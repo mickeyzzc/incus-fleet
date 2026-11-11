@@ -1,0 +1,35 @@
+# Local-only agent instructions and configuration process docs
+/AGENTS.md
+/docs/local/
+
+# Secrets and local state
+*.key
+*.pem
+*.p12
+*.pfx
+*.env
+.env*
+config.local.yaml
+config.yaml
+/data/
+/backups/
+/logs/
+/coverage.out
+/coverage.html
+
+# Go build artifacts
+/bin/
+/dist/
+
+# Frontend
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
+/web/coverage/
+*.tsbuildinfo
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

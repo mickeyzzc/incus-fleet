@@ -1,0 +1,38 @@
+[Unit]
+Description=Incus Fleet multi-cluster control plane
+Documentation=https://github.com/mickeyzzc/incus-fleet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=incus-fleet
+Group=incus-fleet
+WorkingDirectory=/home/incus
+EnvironmentFile=/home/incus/incus-fleet.env
+ExecStart=/home/incus/bin/incus-fleet -config /home/incus/config.yaml
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+# Hardening. Read-only access to /home/incus plus a writable data directory.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/incus/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+
+[Install]
+WantedBy=multi-user.target

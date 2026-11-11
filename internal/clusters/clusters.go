@@ -1,0 +1,451 @@
+// Package clusters owns connections to the managed Incus clusters.
+package clusters
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"sort"
+	"sync"
+
+	incus "github.com/lxc/incus/v7/client"
+	"github.com/lxc/incus/v7/shared/api"
+
+	"github.com/mickeyzzc/incus-fleet/internal/config"
+	"github.com/mickeyzzc/incus-fleet/internal/version"
+)
+
+// ErrUnknownCluster is returned when a cluster name is not configured.
+var ErrUnknownCluster = errors.New("clusters: unknown cluster")
+
+// ErrUnavailable is returned when a configured cluster has no healthy client.
+var ErrUnavailable = errors.New("clusters: cluster unavailable")
+
+// InstanceServer is the narrow slice of the Incus client used by fleet
+// services. Tests provide a fake implementation of this interface.
+type InstanceServer interface {
+	GetServer() (*api.Server, string, error)
+	GetCluster() (*api.Cluster, string, error)
+	GetClusterMembers() ([]api.ClusterMember, error)
+	GetInstancesFull(instanceType api.InstanceType) ([]api.InstanceFull, error)
+	GetInstance(name string) (*api.Instance, string, error)
+	GetInstanceState(name string) (*api.InstanceState, string, error)
+	UpdateInstanceState(name string, state api.InstanceStatePut, etag string) (incus.Operation, error)
+	CopyInstance(source incus.InstanceServer, instance api.Instance, args *incus.InstanceCopyArgs) (incus.RemoteOperation, error)
+	DeleteInstance(name string) (incus.Operation, error)
+	GetStoragePoolNames() ([]string, error)
+	GetNetworkNames() ([]string, error)
+	GetStoragePoolResources(name string) (*api.ResourcesStoragePool, error)
+	IsClustered() bool
+}
+
+// DialFunc connects to one configured Incus endpoint. The returned client may
+// also implement the full Incus client interface, in which case it is retained
+// as a migration source.
+type DialFunc func(ctx context.Context, cfg config.Cluster) (InstanceServer, error)
+
+// Connection is one configured cluster and its client.
+type Connection struct {
+	cfg    config.Cluster
+	client InstanceServer
+	raw    incus.InstanceServer
+	err    error
+
+	mu sync.RWMutex
+}
+
+// Name returns the configured short name.
+func (c *Connection) Name() string { return c.cfg.Name }
+
+// DisplayName returns the human-facing name.
+func (c *Connection) DisplayName() string { return c.cfg.DisplayName }
+
+// Endpoint returns the API endpoint.
+func (c *Connection) Endpoint() string { return c.cfg.Endpoint }
+
+// Project returns the Incus project used for this connection.
+func (c *Connection) Project() string { return c.cfg.Project }
+
+// Client returns the project-scoped client or the last connection error.
+func (c *Connection) Client() (InstanceServer, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.client == nil {
+		if c.err != nil {
+			return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, c.cfg.Name, c.err)
+		}
+
+		return nil, fmt.Errorf("%w: %s", ErrUnavailable, c.cfg.Name)
+	}
+
+	return c.client, nil
+}
+
+// RawClient returns the full client used as a migration source.
+// It may be nil when the connection is down.
+func (c *Connection) RawClient() incus.InstanceServer {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.raw
+}
+
+// ConnectError returns the last dial error, if any.
+func (c *Connection) ConnectError() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.err
+}
+
+// reconnect replaces the client, disconnecting the previous one.
+func (c *Connection) reconnect(_ context.Context, srv InstanceServer) {
+	full := fullClient(srv)
+	client := srv
+	if full != nil {
+		if c.cfg.Project != "" {
+			full = full.UseProject(c.cfg.Project)
+		}
+		client = full
+	}
+
+	c.mu.Lock()
+	old := c.client
+	c.client = client
+	c.raw = full
+	c.err = nil
+	c.mu.Unlock()
+
+	if old != nil {
+		if closer, ok := old.(interface{ Disconnect() }); ok {
+			closer.Disconnect()
+		}
+	}
+}
+
+func fullClient(srv InstanceServer) incus.InstanceServer {
+	if full, ok := srv.(incus.InstanceServer); ok {
+		return full
+	}
+
+	return nil
+}
+
+func (c *Connection) setError(err error) {
+	c.mu.Lock()
+	c.client = nil
+	c.raw = nil
+	c.err = err
+	c.mu.Unlock()
+}
+
+func (c *Connection) disconnect() {
+	c.mu.Lock()
+	client := c.client
+	c.client = nil
+	c.raw = nil
+	c.mu.Unlock()
+
+	if client != nil {
+		if closer, ok := client.(interface{ Disconnect() }); ok {
+			closer.Disconnect()
+		}
+	}
+}
+
+// Manager owns all configured cluster connections.
+type Manager struct {
+	dial   DialFunc
+	logger *slog.Logger
+	mu     sync.RWMutex
+	order  []string
+	conns  map[string]*Connection
+}
+
+// New connects to every configured cluster. Connection failures are recorded
+// per cluster so the application can still start and report the problem.
+func New(ctx context.Context, cfgs []config.Cluster, logger *slog.Logger) (*Manager, error) {
+	return NewWithDialer(ctx, cfgs, DefaultDial, logger)
+}
+
+// NewWithDialer builds a manager with an injectable dialer for tests.
+func NewWithDialer(ctx context.Context, cfgs []config.Cluster, dial DialFunc, logger *slog.Logger) (*Manager, error) {
+	if dial == nil {
+		return nil, errors.New("clusters: dialer is required")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	m := &Manager{
+		dial:   dial,
+		logger: logger,
+		order:  make([]string, 0, len(cfgs)),
+		conns:  make(map[string]*Connection, len(cfgs)),
+	}
+
+	for _, cfg := range cfgs {
+		if _, exists := m.conns[cfg.Name]; exists {
+			return nil, fmt.Errorf("clusters: duplicate cluster %q", cfg.Name)
+		}
+
+		conn := &Connection{cfg: cfg}
+		srv, err := dial(ctx, cfg)
+		if err != nil {
+			conn.err = err
+			logger.Warn("cluster connection failed", "cluster", cfg.Name, "error", err)
+		} else {
+			conn.reconnect(ctx, srv)
+		}
+
+		m.order = append(m.order, cfg.Name)
+		m.conns[cfg.Name] = conn
+	}
+
+	return m, nil
+}
+
+// DefaultDial connects to an Incus HTTPS endpoint using pinned client
+// certificates. Certificate arguments are PEM contents, not paths.
+func DefaultDial(_ context.Context, cfg config.Cluster) (InstanceServer, error) {
+	certPEM, err := os.ReadFile(cfg.TLSCert)
+	if err != nil {
+		return nil, fmt.Errorf("read client certificate: %w", err)
+	}
+	keyPEM, err := os.ReadFile(cfg.TLSKey)
+	if err != nil {
+		return nil, fmt.Errorf("read client key: %w", err)
+	}
+
+	var serverCert string
+	if cfg.TLSServerCert != "" {
+		serverPEM, err := os.ReadFile(cfg.TLSServerCert)
+		if err != nil {
+			return nil, fmt.Errorf("read server certificate: %w", err)
+		}
+		serverCert = string(serverPEM)
+	}
+
+	srv, err := incus.ConnectIncus(cfg.Endpoint, &incus.ConnectionArgs{
+		TLSClientCert: string(certPEM),
+		TLSClientKey:  string(keyPEM),
+		TLSServerCert: serverCert,
+		UserAgent:     "incus-fleet/" + version.String(),
+		SkipGetEvents: true,
+		AuthType:      "tls",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("connect: %w", err)
+	}
+
+	return srv, nil
+}
+
+// List returns a fresh summary for every configured cluster, in config order.
+func (m *Manager) List() []Summary {
+	m.mu.RLock()
+	conns := make([]*Connection, 0, len(m.order))
+	for _, name := range m.order {
+		conns = append(conns, m.conns[name])
+	}
+	m.mu.RUnlock()
+
+	summaries := make([]Summary, len(conns))
+
+	var wg sync.WaitGroup
+	wg.Add(len(conns))
+	for i, conn := range conns {
+		go func(i int, conn *Connection) {
+			defer wg.Done()
+			summaries[i] = conn.Summary()
+		}(i, conn)
+	}
+	wg.Wait()
+
+	return summaries
+}
+
+// Get returns a fresh summary for one cluster.
+func (m *Manager) Get(name string) (Summary, error) {
+	conn, err := m.Connection(name)
+	if err != nil {
+		return Summary{}, err
+	}
+
+	return conn.Summary(), nil
+}
+
+// Names returns configured cluster names in config order.
+func (m *Manager) Names() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return append([]string(nil), m.order...)
+}
+
+// Connection returns one configured connection.
+func (m *Manager) Connection(name string) (*Connection, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	conn, ok := m.conns[name]
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrUnknownCluster, name)
+	}
+
+	return conn, nil
+}
+
+// Reconnect re-dials one cluster and returns its fresh summary.
+func (m *Manager) Reconnect(ctx context.Context, name string) (Summary, error) {
+	conn, err := m.Connection(name)
+	if err != nil {
+		return Summary{}, err
+	}
+
+	srv, err := m.dial(ctx, conn.cfg)
+	if err != nil {
+		conn.setError(err)
+		m.logger.Warn("cluster reconnect failed", "cluster", name, "error", err)
+		return conn.Summary(), fmt.Errorf("clusters: reconnect %s: %w", name, err)
+	}
+
+	conn.reconnect(ctx, srv)
+	m.logger.Info("cluster reconnected", "cluster", name)
+
+	return conn.Summary(), nil
+}
+
+// Close disconnects every cluster.
+func (m *Manager) Close() {
+	m.mu.Lock()
+	conns := make([]*Connection, 0, len(m.conns))
+	for _, conn := range m.conns {
+		conns = append(conns, conn)
+	}
+	m.mu.Unlock()
+
+	for _, conn := range conns {
+		conn.disconnect()
+	}
+}
+
+// Summary is the API representation of one cluster.
+type Summary struct {
+	Name          string       `json:"name"`
+	DisplayName   string       `json:"display_name"`
+	Endpoint      string       `json:"endpoint"`
+	Online        bool         `json:"online"`
+	Error         string       `json:"error,omitempty"`
+	ServerName    string       `json:"server_name,omitempty"`
+	ServerVersion string       `json:"server_version,omitempty"`
+	Clustered     bool         `json:"clustered"`
+	Architectures []string     `json:"architectures,omitempty"`
+	Members       []Member     `json:"members"`
+	Instances     Counts       `json:"instances"`
+	Storage       StorageUsage `json:"storage"`
+	Networks      []string     `json:"networks"`
+}
+
+// Member is one Incus cluster member.
+type Member struct {
+	Name         string   `json:"name"`
+	URL          string   `json:"url,omitempty"`
+	Status       string   `json:"status"`
+	Message      string   `json:"message,omitempty"`
+	Database     bool     `json:"database"`
+	Roles        []string `json:"roles"`
+	Architecture string   `json:"architecture,omitempty"`
+}
+
+// Counts summarizes instances by type and state.
+type Counts struct {
+	Total           int `json:"total"`
+	Containers      int `json:"containers"`
+	VirtualMachines int `json:"virtual_machines"`
+	Running         int `json:"running"`
+}
+
+// StorageUsage summarizes the primary storage pool.
+type StorageUsage struct {
+	Pool  string `json:"pool,omitempty"`
+	Used  uint64 `json:"used"`
+	Total uint64 `json:"total"`
+}
+
+// Summary probes the cluster and builds a status snapshot.
+func (c *Connection) Summary() Summary {
+	summary := Summary{
+		Name:        c.cfg.Name,
+		DisplayName: c.cfg.DisplayName,
+		Endpoint:    c.cfg.Endpoint,
+		Members:     []Member{},
+		Networks:    []string{},
+	}
+
+	client, err := c.Client()
+	if err != nil {
+		summary.Error = err.Error()
+		return summary
+	}
+
+	server, _, err := client.GetServer()
+	if err != nil {
+		summary.Error = fmt.Sprintf("get server: %v", err)
+		return summary
+	}
+
+	summary.Online = true
+	summary.Clustered = server.Environment.ServerClustered
+	summary.ServerName = server.Environment.ServerName
+	summary.ServerVersion = server.Environment.ServerVersion
+	summary.Architectures = append([]string(nil), server.Environment.Architectures...)
+
+	if members, err := client.GetClusterMembers(); err == nil {
+		for _, member := range members {
+			summary.Members = append(summary.Members, Member{
+				Name:         member.ServerName,
+				URL:          member.URL,
+				Status:       member.Status,
+				Message:      member.Message,
+				Database:     member.Database,
+				Roles:        append([]string(nil), member.Roles...),
+				Architecture: member.Architecture,
+			})
+		}
+	}
+
+	if instances, err := client.GetInstancesFull(api.InstanceTypeAny); err == nil {
+		for _, instance := range instances {
+			summary.Instances.Total++
+			switch api.InstanceType(instance.Type) {
+			case api.InstanceTypeContainer:
+				summary.Instances.Containers++
+			case api.InstanceTypeVM:
+				summary.Instances.VirtualMachines++
+			}
+			if instance.StatusCode == api.Running || instance.StatusCode == api.Frozen {
+				summary.Instances.Running++
+			}
+		}
+	}
+
+	if pools, err := client.GetStoragePoolNames(); err == nil && len(pools) > 0 {
+		sort.Strings(pools)
+		summary.Storage.Pool = pools[0]
+		if resources, err := client.GetStoragePoolResources(pools[0]); err == nil {
+			summary.Storage.Used = resources.Space.Used
+			summary.Storage.Total = resources.Space.Total
+		}
+	}
+
+	if networks, err := client.GetNetworkNames(); err == nil {
+		sort.Strings(networks)
+		summary.Networks = networks
+	}
+
+	return summary
+}

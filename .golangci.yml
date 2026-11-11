@@ -1,0 +1,21 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - gosec
+    - gocritic
+    - revive
+  exclusions:
+    paths:
+      - web/node_modules
+    rules:
+      - linters:
+          - revive
+        text: "stutters"
+
+issues:
+  max-issues-per-linter: 100
+  max-same-issues: 50

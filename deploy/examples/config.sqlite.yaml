@@ -1,0 +1,28 @@
+# Example configuration for a SQLite deployment.
+# Copy to /home/incus/config.yaml, replace placeholders, and keep mode 0600.
+# The admin token is intentionally empty: set INCUS_FLEET_AUTH_TOKEN instead.
+server:
+  listen: 0.0.0.0:8080
+  auth_token: ""
+  log_level: info
+
+database:
+  driver: sqlite
+  dsn: /home/incus/data/fleet.db
+
+clusters:
+  - name: c1
+    display_name: Primary site
+    endpoint: https://192.0.2.10:8443
+    project: default
+    tls_cert: /home/incus/certs/app-a.crt
+    tls_key: /home/incus/certs/app-a.key
+    # Optional: verify the Incus server certificate against a private CA.
+    # tls_server_cert: /home/incus/certs/incus-server.crt
+
+  - name: c2
+    display_name: Secondary site
+    endpoint: https://192.0.2.11:8443
+    project: default
+    tls_cert: /home/incus/certs/app-a.crt
+    tls_key: /home/incus/certs/app-a.key

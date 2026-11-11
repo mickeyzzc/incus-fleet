@@ -1,0 +1,118 @@
+import { createPinia, setActivePinia } from 'pinia'
+import { flushPromises, mount } from '@vue/test-utils'
+import ElementPlus from 'element-plus'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { api } from '@/api'
+import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
+import MigrateDialog from '@/components/MigrateDialog.vue'
+import { clusterSummary, instanceDetail, instanceSummary } from '@/test/fixtures'
+import InstancesView from './InstancesView.vue'
+
+function mockFleet() {
+  vi.mocked(api.listClusters).mockResolvedValue([
+    clusterSummary(),
+    clusterSummary({ name: 'c2', display_name: 'Cluster 63' }),
+  ])
+  vi.mocked(api.listInstances).mockResolvedValue([
+    instanceSummary(),
+    instanceSummary({ name: 'vm1', type: 'virtual-machine', live_migratable: true }),
+    instanceSummary({ name: 'db', cluster: 'c2' }),
+  ])
+  vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+}
+
+function mountInstances() {
+  return mount(InstancesView, {
+    global: { plugins: [ElementPlus] },
+  })
+}
+
+function buttonByText(wrapper: ReturnType<typeof mount>, text: string) {
+  const button = wrapper.findAll('button').find((item) => item.text().includes(text))
+  if (!button) {
+    throw new Error(`${text} button not found`)
+  }
+
+  return button
+}
+
+describe('InstancesView', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockFleet()
+  })
+
+  it('renders all instances across clusters', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    expect(api.listClusters).toHaveBeenCalledTimes(1)
+    expect(api.listInstances).toHaveBeenCalledWith('any')
+    expect(wrapper.text()).toContain('web')
+    expect(wrapper.text()).toContain('vm1')
+    expect(wrapper.text()).toContain('db')
+    expect(wrapper.text()).toContain('3 shown')
+  })
+
+  it('filters by search, cluster, and type', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    await wrapper.find('input').setValue('vm1')
+    expect(wrapper.text()).toContain('1 shown')
+
+    await wrapper.find('input').setValue('')
+    const selects = wrapper.findAllComponents({ name: 'ElSelect' })
+    expect(selects).toHaveLength(2)
+    selects[1]?.vm.$emit('update:modelValue', 'c1')
+    await flushPromises()
+    expect(wrapper.text()).toContain('2 shown')
+
+    selects[0]?.vm.$emit('update:modelValue', 'virtual-machine')
+    await flushPromises()
+    expect(api.listInstances).toHaveBeenLastCalledWith('virtual-machine')
+  })
+
+  it('opens details and the migrate dialog', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Details').trigger('click')
+    await flushPromises()
+
+    expect(api.getInstance).toHaveBeenCalledWith('c1', 'web')
+    expect(wrapper.findComponent(InstanceDetailDrawer).props('modelValue')).toBe(true)
+
+    await buttonByText(wrapper, 'Migrate').trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(MigrateDialog)
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('instance')).toMatchObject({ name: 'web', cluster: 'c1' })
+  })
+
+  it('refreshes and surfaces errors', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Refresh').trigger('click')
+    await flushPromises()
+    expect(api.listClusters).toHaveBeenCalledTimes(2)
+    expect(api.listInstances).toHaveBeenCalledTimes(2)
+
+    vi.mocked(api.listInstances).mockRejectedValue(new Error('cluster unreachable'))
+    await buttonByText(wrapper, 'Refresh').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('cluster unreachable')
+  })
+
+  it('shows an empty state when filters match nothing', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    await wrapper.find('input').setValue('nothing-here')
+
+    expect(wrapper.text()).toContain('No instances match the filters')
+  })
+})

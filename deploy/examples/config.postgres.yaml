@@ -1,0 +1,29 @@
+# Example configuration for a PostgreSQL deployment.
+# Copy to /home/incus/config.yaml, replace placeholders, and keep mode 0600.
+# Prefer environment variables for the DSN so the password is not in YAML:
+#   INCUS_FLEET_DATABASE_DRIVER=postgres
+#   INCUS_FLEET_DATABASE_DSN=postgres://incus_fleet:...@127.0.0.1:5432/incus_fleet
+server:
+  listen: 0.0.0.0:8080
+  auth_token: ""
+  log_level: info
+
+database:
+  driver: postgres
+  dsn: ""
+
+clusters:
+  - name: c1
+    display_name: Primary site
+    endpoint: https://192.0.2.10:8443
+    project: default
+    tls_cert: /home/incus/certs/app-a.crt
+    tls_key: /home/incus/certs/app-a.key
+    # tls_server_cert: /home/incus/certs/incus-server.crt
+
+  - name: c2
+    display_name: Secondary site
+    endpoint: https://192.0.2.11:8443
+    project: default
+    tls_cert: /home/incus/certs/app-a.crt
+    tls_key: /home/incus/certs/app-a.key

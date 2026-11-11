@@ -1,0 +1,177 @@
+package app
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"path/filepath"
+	"testing"
+	"testing/fstest"
+	"time"
+
+	"github.com/mickeyzzc/incus-fleet/internal/clusters"
+	"github.com/mickeyzzc/incus-fleet/internal/config"
+	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
+)
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func testConfig(t *testing.T) *config.Config {
+	t.Helper()
+
+	return &config.Config{
+		Server: config.Server{
+			Listen:    "127.0.0.1:0",
+			AuthToken: "secret",
+			LogLevel:  "debug",
+		},
+		Database: config.Database{
+			Driver: "sqlite",
+			DSN:    filepath.Join(t.TempDir(), "fleet.db"),
+		},
+		Clusters: []config.Cluster{
+			{Name: "c1", DisplayName: "c1", Endpoint: "https://192.0.2.10:8443"},
+			{Name: "c2", DisplayName: "c2", Endpoint: "https://198.51.100.11:8443"},
+		},
+	}
+}
+
+func testDialer(source, target *incusfake.Server) clusters.DialFunc {
+	return func(_ context.Context, cfg config.Cluster) (clusters.InstanceServer, error) {
+		if cfg.Name == "c1" {
+			return source, nil
+		}
+
+		return target, nil
+	}
+}
+
+func staticFS() fstest.MapFS {
+	return fstest.MapFS{"dist/index.html": {Data: []byte("<html>fleet</html>")}}
+}
+
+func TestNewRequiresConfig(t *testing.T) {
+	if _, err := New(context.Background(), nil, testLogger()); err == nil {
+		t.Fatal("New() expected error")
+	}
+}
+
+func TestNewAndHandler(t *testing.T) {
+	cfg := testConfig(t)
+	application, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+
+	handler := application.Handler()
+	if handler == nil {
+		t.Fatal("Handler() is nil")
+	}
+}
+
+func TestNewStoreError(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Database.Driver = "mysql"
+
+	if _, err := New(context.Background(), cfg, testLogger(), WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{}))); err == nil {
+		t.Fatal("New() expected store error")
+	}
+}
+
+func TestNewOfflineCluster(t *testing.T) {
+	cfg := testConfig(t)
+	application, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(func(_ context.Context, _ config.Cluster) (clusters.InstanceServer, error) {
+			return nil, context.DeadlineExceeded
+		}),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+}
+
+func TestRunGracefulShutdown(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Server.Listen = freeAddress(t)
+
+	application, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- application.Run(ctx) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := http.Get("http://" + cfg.Server.Listen + "/api/v1/healthz")
+		if err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("server did not start: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() did not stop")
+	}
+}
+
+func TestRunListenError(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	cfg := testConfig(t)
+	cfg.Server.Listen = listener.Addr().String()
+
+	application, err := New(context.Background(), cfg, testLogger(), WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+
+	if err := application.Run(context.Background()); err == nil {
+		t.Fatal("Run() expected listen error")
+	}
+}
+
+func freeAddress(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+
+	return address
+}
