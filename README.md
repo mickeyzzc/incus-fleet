@@ -16,6 +16,9 @@ including live migration for stateful virtual machines.
 - Admin-token login with HttpOnly sessions; bearer tokens for automation
 - Cluster connections pinned to per-deployment client certificates
 
+> Live migration preserves guest network state. When clusters use different subnets,
+> renew DHCP inside the guest after the move (or use matching subnets).
+
 ## Architecture at a glance
 
 ```

@@ -260,6 +260,7 @@ Stop the service or use SQLite's online backup before copying the database file.
 | Cluster marked offline | Endpoint reachable, `tls_server_cert` correct, client cert trusted |
 | `503 cluster_unavailable` | Reconnect from the UI/API and inspect app logs |
 | Live migration rejected | Running VM, `migration.stateful=true`, `mode=move` |
+| VM unreachable after live migration | Guest kept its source DHCP lease; renew DHCP in the guest or use matching cluster subnets |
 | Target storage pool missing | Create the same pool name on the target cluster |
 | Login works then fails after refresh | Caddy is not using sticky sessions |
 | Migration stuck/failed after restart | Unfinished tasks are marked failed; inspect target for partial copies |

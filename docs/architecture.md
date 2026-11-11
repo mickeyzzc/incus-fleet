@@ -126,6 +126,12 @@ A per-instance lock (`source/instance`) prevents two migrations of the same inst
 4. `verifying` — live moves stop the source before target startup.
 5. `starting` — start the target when the migration is live, or when the source was running and
    `auto_start` is true.
+
+Live migration preserves the guest's network state. If the source and target clusters use
+different subnets, the guest can keep its source DHCP lease and become unreachable until it
+renews (for example `dhclient -r <if>` then `dhclient <if>`, or `networkctl reconfigure <if>`).
+The control plane does not run commands inside guests; use matching subnets or arrange a guest
+DHCP renewal after the move.
 6. For `move`, delete the source instance (`verifying` / "removing source"). For `copy`, restart
    the source if it was stopped.
 7. `done` — progress "complete".
