@@ -226,6 +226,8 @@ func (s *Service) CloneInstance(ctx context.Context, clusterName, name string, r
 		start = *req.Start
 	}
 
+	// The daemon rejects copy requests that also request a start, so the
+	// copy runs first and the clone is powered on separately.
 	post := api.InstancesPost{
 		Name: target,
 		Type: api.InstanceType(instance.Type),
@@ -236,7 +238,6 @@ func (s *Service) CloneInstance(ctx context.Context, clusterName, name string, r
 			Devices:     copyDevices(instance.Devices),
 		},
 		Source: api.InstanceSource{Type: "copy", Source: name},
-		Start:  start,
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, createTimeout)
@@ -248,6 +249,15 @@ func (s *Service) CloneInstance(ctx context.Context, clusterName, name string, r
 	}
 	if err := waitOperation(ctx, op, "clone "+name); err != nil {
 		return Detail{}, err
+	}
+
+	if start {
+		state, stateErr := client.UpdateInstanceState(target, api.InstanceStatePut{Action: "start", Timeout: -1}, "")
+		if stateErr == nil {
+			if waitErr := waitOperation(ctx, state, "start "+target); waitErr != nil {
+				return Detail{}, waitErr
+			}
+		}
 	}
 
 	return s.Get(clusterName, target)

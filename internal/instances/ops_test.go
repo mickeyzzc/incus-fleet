@@ -214,8 +214,14 @@ func TestCloneInstance(t *testing.T) {
 	if created[0].Type != api.InstanceTypeContainer || created[0].Config["limits.cpu"] != "2" {
 		t.Fatalf("clone put = %#v", created[0])
 	}
-	if !created[0].Start {
+	// Copies must not carry Start (the daemon rejects it); the clone is
+	// powered on through a separate state call.
+	if created[0].Start {
 		t.Fatalf("clone start = %#v", created[0].Start)
+	}
+	states := source.UpdateStateArgs()
+	if len(states) != 1 || states[0].Action != "start" {
+		t.Fatalf("state args = %#v", states)
 	}
 
 	if _, err := svc.CloneInstance(ctx, "c1", "web", CloneRequest{Target: ""}); !errors.Is(err, ErrInvalidRequest) {
