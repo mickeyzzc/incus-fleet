@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
 
 import StorageBar from '@/components/StorageBar.vue'
 import { useClustersStore } from '@/stores/clusters'
@@ -13,6 +14,7 @@ import { formatDateTime } from '@/utils/format'
 const clusters = useClustersStore()
 const instances = useInstancesStore()
 const migrations = useMigrationsStore()
+const { t } = useI18n()
 
 const totalInstances = computed(
   () => clusters.items.reduce((total, cluster) => total + cluster.instances.total, 0),
@@ -43,7 +45,7 @@ async function refresh(): Promise<void> {
 async function reconnect(name: string): Promise<void> {
   try {
     await clusters.reconnect(name)
-    ElMessage.success(`Reconnected ${name}.`)
+    ElMessage.success(t('dashboard.reconnectSuccess', { name }))
   } catch (err) {
     ElMessage.error(errorMessage(err))
   }
@@ -58,14 +60,15 @@ function initials(name: string): string {
   <div class="page">
     <div class="page-header">
       <div>
-        <h2>Fleet overview</h2>
+        <h2>{{ t('dashboard.title') }}</h2>
         <p class="subtitle">
-          Independent clusters, one control surface. Last refreshed
-          {{ formatDateTime(clusters.lastUpdated?.toISOString()) }}.
+          {{ t('dashboard.subtitle', { time: formatDateTime(clusters.lastUpdated?.toISOString()) }) }}
         </p>
       </div>
       <div class="page-actions">
-        <el-button :icon="Refresh" :loading="clusters.loading" @click="refresh">Refresh</el-button>
+        <el-button :icon="Refresh" :loading="clusters.loading" @click="refresh">
+          {{ t('common.refresh') }}
+        </el-button>
       </div>
     </div>
 
@@ -80,24 +83,28 @@ function initials(name: string): string {
 
     <section class="stat-grid">
       <article class="stat-card">
-        <span class="label">Clusters online</span>
+        <span class="label">{{ t('dashboard.clustersOnline') }}</span>
         <span class="value">{{ clusters.onlineCount }} / {{ clusters.items.length }}</span>
-        <span class="hint">{{ clusters.items.length - clusters.onlineCount }} unreachable</span>
+        <span class="hint">
+          {{ t('dashboard.unreachable', { count: clusters.items.length - clusters.onlineCount }) }}
+        </span>
       </article>
       <article class="stat-card">
-        <span class="label">Instances</span>
+        <span class="label">{{ t('dashboard.instances') }}</span>
         <span class="value">{{ totalInstances }}</span>
-        <span class="hint">{{ runningInstances }} running</span>
+        <span class="hint">{{ t('dashboard.running', { count: runningInstances }) }}</span>
       </article>
       <article class="stat-card">
-        <span class="label">Virtual machines</span>
+        <span class="label">{{ t('dashboard.virtualMachines') }}</span>
         <span class="value">{{ totalVMs }}</span>
-        <span class="hint">{{ totalInstances - totalVMs }} containers</span>
+        <span class="hint">
+          {{ t('dashboard.containersHint', { count: totalInstances - totalVMs }) }}
+        </span>
       </article>
       <article class="stat-card">
-        <span class="label">Active migrations</span>
+        <span class="label">{{ t('dashboard.activeMigrations') }}</span>
         <span class="value">{{ migrations.active.length }}</span>
-        <span class="hint">{{ migrations.items.length }} recent tasks</span>
+        <span class="hint">{{ t('dashboard.recentTasks', { count: migrations.items.length }) }}</span>
       </article>
     </section>
 
@@ -112,7 +119,7 @@ function initials(name: string): string {
             </div>
           </div>
           <el-tag :type="cluster.online ? 'success' : 'danger'" effect="light" round>
-            {{ cluster.online ? 'Online' : 'Offline' }}
+            {{ cluster.online ? t('cluster.online') : t('cluster.offline') }}
           </el-tag>
         </div>
 
@@ -126,15 +133,15 @@ function initials(name: string): string {
 
         <div class="cluster-metrics">
           <div class="metric">
-            <span>Instances</span>
+            <span>{{ t('dashboard.instances') }}</span>
             <strong>{{ cluster.instances.total }}</strong>
           </div>
           <div class="metric">
-            <span>Running</span>
+            <span>{{ t('status.running') }}</span>
             <strong>{{ cluster.instances.running }}</strong>
           </div>
           <div class="metric">
-            <span>Members</span>
+            <span>{{ t('cluster.members') }}</span>
             <strong>{{ cluster.members.length }}</strong>
           </div>
         </div>
@@ -146,9 +153,11 @@ function initials(name: string): string {
         />
 
         <div class="cluster-tags">
-          <el-tag v-if="cluster.clustered" size="small" effect="plain">Clustered</el-tag>
+          <el-tag v-if="cluster.clustered" size="small" effect="plain">
+            {{ t('dashboard.clustered') }}
+          </el-tag>
           <el-tag v-if="cluster.server_version" size="small" effect="plain">
-            Incus {{ cluster.server_version }}
+            {{ t('dashboard.incusVersion', { version: cluster.server_version }) }}
           </el-tag>
           <el-tag v-if="cluster.server_name" size="small" effect="plain">
             {{ cluster.server_name }}
@@ -163,20 +172,20 @@ function initials(name: string): string {
 
         <div class="cluster-actions">
           <router-link :to="{ name: 'cluster', params: { cluster: cluster.name } }">
-            <el-button type="primary" plain>Open cluster</el-button>
+            <el-button type="primary" plain>{{ t('dashboard.openCluster') }}</el-button>
           </router-link>
           <el-button
             :loading="clusters.reconnecting === cluster.name"
             @click="reconnect(cluster.name)"
           >
-            Reconnect
+            {{ t('common.reconnect') }}
           </el-button>
         </div>
       </article>
 
       <el-empty
         v-if="!clusters.loading && clusters.items.length === 0"
-        description="No clusters configured"
+        :description="t('dashboard.noClusters')"
         class="panel"
       />
     </section>

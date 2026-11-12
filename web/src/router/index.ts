@@ -1,11 +1,13 @@
 import {
   createRouter,
   createWebHistory,
+  type RouteLocationNormalized,
   type RouteRecordRaw,
   type Router,
   type RouterHistory,
 } from 'vue-router'
 
+import i18n from '@/i18n'
 import { useAuthStore } from '@/stores/auth'
 
 const routes: RouteRecordRaw[] = [
@@ -13,38 +15,55 @@ const routes: RouteRecordRaw[] = [
     path: '/login',
     name: 'login',
     component: () => import('@/views/LoginView.vue'),
-    meta: { public: true, title: 'Sign in' },
+    meta: { public: true, titleKey: 'titles.signIn' },
   },
   {
     path: '/',
     name: 'dashboard',
     component: () => import('@/views/DashboardView.vue'),
-    meta: { title: 'Dashboard' },
+    meta: { titleKey: 'titles.dashboard' },
   },
   {
     path: '/clusters/:cluster',
     name: 'cluster',
     component: () => import('@/views/ClusterView.vue'),
     props: true,
-    meta: { title: 'Cluster' },
+    meta: { titleKey: 'titles.cluster' },
   },
   {
     path: '/instances',
     name: 'instances',
     component: () => import('@/views/InstancesView.vue'),
-    meta: { title: 'Instances' },
+    meta: { titleKey: 'titles.instances' },
   },
   {
     path: '/migrations',
     name: 'migrations',
     component: () => import('@/views/MigrationsView.vue'),
-    meta: { title: 'Migrations' },
+    meta: { titleKey: 'titles.migrations' },
   },
   {
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },
 ]
+
+/** Resolves the translated page title for a route. */
+export function routeTitle(to: RouteLocationNormalized): string {
+  if (typeof to.meta.titleKey === 'string') {
+    return i18n.global.t(to.meta.titleKey)
+  }
+  if (typeof to.meta.title === 'string') {
+    return to.meta.title
+  }
+
+  return i18n.global.t('app.brand')
+}
+
+/** Applies the translated document title for a route. */
+export function applyDocumentTitle(to: RouteLocationNormalized): void {
+  document.title = `${routeTitle(to)} · ${i18n.global.t('app.brand')}`
+}
 
 /** Builds a fleet router. Tests pass a memory history. */
 export function createFleetRouter(history: RouterHistory = createWebHistory()): Router {
@@ -80,8 +99,7 @@ export function createFleetRouter(history: RouterHistory = createWebHistory()): 
   })
 
   router.afterEach((to) => {
-    const title = typeof to.meta.title === 'string' ? to.meta.title : 'Incus Fleet'
-    document.title = `${title} · Incus Fleet`
+    applyDocumentTitle(to)
   })
 
   return router

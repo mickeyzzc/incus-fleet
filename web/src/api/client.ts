@@ -1,12 +1,17 @@
 import type {
+  ClusterResources,
   ClusterSummary,
+  CreateInstanceRequest,
   HealthResponse,
+  InstanceActionRequest,
   InstanceDetail,
+  InstanceImage,
   InstanceSummary,
   InstanceType,
   Migration,
   MigrationRequest,
   SessionResponse,
+  UpdateInstanceRequest,
   VersionResponse,
 } from './types'
 
@@ -120,6 +125,64 @@ export class ApiClient {
     return this.request<InstanceDetail>(
       'GET',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(name)}`,
+    )
+  }
+
+  async listImages(cluster: string): Promise<InstanceImage[]> {
+    const data = await this.request<{ images: InstanceImage[] }>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/images`,
+    )
+    return data.images ?? []
+  }
+
+  async getResources(cluster: string): Promise<ClusterResources> {
+    return this.request<ClusterResources>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/resources`,
+    )
+  }
+
+  async createInstance(
+    cluster: string,
+    request: CreateInstanceRequest,
+  ): Promise<InstanceDetail> {
+    return this.request<InstanceDetail>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances`,
+      request,
+    )
+  }
+
+  async updateInstance(
+    cluster: string,
+    name: string,
+    request: UpdateInstanceRequest,
+  ): Promise<InstanceDetail> {
+    return this.request<InstanceDetail>(
+      'PATCH',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(name)}`,
+      request,
+    )
+  }
+
+  async instanceAction(
+    cluster: string,
+    name: string,
+    request: InstanceActionRequest,
+  ): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(name)}/state`,
+      request,
+    )
+  }
+
+  async deleteInstance(cluster: string, name: string, force = false): Promise<void> {
+    const query = force ? '?force=true' : ''
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(name)}${query}`,
     )
   }
 

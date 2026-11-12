@@ -1,12 +1,19 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import ElementPlus from 'element-plus'
+import ElementPlus, { ElMessage } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
+import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
-import { clusterSummary, instanceDetail, instanceSummary } from '@/test/fixtures'
+import {
+  clusterResources,
+  clusterSummary,
+  instanceDetail,
+  instanceImage,
+  instanceSummary,
+} from '@/test/fixtures'
 import InstancesView from './InstancesView.vue'
 
 function mockFleet() {
@@ -20,6 +27,10 @@ function mockFleet() {
     instanceSummary({ name: 'db', cluster: 'c2' }),
   ])
   vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+  vi.mocked(api.getResources).mockResolvedValue(clusterResources())
+  vi.mocked(api.listImages).mockResolvedValue([instanceImage()])
+  vi.mocked(api.instanceAction).mockResolvedValue(undefined)
+  vi.mocked(api.deleteInstance).mockResolvedValue(undefined)
 }
 
 function mountInstances() {
@@ -78,7 +89,7 @@ describe('InstancesView', () => {
     const wrapper = mountInstances()
     await flushPromises()
 
-    await buttonByText(wrapper, 'Details').trigger('click')
+    await wrapper.find('.name-link').trigger('click')
     await flushPromises()
 
     expect(api.getInstance).toHaveBeenCalledWith('c1', 'web')
@@ -90,6 +101,42 @@ describe('InstancesView', () => {
     const dialog = wrapper.findComponent(MigrateDialog)
     expect(dialog.props('modelValue')).toBe(true)
     expect(dialog.props('instance')).toMatchObject({ name: 'web', cluster: 'c1' })
+  })
+
+  it('opens the create dialog and lifecycle actions', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Create instance').trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(InstanceFormDialog)
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('mode')).toBe('create')
+    expect(dialog.props('cluster')).toBe('')
+    expect(api.listImages).toHaveBeenCalledWith('c1')
+
+    await buttonByText(wrapper, 'Stop').trigger('click')
+    await flushPromises()
+    expect(api.instanceAction).toHaveBeenCalledWith('c1', 'web', {
+      action: 'stop',
+      force: false,
+    })
+
+    await buttonByText(wrapper, 'Edit').trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent(InstanceFormDialog).props('mode')).toBe('edit')
+  })
+
+  it('deletes an instance after confirmation', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Delete').trigger('click')
+    await flushPromises()
+
+    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true)
+    expect(ElMessage.success).toHaveBeenCalledWith('Deleted web.')
   })
 
   it('refreshes and surfaces errors', async () => {

@@ -88,6 +88,12 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /api/v1/clusters/{cluster}/reconnect", a.requireAuth(http.HandlerFunc(a.reconnectCluster)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances", a.requireAuth(http.HandlerFunc(a.listClusterInstances)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}", a.requireAuth(http.HandlerFunc(a.getInstance)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances", a.requireAuth(http.HandlerFunc(a.createInstance)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/instances/{instance}", a.requireAuth(http.HandlerFunc(a.updateInstance)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/state", a.requireAuth(http.HandlerFunc(a.instanceAction)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}", a.requireAuth(http.HandlerFunc(a.deleteInstance)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/images", a.requireAuth(http.HandlerFunc(a.listImages)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/resources", a.requireAuth(http.HandlerFunc(a.getResources)))
 	mux.Handle("GET /api/v1/instances", a.requireAuth(http.HandlerFunc(a.listInstances)))
 	mux.Handle("GET /api/v1/migrations", a.requireAuth(http.HandlerFunc(a.listMigrations)))
 	mux.Handle("POST /api/v1/migrations", a.requireAuth(http.HandlerFunc(a.submitMigration)))
@@ -266,6 +272,88 @@ func (a *API) getInstance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
+func (a *API) createInstance(w http.ResponseWriter, r *http.Request) {
+	var req instances.CreateRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	detail, err := a.instances.Create(r.Context(), r.PathValue("cluster"), req)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, detail)
+}
+
+func (a *API) updateInstance(w http.ResponseWriter, r *http.Request) {
+	var req instances.UpdateRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	detail, err := a.instances.Update(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), req)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, detail)
+}
+
+func (a *API) instanceAction(w http.ResponseWriter, r *http.Request) {
+	var req instances.ActionRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.Action(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) deleteInstance(w http.ResponseWriter, r *http.Request) {
+	force, err := parseForce(r.URL.Query().Get("force"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.Delete(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), force); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) listImages(w http.ResponseWriter, r *http.Request) {
+	images, err := a.instances.Images(r.PathValue("cluster"))
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"images": images})
+}
+
+func (a *API) getResources(w http.ResponseWriter, r *http.Request) {
+	resources, err := a.instances.Resources(r.PathValue("cluster"))
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resources)
+}
+
 func (a *API) listMigrations(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -317,7 +405,8 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 	code := "internal_error"
 
 	switch {
-	case errors.Is(err, migrations.ErrInvalidRequest):
+	case errors.Is(err, migrations.ErrInvalidRequest),
+		errors.Is(err, instances.ErrInvalidRequest):
 		status, code = http.StatusBadRequest, "invalid_request"
 	case errors.Is(err, migrations.ErrConflict):
 		status, code = http.StatusConflict, "conflict"
@@ -424,6 +513,19 @@ func (a *API) recoverer(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func parseForce(raw string) (bool, error) {
+	if strings.TrimSpace(raw) == "" {
+		return false, nil
+	}
+
+	force, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, errors.New("force must be true or false")
+	}
+
+	return force, nil
 }
 
 func parseInstanceType(raw string) (api.InstanceType, error) {

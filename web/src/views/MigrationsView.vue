@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Refresh, Search } from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
 
 import MigrationStatusTag from '@/components/MigrationStatusTag.vue'
 import type { Migration } from '@/api/types'
@@ -8,6 +9,7 @@ import { useMigrationsStore } from '@/stores/migrations'
 import { formatDateTime, formatDuration, shortID } from '@/utils/format'
 
 const migrations = useMigrationsStore()
+const { t, te } = useI18n()
 
 const search = ref('')
 const statusFilter = ref('')
@@ -70,7 +72,8 @@ function openDetail(migration: Migration): void {
 }
 
 function statusLabel(status: string): string {
-  return status.charAt(0).toUpperCase() + status.slice(1)
+  const key = `migrationStatus.${status}`
+  return te(key) ? t(key) : status
 }
 </script>
 
@@ -78,17 +81,23 @@ function statusLabel(status: string): string {
   <div class="page">
     <div class="page-header">
       <div>
-        <h2>Migrations</h2>
+        <h2>{{ t('migrations.title') }}</h2>
         <p class="subtitle">
-          {{ migrations.active.length }} active · last refreshed
-          {{ formatDateTime(migrations.lastUpdated?.toISOString()) }}
+          {{
+            t('migrations.subtitle', {
+              active: migrations.active.length,
+              time: formatDateTime(migrations.lastUpdated?.toISOString()),
+            })
+          }}
         </p>
       </div>
       <div class="page-actions">
         <el-tag v-if="migrations.hasActive" type="primary" effect="light" round>
-          Polling every 2s
+          {{ t('migrations.polling') }}
         </el-tag>
-        <el-button :icon="Refresh" :loading="migrations.loading" @click="refresh">Refresh</el-button>
+        <el-button :icon="Refresh" :loading="migrations.loading" @click="refresh">
+          {{ t('common.refresh') }}
+        </el-button>
       </div>
     </div>
 
@@ -107,21 +116,26 @@ function statusLabel(status: string): string {
           <el-input
             v-model="search"
             :prefix-icon="Search"
-            placeholder="Search instance, cluster, or ID"
+            :placeholder="t('migrations.searchPlaceholder')"
             clearable
             style="width: 300px"
           />
-          <el-select v-model="statusFilter" placeholder="All statuses" clearable style="width: 180px">
-            <el-option label="Queued" value="pending" />
-            <el-option label="Preflight" value="preflight" />
-            <el-option label="Stopping source" value="stopping" />
-            <el-option label="Transferring" value="transferring" />
-            <el-option label="Starting" value="starting" />
-            <el-option label="Verifying" value="verifying" />
-            <el-option label="Done" value="done" />
-            <el-option label="Failed" value="failed" />
+          <el-select
+            v-model="statusFilter"
+            :placeholder="t('common.allStatuses')"
+            clearable
+            style="width: 180px"
+          >
+            <el-option :label="t('migrationStatus.pending')" value="pending" />
+            <el-option :label="t('migrationStatus.preflight')" value="preflight" />
+            <el-option :label="t('migrationStatus.stopping')" value="stopping" />
+            <el-option :label="t('migrationStatus.transferring')" value="transferring" />
+            <el-option :label="t('migrationStatus.starting')" value="starting" />
+            <el-option :label="t('migrationStatus.verifying')" value="verifying" />
+            <el-option :label="t('migrationStatus.done')" value="done" />
+            <el-option :label="t('migrationStatus.failed')" value="failed" />
           </el-select>
-          <span class="muted">{{ filtered.length }} shown</span>
+          <span class="muted">{{ t('common.shown', { count: filtered.length }) }}</span>
         </div>
 
         <el-table
@@ -131,36 +145,38 @@ function statusLabel(status: string): string {
           row-key="id"
           @row-click="openDetail"
         >
-          <el-table-column label="ID" width="110">
+          <el-table-column :label="t('common.id')" width="110">
             <template #default="{ row }">
               <span class="mono">{{ shortID(row.id) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="Instance" min-width="150">
+          <el-table-column :label="t('common.instance')" min-width="150">
             <template #default="{ row }">
               <strong>{{ row.instance }}</strong>
               <span class="mini-label">{{ row.instance_type }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="Route" min-width="160">
+          <el-table-column :label="t('common.route')" min-width="160">
             <template #default="{ row }">
               <el-tag size="small" effect="plain">{{ row.source_cluster }}</el-tag>
               <span class="arrow">→</span>
               <el-tag size="small" effect="plain" type="primary">{{ row.target_cluster }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="Mode" width="100">
+          <el-table-column :label="t('common.mode')" width="100">
             <template #default="{ row }">
               {{ row.mode }}
-              <el-tag v-if="row.live" size="small" type="success" effect="light">live</el-tag>
+              <el-tag v-if="row.live" size="small" type="success" effect="light">
+                {{ t('common.live') }}
+              </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="Status" width="150">
+          <el-table-column :label="t('common.status')" width="150">
             <template #default="{ row }">
               <MigrationStatusTag :status="row.status" />
             </template>
           </el-table-column>
-          <el-table-column label="Progress" min-width="190">
+          <el-table-column :label="t('common.progress')" min-width="190">
             <template #default="{ row }">
               <div class="migration-progress">
                 <el-progress
@@ -174,56 +190,58 @@ function statusLabel(status: string): string {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="Duration" width="110">
+          <el-table-column :label="t('common.duration')" width="110">
             <template #default="{ row }">
               {{ formatDuration(row.created_at, row.status === 'done' || row.status === 'failed' ? row.updated_at : null) }}
             </template>
           </el-table-column>
-          <el-table-column label="Created" width="180">
+          <el-table-column :label="t('common.created')" width="180">
             <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
           </el-table-column>
           <template #empty>
-            <el-empty description="No migrations yet. Start one from an instance." />
+            <el-empty :description="t('migrations.empty')" />
           </template>
         </el-table>
       </div>
     </section>
 
-    <el-drawer v-model="drawerOpen" size="520px" title="Migration detail">
+    <el-drawer v-model="drawerOpen" size="520px" :title="t('migrations.detailTitle')">
       <template v-if="selected">
         <div class="drawer-section">
-          <h4>Task</h4>
+          <h4>{{ t('migrations.task') }}</h4>
           <div class="detail-grid">
             <div class="detail-item">
-              <div class="label">ID</div>
+              <div class="label">{{ t('common.id') }}</div>
               <div class="value mono">{{ selected.id }}</div>
             </div>
             <div class="detail-item">
-              <div class="label">Instance</div>
+              <div class="label">{{ t('common.instance') }}</div>
               <div class="value">{{ selected.instance }} ({{ selected.instance_type }})</div>
             </div>
             <div class="detail-item">
-              <div class="label">Route</div>
+              <div class="label">{{ t('common.route') }}</div>
               <div class="value">{{ selected.source_cluster }} → {{ selected.target_cluster }}</div>
             </div>
             <div class="detail-item">
-              <div class="label">Mode</div>
-              <div class="value">{{ selected.mode }}{{ selected.live ? ' · live' : '' }}</div>
+              <div class="label">{{ t('common.mode') }}</div>
+              <div class="value">
+                {{ selected.mode }}{{ selected.live ? ` · ${t('common.live')}` : '' }}
+              </div>
             </div>
             <div class="detail-item">
-              <div class="label">Status</div>
+              <div class="label">{{ t('common.status') }}</div>
               <div class="value"><MigrationStatusTag :status="selected.status" /></div>
             </div>
             <div class="detail-item">
-              <div class="label">Created</div>
+              <div class="label">{{ t('common.created') }}</div>
               <div class="value">{{ formatDateTime(selected.created_at) }}</div>
             </div>
             <div class="detail-item">
-              <div class="label">Updated</div>
+              <div class="label">{{ t('common.updated') }}</div>
               <div class="value">{{ formatDateTime(selected.updated_at) }}</div>
             </div>
             <div class="detail-item">
-              <div class="label">Duration</div>
+              <div class="label">{{ t('common.duration') }}</div>
               <div class="value">
                 {{ formatDuration(selected.created_at, selected.status === 'done' || selected.status === 'failed' ? selected.updated_at : null) }}
               </div>
@@ -232,14 +250,14 @@ function statusLabel(status: string): string {
         </div>
 
         <div class="drawer-section">
-          <h4>Progress</h4>
+          <h4>{{ t('common.progress') }}</h4>
           <el-progress
             v-if="selected.status === 'transferring'"
             :percentage="100"
             :indeterminate="true"
             :show-text="false"
           />
-          <p>{{ selected.progress || 'No progress details reported.' }}</p>
+          <p>{{ selected.progress || t('migrations.noProgress') }}</p>
         </div>
 
         <el-alert
@@ -251,7 +269,7 @@ function statusLabel(status: string): string {
         />
       </template>
 
-      <el-empty v-else description="Select a migration" />
+      <el-empty v-else :description="t('migrations.select')" />
     </el-drawer>
   </div>
 </template>

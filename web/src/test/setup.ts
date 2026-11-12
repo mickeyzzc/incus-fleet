@@ -3,6 +3,8 @@ import { afterEach, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { config } from '@vue/test-utils'
 
+import i18n, { setLocale } from '@/i18n'
+
 // Element Plus components rely on ResizeObserver, which jsdom does not provide.
 class ResizeObserverStub {
   observe(): void {}
@@ -45,6 +47,8 @@ config.global.stubs = {
   ElOption: ElOptionStub,
 }
 
+config.global.plugins = [i18n]
+
 // All stores and components share the `api` singleton from `@/api`. Tests
 // replace it with spies while keeping the real ApiError class.
 vi.mock('@/api', async (importOriginal) => {
@@ -66,6 +70,12 @@ vi.mock('@/api', async (importOriginal) => {
       listClusterInstances: vi.fn(),
       listInstances: vi.fn(),
       getInstance: vi.fn(),
+      listImages: vi.fn(),
+      getResources: vi.fn(),
+      createInstance: vi.fn(),
+      updateInstance: vi.fn(),
+      instanceAction: vi.fn(),
+      deleteInstance: vi.fn(),
       listMigrations: vi.fn(),
       getMigration: vi.fn(),
       submitMigration: vi.fn(),
@@ -85,10 +95,14 @@ vi.mock('element-plus', async (importOriginal) => {
       info: vi.fn(),
       warning: vi.fn(),
     },
+    ElMessageBox: {
+      confirm: vi.fn().mockResolvedValue('confirm'),
+    },
   }
 })
 
 afterEach(() => {
   document.body.innerHTML = ''
+  setLocale('en')
   vi.clearAllMocks()
 })

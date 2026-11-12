@@ -1,6 +1,8 @@
 import type {
+  ClusterResources,
   ClusterSummary,
   InstanceDetail,
+  InstanceImage,
   InstanceSummary,
   Migration,
   MigrationStatus,
@@ -73,8 +75,7 @@ export function instanceDetail(overrides: Partial<InstanceDetail> = {}): Instanc
   }
 }
 
-export function migration(overrides: Partial<Migration> = {}): Migration {
-  return {
+export function migration(overrides: Partial<Migration> = {}): Migration {  return {
     id: 'abcdef0123456789abcdef0123456789',
     source_cluster: 'c1',
     target_cluster: 'c2',
@@ -87,6 +88,58 @@ export function migration(overrides: Partial<Migration> = {}): Migration {
     error: '',
     created_at: '2026-11-11T10:00:00Z',
     updated_at: '2026-11-11T10:01:05Z',
+    ...overrides,
+  }
+}
+
+export function instanceImage(overrides: Partial<InstanceImage> = {}): InstanceImage {
+  return {
+    fingerprint: '053059ea4e28',
+    aliases: ['debian'],
+    type: 'container',
+    architecture: 'x86_64',
+    os: 'Debian',
+    release: 'trixie',
+    description: 'Debian trixie',
+    size: 272_237_676,
+    cached: false,
+    created_at: '2026-11-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+export function clusterResources(overrides: Partial<ClusterResources> = {}): ClusterResources {
+  return {
+    storage_pools: [
+      {
+        name: 'default',
+        driver: 'dir',
+        source: '/srv/incus',
+        status: 'Created',
+        used_by: ['/1.0/instances/web'],
+        locations: [],
+        total: 1_000_000_000_000,
+        used: 250_000_000_000,
+      },
+    ],
+    networks: [
+      {
+        name: 'incusbr0',
+        type: 'bridge',
+        managed: true,
+        ipv4: '10.0.0.0.1/24',
+        ipv6: 'none',
+        used_by: ['/1.0/instances/web'],
+        locations: [],
+      },
+      {
+        name: 'lo',
+        type: 'loopback',
+        managed: false,
+        used_by: [],
+        locations: [],
+      },
+    ],
     ...overrides,
   }
 }

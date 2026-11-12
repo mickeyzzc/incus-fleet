@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -354,6 +355,162 @@ func TestInstanceEndpoints(t *testing.T) {
 	rec = f.request(t, http.MethodGet, "/api/v1/instances?type=banana", nil, cookie, "")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad type status = %d", rec.Code)
+	}
+}
+
+func TestInstanceManagementEndpoints(t *testing.T) {
+	source := &incusfake.Server{
+		Instance: testContainer(""),
+		Images: []api.Image{{
+			Fingerprint:  "053059ea4e28",
+			Type:         "container",
+			Architecture: "x86_64",
+			Properties:   map[string]string{"os": "Debian", "release": "trixie"},
+		}},
+		Pools: []api.StoragePool{{
+			Name:   "default",
+			Driver: "dir",
+			Config: api.ConfigMap{"source": "/srv/incus"},
+		}},
+		Networks: []api.Network{{
+			Name:    "incusbr0",
+			Type:    "bridge",
+			Managed: true,
+			Config:  api.ConfigMap{"ipv4.address": "10.0.0.0.1/24"},
+		}},
+	}
+	target := &incusfake.Server{}
+	f := newAPIFixture(t, source, target)
+	cookie := f.login(t)
+
+	rec := f.request(t, http.MethodPost, "/api/v1/clusters/c1/instances", map[string]any{
+		"name":         "newct",
+		"type":         "container",
+		"image":        "053059ea4e28",
+		"cpu":          "2",
+		"memory":       "1GiB",
+		"network":      "incusbr0",
+		"ipv4":         "10.0.0.0.50",
+		"storage_pool": "default",
+	}, cookie, "")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	createArgs := source.CreateArgs()
+	if len(createArgs) != 1 || createArgs[0].Name != "newct" || createArgs[0].Source.Fingerprint != "053059ea4e28" {
+		t.Fatalf("create args = %#v", createArgs)
+	}
+
+	rec = f.request(t, http.MethodPatch, "/api/v1/clusters/c1/instances/web", map[string]any{
+		"cpu":         "4",
+		"memory":      "",
+		"description": "after",
+	}, cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	updateArgs := source.UpdateArgs()
+	if len(updateArgs) != 1 || updateArgs[0].Instance.Config["limits.cpu"] != "4" {
+		t.Fatalf("update args = %#v", updateArgs)
+	}
+
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/instances/web/state", map[string]any{
+		"action": "restart",
+		"force":  true,
+	}, cookie, "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("action status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	states := source.UpdateStateArgs()
+	if len(states) != 1 || states[0].Action != "restart" || !states[0].Force {
+		t.Fatalf("state args = %#v", states)
+	}
+
+	rec = f.request(t, http.MethodDelete, "/api/v1/clusters/c1/instances/web?force=true", nil, cookie, "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if !source.HasCall("DeleteInstance:web") {
+		t.Fatalf("calls = %v", source.Calls())
+	}
+
+	rec = f.request(t, http.MethodGet, "/api/v1/clusters/c1/images", nil, cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("images status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var imageEnvelope struct {
+		Images []instances.Image `json:"images"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &imageEnvelope); err != nil || len(imageEnvelope.Images) != 1 || imageEnvelope.Images[0].Fingerprint != "053059ea4e28" {
+		t.Fatalf("images = %#v error = %v", imageEnvelope.Images, err)
+	}
+
+	rec = f.request(t, http.MethodGet, "/api/v1/clusters/c1/resources", nil, cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("resources status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var resources instances.Resources
+	if err := json.Unmarshal(rec.Body.Bytes(), &resources); err != nil {
+		t.Fatalf("decode resources: %v", err)
+	}
+	if len(resources.StoragePools) != 1 || resources.StoragePools[0].Name != "default" || resources.StoragePools[0].Source != "/srv/incus" {
+		t.Fatalf("pools = %#v", resources.StoragePools)
+	}
+	if len(resources.Networks) != 1 || resources.Networks[0].IPv4 != "10.0.0.0.1/24" {
+		t.Fatalf("networks = %#v", resources.Networks)
+	}
+}
+
+func TestInstanceManagementErrors(t *testing.T) {
+	source := &incusfake.Server{Instance: testContainer("web")}
+	target := &incusfake.Server{}
+	f := newAPIFixture(t, source, target)
+	cookie := f.login(t)
+
+	rec := f.request(t, http.MethodPost, "/api/v1/clusters/c1/instances", `{"name":`, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed create status = %d", rec.Code)
+	}
+
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/instances", map[string]any{"image": "debian"}, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid create status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var envelope errorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil || envelope.Error.Code != "invalid_request" {
+		t.Fatalf("error = %#v error = %v", envelope, err)
+	}
+
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c99/instances", map[string]any{"name": "ct", "image": "debian"}, cookie, "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown cluster status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = f.request(t, http.MethodPatch, "/api/v1/clusters/c1/instances/missing", map[string]any{"cpu": "2"}, cookie, "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing update status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/instances/web/state", map[string]any{"action": "explode"}, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid action status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = f.request(t, http.MethodDelete, "/api/v1/clusters/c1/instances/web?force=banana", nil, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid force status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	source.ImagesErr = errors.New("images boom")
+	rec = f.request(t, http.MethodGet, "/api/v1/clusters/c1/images", nil, cookie, "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("images error status = %d", rec.Code)
+	}
+
+	source.PoolsErr = errors.New("pools boom")
+	rec = f.request(t, http.MethodGet, "/api/v1/clusters/c1/resources", nil, cookie, "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("resources error status = %d", rec.Code)
 	}
 }
 

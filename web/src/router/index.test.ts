@@ -3,6 +3,7 @@ import { createMemoryHistory } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
+import { setLocale } from '@/i18n'
 import { createFleetRouter } from './index'
 
 describe('fleet router', () => {
@@ -80,5 +81,16 @@ describe('fleet router', () => {
 
     expect(router.currentRoute.value.path).toBe('/')
     expect(document.title).toBe('Dashboard · Incus Fleet')
+  })
+
+  it('uses translated titles after switching language', async () => {
+    vi.mocked(api.session).mockResolvedValue({ authenticated: true })
+    setLocale('zh-CN')
+    const router = createFleetRouter(createMemoryHistory())
+
+    await router.push('/instances')
+    await router.isReady()
+
+    expect(document.title).toBe('实例 · Incus Fleet')
   })
 })

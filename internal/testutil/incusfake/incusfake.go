@@ -30,8 +30,16 @@ type Server struct {
 	StateFunc        func(name string) (*api.InstanceState, error)
 	StateErr         error
 	UpdateStateErr   error
+	CreateErr        error
+	UpdateErr        error
 	CopyErr          error
 	DeleteErr        error
+	Images           []api.Image
+	ImagesErr        error
+	Pools            []api.StoragePool
+	PoolsErr         error
+	Networks         []api.Network
+	NetworksErr      error
 	PoolNames        []string
 	PoolNamesErr     error
 	NetworkNames     []string
@@ -46,8 +54,17 @@ type Server struct {
 	mu              sync.Mutex
 	calls           []string
 	copyArgs        []*incus.InstanceCopyArgs
+	createArgs      []api.InstancesPost
+	updateArgs      []UpdateInstanceArgs
 	updateStateArgs []api.InstanceStatePut
 	copySource      incus.InstanceServer
+}
+
+// UpdateInstanceArgs records one UpdateInstance call.
+type UpdateInstanceArgs struct {
+	Name     string
+	Instance api.InstancePut
+	ETag     string
 }
 
 // Calls returns a copy of the recorded call log.
@@ -109,6 +126,22 @@ func (s *Server) UpdateStateArgs() []api.InstanceStatePut {
 	defer s.mu.Unlock()
 
 	return append([]api.InstanceStatePut(nil), s.updateStateArgs...)
+}
+
+// CreateArgs returns the arguments recorded by CreateInstance.
+func (s *Server) CreateArgs() []api.InstancesPost {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]api.InstancesPost(nil), s.createArgs...)
+}
+
+// UpdateArgs returns the arguments recorded by UpdateInstance.
+func (s *Server) UpdateArgs() []UpdateInstanceArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]UpdateInstanceArgs(nil), s.updateArgs...)
 }
 
 func (s *Server) record(call string) {
@@ -223,6 +256,40 @@ func (s *Server) UpdateInstanceState(_ string, state api.InstanceStatePut, _ str
 	return &Operation{}, nil
 }
 
+// CreateInstance implements clusters.InstanceServer.
+func (s *Server) CreateInstance(instance api.InstancesPost) (incus.Operation, error) {
+	s.record("CreateInstance:" + instance.Name)
+	s.mu.Lock()
+	s.createArgs = append(s.createArgs, instance)
+	s.mu.Unlock()
+
+	if s.CreateErr != nil {
+		return nil, s.CreateErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// UpdateInstance implements clusters.InstanceServer.
+func (s *Server) UpdateInstance(name string, instance api.InstancePut, etag string) (incus.Operation, error) {
+	s.record("UpdateInstance:" + name)
+	s.mu.Lock()
+	s.updateArgs = append(s.updateArgs, UpdateInstanceArgs{Name: name, Instance: instance, ETag: etag})
+	s.mu.Unlock()
+
+	if s.UpdateErr != nil {
+		return nil, s.UpdateErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
 // CopyInstance implements clusters.InstanceServer.
 func (s *Server) CopyInstance(source incus.InstanceServer, instance api.Instance, args *incus.InstanceCopyArgs) (incus.RemoteOperation, error) {
 	s.record("CopyInstance:" + instance.Name)
@@ -269,6 +336,29 @@ func (s *Server) GetStoragePoolNames() ([]string, error) {
 	return []string{"default"}, nil
 }
 
+// GetStoragePools implements clusters.InstanceServer.
+func (s *Server) GetStoragePools() ([]api.StoragePool, error) {
+	s.record("GetStoragePools")
+	if s.PoolsErr != nil {
+		return nil, s.PoolsErr
+	}
+	if s.Pools != nil {
+		return s.Pools, nil
+	}
+
+	return []api.StoragePool{{Name: "default", Driver: "dir", Config: api.ConfigMap{"source": "/srv/incus"}}}, nil
+}
+
+// GetImages implements clusters.InstanceServer.
+func (s *Server) GetImages() ([]api.Image, error) {
+	s.record("GetImages")
+	if s.ImagesErr != nil {
+		return nil, s.ImagesErr
+	}
+
+	return s.Images, nil
+}
+
 // GetNetworkNames implements clusters.InstanceServer.
 func (s *Server) GetNetworkNames() ([]string, error) {
 	s.record("GetNetworkNames")
@@ -280,6 +370,19 @@ func (s *Server) GetNetworkNames() ([]string, error) {
 	}
 
 	return []string{"incusbr0"}, nil
+}
+
+// GetNetworks implements clusters.InstanceServer.
+func (s *Server) GetNetworks() ([]api.Network, error) {
+	s.record("GetNetworks")
+	if s.NetworksErr != nil {
+		return nil, s.NetworksErr
+	}
+	if s.Networks != nil {
+		return s.Networks, nil
+	}
+
+	return []api.Network{{Name: "incusbr0", Type: "bridge", Managed: true, Config: api.ConfigMap{"ipv4.address": "10.0.0.0.1/24", "ipv6.address": "none"}}}, nil
 }
 
 // GetStoragePoolResources implements clusters.InstanceServer.

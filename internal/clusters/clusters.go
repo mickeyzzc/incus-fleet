@@ -33,10 +33,15 @@ type InstanceServer interface {
 	GetInstance(name string) (*api.Instance, string, error)
 	GetInstanceState(name string) (*api.InstanceState, string, error)
 	UpdateInstanceState(name string, state api.InstanceStatePut, etag string) (incus.Operation, error)
+	CreateInstance(instance api.InstancesPost) (incus.Operation, error)
+	UpdateInstance(name string, instance api.InstancePut, etag string) (incus.Operation, error)
 	CopyInstance(source incus.InstanceServer, instance api.Instance, args *incus.InstanceCopyArgs) (incus.RemoteOperation, error)
 	DeleteInstance(name string) (incus.Operation, error)
+	GetImages() ([]api.Image, error)
 	GetStoragePoolNames() ([]string, error)
+	GetStoragePools() ([]api.StoragePool, error)
 	GetNetworkNames() ([]string, error)
+	GetNetworks() ([]api.Network, error)
 	GetStoragePoolResources(name string) (*api.ResourcesStoragePool, error)
 	IsClustered() bool
 }

@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import ElementPlus from 'element-plus'
+import ElementPlus, { ElMessage } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
@@ -51,5 +51,54 @@ describe('InstanceDetailDrawer', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Instance details unavailable')
+  })
+
+  it('runs lifecycle actions from the drawer', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+    vi.mocked(api.instanceAction).mockResolvedValue(undefined)
+    const wrapper = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'web' },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    const stop = wrapper.findAll('button').find((item) => item.text().includes('Stop'))
+    await stop?.trigger('click')
+    await flushPromises()
+
+    expect(api.instanceAction).toHaveBeenCalledWith('c1', 'web', {
+      action: 'stop',
+      force: false,
+    })
+    expect(ElMessage.success).toHaveBeenCalledWith('Stopped web.')
+  })
+
+  it('emits edit, migrate, and delete requests', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+    const wrapper = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'web' },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    for (const label of ['Edit', 'Migrate', 'Delete']) {
+      const button = wrapper.findAll('button').find((item) => item.text().includes(label))
+      await button?.trigger('click')
+    }
+
+    expect(wrapper.emitted('edit')?.[0]?.[0]).toMatchObject({ name: 'web', cluster: 'c1' })
+    expect(wrapper.emitted('migrate')).toHaveLength(1)
+    expect(wrapper.emitted('delete')).toHaveLength(1)
+  })
+
+  it('hides migration when it is not available', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+    const wrapper = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'web', canMigrate: false },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('Migrate')
   })
 })

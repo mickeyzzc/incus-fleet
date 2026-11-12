@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { formatBytes, formatPercent } from '@/utils/format'
 
@@ -8,6 +9,8 @@ const props = defineProps<{
   total: number
   pool?: string
 }>()
+
+const { t } = useI18n()
 
 const percentage = computed(() => {
   if (!Number.isFinite(props.total) || props.total <= 0) {
@@ -27,12 +30,16 @@ const status = computed<'success' | 'warning' | 'exception'>(() => {
 
   return 'success'
 })
+
+const label = computed(() =>
+  props.pool ? t('storage.label', { pool: props.pool }) : t('storage.labelGeneric'),
+)
 </script>
 
 <template>
   <div class="storage-line">
     <div class="storage-label">
-      <span>{{ pool ? `Storage · ${pool}` : 'Storage' }}</span>
+      <span>{{ label }}</span>
       <span>{{ formatBytes(used) }} / {{ formatBytes(total) }} ({{ formatPercent(used, total) }})</span>
     </div>
     <el-progress

@@ -2,12 +2,15 @@
 import { computed, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Key } from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
 
+import LocaleSwitch from '@/components/LocaleSwitch.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+const { t } = useI18n()
 
 const form = reactive({ token: '' })
 
@@ -37,14 +40,14 @@ async function submit(): Promise<void> {
       <div class="login-brand">
         <span class="brand-mark">IF</span>
         <div>
-          <h1>Incus Fleet</h1>
-          <p>Multi-cluster control plane</p>
+          <h1>{{ t('app.brand') }}</h1>
+          <p>{{ t('login.tagline') }}</p>
         </div>
+        <LocaleSwitch class="login-locale" />
       </div>
 
       <p class="login-hint">
-        Sign in with the shared admin token configured on this server. The token is exchanged for
-        an HttpOnly session cookie.
+        {{ t('login.hint') }}
       </p>
 
       <el-alert
@@ -57,13 +60,13 @@ async function submit(): Promise<void> {
       />
 
       <el-form label-position="top" @submit.prevent="submit">
-        <el-form-item label="Admin token">
+        <el-form-item :label="t('login.token')">
           <el-input
             v-model="form.token"
             type="password"
             show-password
             size="large"
-            placeholder="Enter the admin token"
+            :placeholder="t('login.tokenPlaceholder')"
             autocomplete="current-password"
             :prefix-icon="Key"
             @keyup.enter="submit"
@@ -78,14 +81,19 @@ async function submit(): Promise<void> {
           :disabled="!form.token.trim()"
           style="width: 100%"
         >
-          Sign in
+          {{ t('login.submit') }}
         </el-button>
       </el-form>
 
       <p class="login-hint">
-        Tip: automation clients may send
-        <code class="mono">Authorization: Bearer &lt;token&gt;</code> directly to the API.
+        {{ t('login.tip') }}
       </p>
     </section>
   </main>
 </template>
+
+<style scoped>
+.login-locale {
+  margin-left: auto;
+}
+</style>

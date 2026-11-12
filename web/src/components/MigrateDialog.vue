@@ -2,6 +2,7 @@
 import { computed, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Right } from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
 
 import type { ClusterSummary, InstanceSummary, Migration, MigrationMode } from '@/api/types'
 import { useMigrationsStore } from '@/stores/migrations'
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 }>()
 
 const migrations = useMigrationsStore()
+const { t } = useI18n()
 
 const form = reactive({
   target: '',
@@ -45,7 +47,9 @@ const canLive = computed(
 )
 
 const targetDisplay = computed(
-  () => targets.value.find((cluster) => cluster.name === form.target)?.display_name ?? '—',
+  () =>
+    targets.value.find((cluster) => cluster.name === form.target)?.display_name ??
+    t('common.none'),
 )
 
 watch(
@@ -95,7 +99,7 @@ async function submit(): Promise<void> {
     return
   }
   if (!form.target) {
-    ElMessage.error('Select a target cluster.')
+    ElMessage.error(t('migrate.targetRequired'))
     return
   }
 
@@ -110,7 +114,7 @@ async function submit(): Promise<void> {
       auto_start: form.autoStart,
     })
 
-    ElMessage.success(`Migration queued for ${props.instance.name}.`)
+    ElMessage.success(t('migrate.queued', { name: props.instance.name }))
     emit('submitted', migration)
     visible.value = false
   } catch (err) {
@@ -120,11 +124,17 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="Migrate instance" width="580px" destroy-on-close>
+  <el-dialog v-model="visible" :title="t('migrate.title')" width="580px" destroy-on-close>
     <div v-if="instance" class="instance-summary">
       <div class="summary-name">
         <strong>{{ instance.name }}</strong>
-        <span class="muted">{{ instance.type === 'virtual-machine' ? 'Virtual machine' : 'Container' }}</span>
+        <span class="muted">
+          {{
+            instance.type === 'virtual-machine'
+              ? t('common.virtualMachine')
+              : t('common.container')
+          }}
+        </span>
       </div>
       <div class="summary-route">
         <el-tag effect="plain" round>{{ instance.cluster }}</el-tag>
@@ -139,13 +149,13 @@ async function submit(): Promise<void> {
       type="warning"
       :closable="false"
       show-icon
-      title="No migration target"
-      description="At least one other cluster must be online to migrate this instance."
+      :title="t('migrate.noTarget')"
+      :description="t('migrate.noTargetDescription')"
     />
 
     <el-form v-else label-position="top" class="migrate-form" @submit.prevent="submit">
-      <el-form-item label="Target cluster">
-        <el-select v-model="form.target" placeholder="Select a cluster" style="width: 100%">
+      <el-form-item :label="t('migrate.targetCluster')">
+        <el-select v-model="form.target" :placeholder="t('migrate.selectCluster')" style="width: 100%">
           <el-option
             v-for="cluster in targets"
             :key="cluster.name"
@@ -155,26 +165,21 @@ async function submit(): Promise<void> {
         </el-select>
       </el-form-item>
 
-      <el-form-item label="Mode">
+      <el-form-item :label="t('migrate.mode')">
         <el-radio-group v-model="form.mode">
-          <el-radio-button value="move">Move (remove from source)</el-radio-button>
-          <el-radio-button value="copy">Copy (keep on source)</el-radio-button>
+          <el-radio-button value="move">{{ t('migrate.move') }}</el-radio-button>
+          <el-radio-button value="copy">{{ t('migrate.copy') }}</el-radio-button>
         </el-radio-group>
         <p class="field-hint">
-          {{
-            form.mode === 'copy'
-              ? 'The source is stopped briefly during transfer and restarted afterwards.'
-              : 'The instance is removed from the source after a successful transfer.'
-          }}
+          {{ form.mode === 'copy' ? t('migrate.copyHint') : t('migrate.moveHint') }}
         </p>
       </el-form-item>
 
       <div class="switch-row">
         <div>
-          <strong>Live migration</strong>
+          <strong>{{ t('migrate.liveMigration') }}</strong>
           <p class="field-hint">
-            Requires a running virtual machine with <code>migration.stateful=true</code>. Only
-            available in move mode.
+            {{ t('migrate.liveHint') }}
           </p>
         </div>
         <el-switch v-model="form.live" :disabled="!canLive || form.mode !== 'move'" />
@@ -182,16 +187,16 @@ async function submit(): Promise<void> {
 
       <div class="switch-row">
         <div>
-          <strong>Include snapshots</strong>
-          <p class="field-hint">Copy instance snapshots along with the instance.</p>
+          <strong>{{ t('migrate.includeSnapshots') }}</strong>
+          <p class="field-hint">{{ t('migrate.includeSnapshotsHint') }}</p>
         </div>
         <el-switch v-model="form.includeSnapshots" />
       </div>
 
       <div class="switch-row">
         <div>
-          <strong>Start on target</strong>
-          <p class="field-hint">Start the instance on the target if it was running on the source.</p>
+          <strong>{{ t('migrate.startOnTarget') }}</strong>
+          <p class="field-hint">{{ t('migrate.startOnTargetHint') }}</p>
         </div>
         <el-switch v-model="form.autoStart" />
       </div>
@@ -202,8 +207,8 @@ async function submit(): Promise<void> {
         type="info"
         :closable="false"
         show-icon
-        title="Live move"
-        description="The VM keeps running while memory and disk state transfer. The source is stopped after the copy completes and then deleted."
+        :title="t('migrate.liveTitle')"
+        :description="t('migrate.liveDescription')"
       />
 
       <el-alert
@@ -217,14 +222,14 @@ async function submit(): Promise<void> {
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">Cancel</el-button>
+      <el-button @click="visible = false">{{ t('common.cancel') }}</el-button>
       <el-button
         type="primary"
         :loading="migrations.submitting"
         :disabled="targets.length === 0"
         @click="submit"
       >
-        Start migration
+        {{ t('migrate.submit') }}
       </el-button>
     </template>
   </el-dialog>

@@ -119,6 +119,88 @@ export interface InstanceDetail extends InstanceSummary {
   state?: InstanceState
 }
 
+/** Local Incus image available on a cluster. */
+export interface InstanceImage {
+  fingerprint: string
+  aliases: string[]
+  type: string
+  architecture: string
+  os?: string
+  release?: string
+  description?: string
+  size: number
+  cached: boolean
+  created_at: string
+}
+
+/** Storage pool details reported by a cluster. */
+export interface StoragePoolResource {
+  name: string
+  driver: string
+  source?: string
+  status?: string
+  description?: string
+  used_by: string[]
+  locations: string[]
+  total: number
+  used: number
+}
+
+/** Network details reported by a cluster. */
+export interface NetworkResource {
+  name: string
+  type: string
+  managed: boolean
+  status?: string
+  description?: string
+  ipv4?: string
+  ipv6?: string
+  used_by: string[]
+  locations: string[]
+}
+
+/** Storage pools and networks for one cluster. */
+export interface ClusterResources {
+  storage_pools: StoragePoolResource[]
+  networks: NetworkResource[]
+}
+
+/** Request used to create an instance from a local image. */
+export interface CreateInstanceRequest {
+  name: string
+  type?: 'container' | 'virtual-machine'
+  image: string
+  description?: string
+  profiles?: string[]
+  cpu?: string
+  memory?: string
+  root_disk_size?: string
+  storage_pool?: string
+  network?: string
+  ipv4?: string
+  ipv6?: string
+  start?: boolean
+}
+
+/** Request used to change instance limits, disk size, or networking. */
+export interface UpdateInstanceRequest {
+  description?: string
+  cpu?: string
+  memory?: string
+  root_disk_size?: string
+  device?: string
+  network?: string
+  ipv4?: string
+  ipv6?: string
+}
+
+export type InstanceAction = 'start' | 'stop' | 'restart'
+
+export interface InstanceActionRequest {
+  action: InstanceAction
+  force?: boolean
+}
+
 export interface Migration {
   id: string
   source_cluster: string

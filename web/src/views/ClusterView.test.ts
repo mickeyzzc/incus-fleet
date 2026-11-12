@@ -6,8 +6,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
+import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
-import { clusterSummary, instanceDetail, instanceSummary } from '@/test/fixtures'
+import { clusterResources, clusterSummary, instanceDetail, instanceSummary } from '@/test/fixtures'
 import ClusterView from './ClusterView.vue'
 
 const Blank = { template: '<div />' }
@@ -34,6 +35,10 @@ function mockFleet() {
   )
   vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
   vi.mocked(api.reconnectCluster).mockResolvedValue(clusterSummary({ online: true }))
+  vi.mocked(api.getResources).mockResolvedValue(clusterResources())
+  vi.mocked(api.listImages).mockResolvedValue([])
+  vi.mocked(api.instanceAction).mockResolvedValue(undefined)
+  vi.mocked(api.deleteInstance).mockResolvedValue(undefined)
 }
 
 async function mountCluster(cluster = 'c1') {
@@ -89,7 +94,7 @@ describe('ClusterView', () => {
   it('opens the detail drawer and migration dialog', async () => {
     const { wrapper } = await mountCluster()
 
-    await buttonByText(wrapper, 'Details').trigger('click')
+    await wrapper.find('.name-link').trigger('click')
     await flushPromises()
 
     expect(api.getInstance).toHaveBeenCalledWith('c1', 'web')
@@ -103,8 +108,58 @@ describe('ClusterView', () => {
     expect(dialog.props('instance')).toMatchObject({ name: 'web', cluster: 'c1' })
   })
 
-  it('refreshes, reconnects, and reports reconnect errors', async () => {
+  it('renders storage pool and network details', async () => {
     const { wrapper } = await mountCluster()
+
+    expect(api.getResources).toHaveBeenCalledWith('c1')
+    expect(wrapper.text()).toContain('Storage pools')
+    expect(wrapper.text()).toContain('default')
+    expect(wrapper.text()).toContain('/srv/incus')
+    expect(wrapper.text()).toContain('Networks')
+    expect(wrapper.text()).toContain('incusbr0')
+    expect(wrapper.text()).toContain('10.0.0.0.1/24')
+  })
+
+  it('opens the create dialog for the current cluster', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Create instance').trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(InstanceFormDialog)
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('mode')).toBe('create')
+    expect(dialog.props('cluster')).toBe('c1')
+    expect(api.listImages).toHaveBeenCalledWith('c1')
+  })
+
+  it('starts lifecycle actions and opens the edit dialog', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Stop').trigger('click')
+    await flushPromises()
+    expect(api.instanceAction).toHaveBeenCalledWith('c1', 'web', {
+      action: 'stop',
+      force: false,
+    })
+
+    await buttonByText(wrapper, 'Edit').trigger('click')
+    await flushPromises()
+    expect(api.getInstance).toHaveBeenCalledWith('c1', 'web')
+    expect(wrapper.findComponent(InstanceFormDialog).props('mode')).toBe('edit')
+  })
+
+  it('deletes an instance after confirmation', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Delete').trigger('click')
+    await flushPromises()
+
+    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true)
+    expect(ElMessage.success).toHaveBeenCalledWith('Deleted web.')
+  })
+
+  it('refreshes, reconnects, and reports reconnect errors', async () => {    const { wrapper } = await mountCluster()
     expect(api.listClusters).toHaveBeenCalledTimes(1)
 
     await buttonByText(wrapper, 'Refresh').trigger('click')
