@@ -7,6 +7,8 @@ import type {
   CreateInstanceRequest,
   DeviceRequest,
   FileEntry,
+  ImportImageRequest,
+  CopyImageRequest,
   InstanceAction,
   InstanceDetail,
   InstanceImage,
@@ -407,6 +409,44 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
+  /** Uploads an image tarball into a cluster and refreshes the image list. */
+  async function importImage(cluster: string, request: ImportImageRequest): Promise<string | null> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const fingerprint = await api.importImage(cluster, request)
+      delete imageCache.value[cluster]
+      return fingerprint
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Distributes an image to another cluster and refreshes both lists. */
+  async function copyImage(
+    cluster: string,
+    fingerprint: string,
+    request: CopyImageRequest,
+  ): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.copyImage(cluster, fingerprint, request)
+      delete imageCache.value[cluster]
+      delete imageCache.value[request.target_cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
   /** Deletes an image from a cluster and invalidates the cached image list. */
   async function deleteImage(cluster: string, fingerprint: string): Promise<void> {
     saving.value = true
@@ -766,6 +806,8 @@ export const useInstancesStore = defineStore('instances', () => {
     deleteProfile,
     updateMember,
     deleteImage,
+    importImage,
+    copyImage,
     createSnapshot,
     restoreSnapshot,
     deleteSnapshot,

@@ -544,4 +544,36 @@ describe('instances store', () => {
     expect(api.deleteImage).toHaveBeenCalledWith('c1', '053059ea4e28')
     expect(store.imageCache.c1).toBeUndefined()
   })
+
+  it('imports and distributes images with cache invalidation', async () => {
+    vi.mocked(api.listImages).mockResolvedValue([])
+    vi.mocked(api.importImage).mockResolvedValue('abc123')
+    vi.mocked(api.copyImage).mockResolvedValue(undefined)
+    const store = useInstancesStore()
+
+    await store.fetchImages('c1')
+    const fingerprint = await store.importImage('c1', {
+      file: new File(['tarball'], 'debian13.tar'),
+      type: 'container',
+      alias: 'debian/13',
+    })
+    expect(fingerprint).toBe('abc123')
+    expect(api.importImage).toHaveBeenCalledWith('c1', {
+      file: expect.any(File),
+      type: 'container',
+      alias: 'debian/13',
+    })
+    expect(store.imageCache.c1).toBeUndefined()
+
+    await store.fetchImages('c2')
+    await store.copyImage('c1', 'abc123', { target_cluster: 'c2' })
+    expect(api.copyImage).toHaveBeenCalledWith('c1', 'abc123', { target_cluster: 'c2' })
+    expect(store.imageCache.c1).toBeUndefined()
+    expect(store.imageCache.c2).toBeUndefined()
+
+    vi.mocked(api.importImage).mockRejectedValue(new Error('quota'))
+    await expect(
+      store.importImage('c1', { file: new File(['x'], 'x.tar'), type: 'container' }),
+    ).rejects.toThrow('quota')
+  })
 })

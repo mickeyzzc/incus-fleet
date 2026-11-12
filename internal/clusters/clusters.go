@@ -52,6 +52,9 @@ type InstanceServer interface {
 	ListInstanceFiles(instanceName string, dir string) ([]apitypes.FileEntry, error)
 	MkdirInstanceDir(instanceName string, dir string) error
 	GetImages() ([]api.Image, error)
+	GetImage(fingerprint string) (*api.Image, string, error)
+	CreateImage(image api.ImagesPost, args *incus.ImageCreateArgs) (incus.Operation, error)
+	CopyImage(source incus.ImageServer, image api.Image, args *incus.ImageCopyArgs) (incus.RemoteOperation, error)
 	DeleteImage(fingerprint string) (incus.Operation, error)
 	GetInstanceSnapshots(instanceName string) ([]api.InstanceSnapshot, error)
 	CreateInstanceSnapshot(instanceName string, snapshot api.InstanceSnapshotsPost) (incus.Operation, error)
@@ -142,6 +145,13 @@ func (c *Connection) ConnectError() error {
 	return c.err
 }
 
+// sftpExtensions is implemented by clients that already carry the fleet
+// directory helpers (the test fake); real SDK clients need the wrapper.
+type sftpExtensions interface {
+	ListInstanceFiles(instanceName string, dir string) ([]apitypes.FileEntry, error)
+	MkdirInstanceDir(instanceName string, dir string) error
+}
+
 // reconnect replaces the client, disconnecting the previous one.
 func (c *Connection) reconnect(_ context.Context, srv InstanceServer) {
 	full := fullClient(srv)
@@ -151,8 +161,11 @@ func (c *Connection) reconnect(_ context.Context, srv InstanceServer) {
 			full = full.UseProject(c.cfg.Project)
 		}
 		// Keep the narrow surface (including the SFTP helpers) while
-		// preserving the configured project scope.
-		client = &augmentedClient{InstanceServer: full}
+		// preserving the configured project scope. Clients that already
+		// implement the helpers are used as-is.
+		if _, needsWrap := srv.(sftpExtensions); !needsWrap {
+			client = &augmentedClient{InstanceServer: full}
+		}
 	}
 
 	c.mu.Lock()

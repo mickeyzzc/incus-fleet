@@ -13,6 +13,8 @@ import MigrateDialog from '@/components/MigrateDialog.vue'
 import NetworkDialog from '@/components/NetworkDialog.vue'
 import ProfileDialog from '@/components/ProfileDialog.vue'
 import StoragePoolDialog from '@/components/StoragePoolDialog.vue'
+import ImageDistributeDialog from '@/components/ImageDistributeDialog.vue'
+import ImageImportDialog from '@/components/ImageImportDialog.vue'
 import StorageVolumesDialog from '@/components/StorageVolumesDialog.vue'
 import {
   clusterResources,
@@ -407,5 +409,26 @@ describe('ClusterView', () => {
     expect(dialog.props('modelValue')).toBe(true)
     expect(dialog.props('pool')).toMatchObject({ name: 'default' })
     expect(api.listVolumes).toHaveBeenCalledWith('c1', 'default')
+  })
+
+  it('opens the image import and distribute dialogs', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Import image').trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent(ImageImportDialog).props('modelValue')).toBe(true)
+    wrapper.findComponent(ImageImportDialog).vm.$emit('imported', 'abc')
+    await flushPromises()
+    expect(wrapper.findComponent(ImageImportDialog).emitted('imported')).toHaveLength(1)
+
+    const imageRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('053059ea4e28'))
+    await imageRow?.findAll('button').find((b) => b.text().includes('Distribute'))?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(ImageDistributeDialog)
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('fingerprint')).toBe('053059ea4e28')
   })
 })

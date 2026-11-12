@@ -95,6 +95,8 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/state", a.requireAuth(http.HandlerFunc(a.instanceAction)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}", a.requireAuth(http.HandlerFunc(a.deleteInstance)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/images", a.requireAuth(http.HandlerFunc(a.listImages)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/images/import", a.requireAuth(http.HandlerFunc(a.importImage)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/images/{fingerprint}/copy", a.requireAuth(http.HandlerFunc(a.copyImage)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/images/{fingerprint}", a.requireAuth(http.HandlerFunc(a.deleteImage)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/resources", a.requireAuth(http.HandlerFunc(a.getResources)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.listSnapshots)))
@@ -463,6 +465,47 @@ func (a *API) detachDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, detail)
+}
+
+func (a *API) importImage(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	fingerprint, err := a.instances.ImportImage(
+		r.Context(),
+		r.PathValue("cluster"),
+		query.Get("filename"),
+		query.Get("type"),
+		query.Get("alias"),
+		r.Body,
+	)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	if fingerprint == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"fingerprint": fingerprint})
+}
+
+func (a *API) copyImage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TargetCluster string `json:"target_cluster"`
+		Alias         string `json:"alias"`
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.CopyImageTo(r.Context(), r.PathValue("cluster"), r.PathValue("fingerprint"), req.TargetCluster, req.Alias); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) deleteImage(w http.ResponseWriter, r *http.Request) {

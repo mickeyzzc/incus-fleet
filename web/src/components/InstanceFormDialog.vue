@@ -69,6 +69,14 @@ const filteredImages = computed(() =>
 )
 const pools = computed(() => instances.resources(form.cluster)?.storage_pools ?? [])
 const networks = computed(() => instances.resources(form.cluster)?.networks ?? [])
+const isPhysicalNetwork = computed(() => {
+  if (nicDevice.value?.device.nictype === 'macvlan') {
+    return true
+  }
+
+  const selected = networks.value.find((network) => network.name === form.network)
+  return Boolean(selected && !selected.managed)
+})
 
 let pendingCluster = ''
 
@@ -243,6 +251,10 @@ function updateRequest(): UpdateInstanceRequest {
 
   if (nicDevice.value) {
     request.device = nicDevice.value.name
+    if (isPhysicalNetwork.value) {
+      return request
+    }
+
     request.ipv4 = form.ipv4.trim()
     request.ipv6 = form.ipv6.trim()
     if (form.network) {
@@ -406,19 +418,28 @@ async function submit(): Promise<void> {
             <el-option
               v-for="network in networks"
               :key="network.name"
-              :label="`${network.name} · ${network.type}`"
+              :label="
+                network.managed
+                  ? `${network.name} · ${network.type}`
+                  : t('form.networkPhysical', { name: network.name })
+              "
               :value="network.name"
             />
           </el-select>
+          <p v-if="isPhysicalNetwork && !isEdit" class="field-hint">
+            {{ t('form.networkPhysicalHint') }}
+          </p>
         </el-form-item>
 
-        <el-form-item :label="t('form.ipv4')">
-          <el-input v-model="form.ipv4" :placeholder="t('form.ipv4Placeholder')" />
-        </el-form-item>
+        <template v-if="!isPhysicalNetwork">
+          <el-form-item :label="t('form.ipv4')">
+            <el-input v-model="form.ipv4" :placeholder="t('form.ipv4Placeholder')" />
+          </el-form-item>
 
-        <el-form-item :label="t('form.ipv6')">
-          <el-input v-model="form.ipv6" :placeholder="t('form.ipv6Placeholder')" />
-        </el-form-item>
+          <el-form-item :label="t('form.ipv6')">
+            <el-input v-model="form.ipv6" :placeholder="t('form.ipv6Placeholder')" />
+          </el-form-item>
+        </template>
 
         <el-form-item v-if="!isEdit" class="form-span">
           <el-checkbox v-model="form.start">{{ t('form.start') }}</el-checkbox>

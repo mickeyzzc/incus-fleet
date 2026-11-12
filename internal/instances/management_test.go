@@ -52,6 +52,10 @@ func TestCreate(t *testing.T) {
 		Instance:     &api.Instance{Name: "vm1"},
 		PoolNames:    []string{"default", "fast"},
 		NetworkNames: []string{"incusbr0", "incusbr1"},
+		Networks: []api.Network{
+			{Name: "incusbr0", Type: "bridge", Managed: true},
+			{Name: "incusbr1", Type: "bridge", Managed: true},
+		},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
@@ -204,7 +208,7 @@ func TestCreateErrors(t *testing.T) {
 		t.Fatal("Create() expected pool error")
 	}
 
-	srv = &incusfake.Server{Instance: &api.Instance{Name: "vm1"}, NetworkNamesErr: errors.New("network boom")}
+	srv = &incusfake.Server{Instance: &api.Instance{Name: "vm1"}, NetworksErr: errors.New("network boom")}
 	svc = newTestService(t, map[string]*incusfake.Server{"c1": srv})
 	if _, err := svc.Create(context.Background(), "c1", CreateRequest{Name: "vm1", Image: "debian", Network: "incusbr0"}); err == nil {
 		t.Fatal("Create() expected network error")

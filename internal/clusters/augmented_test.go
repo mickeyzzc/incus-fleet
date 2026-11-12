@@ -57,7 +57,8 @@ func TestFullClientUnwrapsAugmented(t *testing.T) {
 	if got := fullClient(wrapped); got != nil {
 		t.Fatalf("fullClient() = %v, want the embedded client", got)
 	}
-	if fullClient(&incusfake.Server{}) != nil {
-		t.Fatal("fullClient() widened a narrow client")
+	// The fake embeds the full SDK interface, so it doubles as a raw client.
+	if fullClient(&incusfake.Server{}) == nil {
+		t.Fatal("fullClient() lost the raw fake")
 	}
 }

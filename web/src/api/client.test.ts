@@ -368,4 +368,27 @@ describe('ApiClient', () => {
       expect.objectContaining({ method: 'DELETE' }),
     )
   })
+
+  it('uploads an image import as a raw file and copies images', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ fingerprint: 'abc123' }))
+
+    const file = new File(['tarball'], 'debian13.tar', { type: 'application/octet-stream' })
+    const fingerprint = await client.importImage('c1', {
+      file,
+      type: 'container',
+      alias: 'debian/13',
+    })
+    await client.copyImage('c1', 'abc123', { target_cluster: 'c2', alias: 'debian/13' })
+
+    expect(fingerprint).toBe('abc123')
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe(
+      'https://fleet.local/api/v1/clusters/c1/images/import?filename=debian13.tar&type=container&alias=debian%2F13',
+    )
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(init.body).toBe(file)
+    expect(fetchImpl.mock.calls[1]?.[0]).toBe(
+      'https://fleet.local/api/v1/clusters/c1/images/abc123/copy',
+    )
+  })
 })

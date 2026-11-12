@@ -5,6 +5,8 @@ import type {
   DeviceRequest,
   FileEntry,
   HealthResponse,
+  ImportImageRequest,
+  CopyImageRequest,
   InstanceActionRequest,
   InstanceDetail,
   InstanceImage,
@@ -145,6 +147,35 @@ export class ApiClient {
       `/api/v1/clusters/${encodeURIComponent(cluster)}/images`,
     )
     return data.images ?? []
+  }
+
+  async importImage(
+    cluster: string,
+    request: ImportImageRequest,
+  ): Promise<string | null> {
+    const query = new URLSearchParams({
+      filename: request.file.name,
+      type: request.type,
+    })
+    if (request.alias) {
+      query.set('alias', request.alias)
+    }
+
+    const data = await this.request<{ fingerprint?: string } | undefined>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/images/import?${query.toString()}`,
+      request.file,
+    )
+
+    return data?.fingerprint ?? null
+  }
+
+  async copyImage(cluster: string, fingerprint: string, request: CopyImageRequest): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/images/${encodeURIComponent(fingerprint)}/copy`,
+      request,
+    )
   }
 
   async deleteImage(cluster: string, fingerprint: string): Promise<void> {
@@ -387,8 +418,11 @@ export class ApiClient {
       headers.Authorization = `Bearer ${this.bearerToken}`
     }
 
-    let payload: string | undefined
-    if (body !== undefined) {
+    let payload: string | BodyInit | undefined
+    if (body instanceof File) {
+      payload = body
+      headers['Content-Type'] = 'application/octet-stream'
+    } else if (body !== undefined) {
       headers['Content-Type'] = jsonHeaders['Content-Type']
       payload = JSON.stringify(body)
     }

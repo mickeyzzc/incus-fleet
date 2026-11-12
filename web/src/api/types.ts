@@ -239,6 +239,17 @@ export interface UpdateInstanceRequest {
   ipv6?: string
 }
 
+export interface ImportImageRequest {
+  file: File
+  type: 'container' | 'virtual-machine'
+  alias?: string
+}
+
+export interface CopyImageRequest {
+  target_cluster: string
+  alias?: string
+}
+
 export type InstanceAction = 'start' | 'stop' | 'restart'
 
 export interface InstanceActionRequest {

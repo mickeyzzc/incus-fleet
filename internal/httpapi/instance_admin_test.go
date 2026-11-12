@@ -229,3 +229,49 @@ func TestAdminErrorBranches(t *testing.T) {
 		}
 	}
 }
+
+func TestImageImportAndCopyEndpoints(t *testing.T) {
+	source := &incusfake.Server{
+		Images:    []api.Image{{Fingerprint: "abc123def456", Type: "container"}},
+		Operation: &incusfake.Operation{Metadata: map[string]any{"fingerprint": "abc123def456"}},
+	}
+	target := &incusfake.Server{}
+	f := newAPIFixture(t, source, target)
+	cookie := f.login(t)
+
+	rec := f.request(t, http.MethodPost,
+		"/api/v1/clusters/c1/images/import?filename=debian13.tar&type=container&alias=debian%2F13",
+		"raw-tarball-bytes", cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("import status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode import response: %v", err)
+	}
+	if resp.Fingerprint != "abc123def456" {
+		t.Fatalf("import response = %#v", resp)
+	}
+	created := source.CreateImageArgs()
+	if len(created) != 1 || created[0].Filename != "debian13.tar" || created[0].Type != "container" || string(created[0].Content) != "raw-tarball-bytes" {
+		t.Fatalf("import args = %#v", created[0])
+	}
+
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/images/abc123def456/copy", map[string]any{
+		"target_cluster": "c2",
+		"alias":          "debian/13",
+	}, cookie, "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("copy status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if len(target.CopyImageArgs()) != 1 || target.CopyImageArgs()[0].Fingerprint != "abc123def456" {
+		t.Fatalf("copy args = %#v", target.CopyImageArgs())
+	}
+
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/images/import?filename=&type=container", "x", cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("import missing filename status = %d", rec.Code)
+	}
+}

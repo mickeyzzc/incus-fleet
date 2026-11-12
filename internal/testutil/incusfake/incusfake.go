@@ -19,8 +19,13 @@ import (
 )
 
 // Server is a configurable fake Incus server implementing the narrow
-// interface used by the fleet services.
+// interface used by the fleet services. It embeds the full SDK interface
+// (nil) so test doubles can be passed wherever a raw client is required;
+// calling the embedded methods panics, which is why every method the fleet
+// services use is implemented explicitly.
 type Server struct {
+	incus.InstanceServer
+
 	Server            *api.Server
 	ServerErr         error
 	Cluster           *api.Cluster
@@ -43,6 +48,9 @@ type Server struct {
 	ExecErr           error
 	GetFileErr        error
 	CreateFileErr     error
+	ImageErr          error
+	CreateImageErr    error
+	CopyImageErr      error
 	DeleteFileErr     error
 	ListFilesErr      error
 	MkdirErr          error
@@ -114,6 +122,8 @@ type Server struct {
 	createSnapshots []SnapshotArgs
 	deleteSnapshots []SnapshotArgs
 	deleteImages    []string
+	createdImages   []ImageArgs
+	copiedImages    []ImageArgs
 	createVolumes   []VolumeArgs
 	deleteVolumes   []VolumeArgs
 	consoleCalls    int
@@ -128,6 +138,31 @@ type FileArgs struct {
 	Path    string
 	Content []byte
 	Mode    int64
+}
+
+// ImageArgs records one image create/copy call.
+type ImageArgs struct {
+	Filename    string
+	Fingerprint string
+	Content     []byte
+	Type        string
+	Aliases     []api.ImageAlias
+}
+
+// CreateImageArgs returns the arguments recorded by CreateImage.
+func (s *Server) CreateImageArgs() []ImageArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]ImageArgs(nil), s.createdImages...)
+}
+
+// CopyImageArgs returns the arguments recorded by CopyImage.
+func (s *Server) CopyImageArgs() []ImageArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]ImageArgs(nil), s.copiedImages...)
 }
 
 // CreateFileArgs returns the arguments recorded by CreateInstanceFile.
@@ -630,6 +665,74 @@ func (s *Server) GetImages() ([]api.Image, error) {
 	}
 
 	return s.Images, nil
+}
+
+// GetImage implements clusters.InstanceServer.
+func (s *Server) GetImage(fingerprint string) (*api.Image, string, error) {
+	s.record("GetImage:" + fingerprint)
+	if s.ImageErr != nil {
+		return nil, "", s.ImageErr
+	}
+	for i := range s.Images {
+		if strings.HasPrefix(s.Images[i].Fingerprint, fingerprint) {
+			return &s.Images[i], "image-etag", nil
+		}
+	}
+
+	return nil, "", api.StatusErrorf(http.StatusNotFound, "Image %q not found", fingerprint)
+}
+
+// CreateImage implements clusters.InstanceServer.
+func (s *Server) CreateImage(image api.ImagesPost, args *incus.ImageCreateArgs) (incus.Operation, error) {
+	s.record("CreateImage:" + image.Filename)
+	content, err := io.ReadAll(args.MetaFile)
+	if err != nil {
+		return nil, fmt.Errorf("read image upload: %w", err)
+	}
+
+	s.mu.Lock()
+	s.createdImages = append(s.createdImages, ImageArgs{Filename: image.Filename, Content: content, Type: args.Type, Aliases: image.Aliases})
+	s.mu.Unlock()
+
+	if s.CreateImageErr != nil {
+		return nil, s.CreateImageErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// CopyImage implements clusters.InstanceServer.
+func (s *Server) CopyImage(_ incus.ImageServer, image api.Image, args *incus.ImageCopyArgs) (incus.RemoteOperation, error) {
+	s.record("CopyImage:" + image.Fingerprint)
+	entry := ImageArgs{Fingerprint: image.Fingerprint}
+	if args != nil {
+		for _, alias := range args.Aliases {
+			entry.Aliases = append(entry.Aliases, api.ImageAlias{Name: alias.Name})
+		}
+	}
+	s.mu.Lock()
+	s.copiedImages = append(s.copiedImages, entry)
+	s.mu.Unlock()
+
+	if s.CopyImageErr != nil {
+		return nil, s.CopyImageErr
+	}
+	if s.RemoteOperation != nil {
+		return s.RemoteOperation, nil
+	}
+
+	return &RemoteOperation{}, nil
+}
+
+// UseProject implements the full SDK interface; the fake ignores projects
+// and returns itself so test doubles survive reconnects with a project set.
+func (s *Server) UseProject(project string) incus.InstanceServer {
+	s.record("UseProject:" + project)
+
+	return s
 }
 
 // ConsoleInstanceDynamic implements clusters.InstanceServer.
@@ -1138,6 +1241,8 @@ type Operation struct {
 	// FDSecrets mirrors the daemon operation metadata so relay code can
 	// resolve fd names into websocket secrets.
 	FDSecrets map[string]string
+	// Metadata is returned verbatim from Get().
+	Metadata map[string]any
 }
 
 // AddHandler implements incus.Operation.
@@ -1153,12 +1258,19 @@ func (o *Operation) Cancel() error {
 // Get implements incus.Operation.
 func (o *Operation) Get() api.Operation {
 	op := api.Operation{}
-	if len(o.FDSecrets) > 0 {
-		fds := make(map[string]any, len(o.FDSecrets))
-		for name, secret := range o.FDSecrets {
-			fds[name] = secret
+	if len(o.FDSecrets) > 0 || len(o.Metadata) > 0 {
+		metadata := make(map[string]any, len(o.Metadata)+1)
+		for key, value := range o.Metadata {
+			metadata[key] = value
 		}
-		op.Metadata = map[string]any{"fds": fds}
+		if len(o.FDSecrets) > 0 {
+			fds := make(map[string]any, len(o.FDSecrets))
+			for name, secret := range o.FDSecrets {
+				fds[name] = secret
+			}
+			metadata["fds"] = fds
+		}
+		op.Metadata = metadata
 	}
 
 	return op

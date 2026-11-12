@@ -8,6 +8,8 @@ import { useI18n } from 'vue-i18n'
 import InstanceActions from '@/components/InstanceActions.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
+import ImageDistributeDialog from '@/components/ImageDistributeDialog.vue'
+import ImageImportDialog from '@/components/ImageImportDialog.vue'
 import MemberDialog from '@/components/MemberDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
 import NetworkDialog from '@/components/NetworkDialog.vue'
@@ -55,6 +57,9 @@ const memberDialogOpen = ref(false)
 const memberEditing = ref<ClusterMember | null>(null)
 const volumesDialogOpen = ref(false)
 const volumesPool = ref<StoragePoolResource | null>(null)
+const importDialogOpen = ref(false)
+const distributeOpen = ref(false)
+const distributeFingerprint = ref('')
 
 const summary = computed(() => clusters.byName(props.cluster))
 const resources = computed(() => instances.resources(props.cluster))
@@ -231,6 +236,11 @@ function openMemberDialog(member: ClusterMember): void {
 function openVolumesDialog(pool: StoragePoolResource): void {
   volumesPool.value = pool
   volumesDialogOpen.value = true
+}
+
+function openDistribute(fingerprint: string): void {
+  distributeFingerprint.value = fingerprint
+  distributeOpen.value = true
 }
 
 async function deleteImage(fingerprint: string): Promise<void> {
@@ -543,6 +553,9 @@ function instanceTypeLabel(type: string): string {
             >
               {{ t('images.cleanup') }} ({{ cachedImageCount }})
             </el-button>
+            <el-button :icon="Plus" type="primary" @click="importDialogOpen = true">
+              {{ t('images.import') }}
+            </el-button>
           </div>
         </div>
 
@@ -576,8 +589,11 @@ function instanceTypeLabel(type: string): string {
               <span v-else class="muted">{{ t('common.none') }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.actions')" width="90">
+          <el-table-column :label="t('common.actions')" width="170">
             <template #default="{ row }">
+              <el-button link type="primary" @click="openDistribute(row.fingerprint)">
+                {{ t('images.distribute') }}
+              </el-button>
               <el-button link type="danger" @click="deleteImage(row.fingerprint)">
                 {{ t('common.delete') }}
               </el-button>
@@ -755,6 +771,18 @@ function instanceTypeLabel(type: string): string {
       v-model="volumesDialogOpen"
       :cluster="cluster"
       :pool="volumesPool"
+    />
+    <ImageImportDialog
+      v-model="importDialogOpen"
+      :cluster="cluster"
+      @imported="instances.fetchImages(cluster, true)"
+    />
+    <ImageDistributeDialog
+      v-model="distributeOpen"
+      :cluster="cluster"
+      :fingerprint="distributeFingerprint"
+      :clusters="clusters.items"
+      @distributed="instances.fetchImages(cluster, true)"
     />
   </div>
 </template>

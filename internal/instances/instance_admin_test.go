@@ -406,3 +406,72 @@ func TestDeviceAndImageErrorPaths(t *testing.T) {
 		t.Fatal("DeleteImage() expected operation error")
 	}
 }
+
+func TestImageTransfer(t *testing.T) {
+	source := &incusfake.Server{
+		Images:    []api.Image{{Fingerprint: "abc123def456", Filename: "debian13.tar", Type: "container"}},
+		Operation: &incusfake.Operation{Metadata: map[string]any{"fingerprint": "abc123def456"}},
+	}
+	target := &incusfake.Server{}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": source, "c2": target})
+	ctx := context.Background()
+
+	fingerprint, err := svc.ImportImage(ctx, "c1", "debian13.tar", "container", "debian/13", strings.NewReader("tarball-bytes"))
+	if err != nil {
+		t.Fatalf("ImportImage() error = %v", err)
+	}
+	if fingerprint != "abc123def456" {
+		t.Fatalf("fingerprint = %q", fingerprint)
+	}
+	created := target.CreateImageArgs()
+	if len(created) != 0 {
+		t.Fatalf("target create args = %#v", created)
+	}
+	sourceCreated := source.CreateImageArgs()
+	if len(sourceCreated) != 1 || sourceCreated[0].Filename != "debian13.tar" || sourceCreated[0].Type != "container" || string(sourceCreated[0].Content) != "tarball-bytes" {
+		t.Fatalf("import args = %#v", sourceCreated[0])
+	}
+	if len(sourceCreated[0].Aliases) != 1 || sourceCreated[0].Aliases[0].Name != "debian/13" {
+		t.Fatalf("aliases = %#v", sourceCreated[0].Aliases)
+	}
+
+	if _, err := svc.ImportImage(ctx, "c1", "debian13.tar", "iso", "x", strings.NewReader("x")); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("ImportImage() bad type = %v", err)
+	}
+	if _, err := svc.ImportImage(ctx, "missing", "f", "container", "", strings.NewReader("x")); err == nil {
+		t.Fatal("ImportImage() expected unknown cluster error")
+	}
+
+	target.CopyImageErr = errors.New("copy refused")
+	if err := svc.CopyImageTo(ctx, "c1", "abc123", "c2", ""); err == nil {
+		t.Fatal("CopyImageTo() expected propagated error")
+	}
+	target.CopyImageErr = nil
+
+	if err := svc.CopyImageTo(ctx, "c1", "abc123", "c2", "debian/13"); err != nil {
+		t.Fatalf("CopyImageTo() error = %v", err)
+	}
+	// Two calls were recorded: the refused attempt and the successful one.
+	copied := target.CopyImageArgs()
+	if len(copied) != 2 || copied[1].Fingerprint != "abc123def456" {
+		t.Fatalf("copy args = %#v", copied)
+	}
+	if len(copied[1].Aliases) != 1 || copied[1].Aliases[0].Name != "debian/13" {
+		t.Fatalf("copy aliases = %#v", copied[1].Aliases)
+	}
+
+	if err := svc.CopyImageTo(ctx, "c1", "abc123", "c1", ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("CopyImageTo() same cluster = %v", err)
+	}
+	if err := svc.CopyImageTo(ctx, "c1", "", "c2", ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("CopyImageTo() empty fingerprint = %v", err)
+	}
+	if err := svc.CopyImageTo(ctx, "missing", "abc", "c2", ""); err == nil {
+		t.Fatal("CopyImageTo() expected unknown source cluster error")
+	}
+
+	source.Images = nil
+	if err := svc.CopyImageTo(ctx, "c1", "abc123", "c2", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CopyImageTo() missing image = %v", err)
+	}
+}

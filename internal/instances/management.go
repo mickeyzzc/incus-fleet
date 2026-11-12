@@ -146,13 +146,30 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 	}
 
 	network := strings.TrimSpace(req.Network)
+	var networkManaged bool
 	if network != "" {
-		networks, err := client.GetNetworkNames()
+		networks, err := client.GetNetworks()
 		if err != nil {
 			return Detail{}, fmt.Errorf("instances: list networks for %s: %w", clusterName, err)
 		}
-		if !containsString(networks, network) {
+
+		var target *api.Network
+		for i := range networks {
+			if networks[i].Name == network {
+				target = &networks[i]
+				break
+			}
+		}
+		if target == nil {
 			return Detail{}, fmt.Errorf("%w: network %q does not exist on %s", ErrInvalidRequest, network, clusterName)
+		}
+
+		networkManaged = target.Managed
+		// Unmanaged parents are attached as macvlan and take addresses from
+		// the physical LAN; device-level static addresses only apply to
+		// managed bridges.
+		if !networkManaged && (req.IPv4 != "" || req.IPv6 != "") {
+			return Detail{}, fmt.Errorf("%w: physical NIC %q takes addresses from the LAN DHCP server; configure a static address inside the instance instead", ErrInvalidRequest, network)
 		}
 	}
 
@@ -171,12 +188,18 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 	devices := api.DevicesMap{"root": root}
 
 	if network != "" {
-		nic := map[string]string{"type": "nic", "network": network}
-		if req.IPv4 != "" {
-			nic["ipv4.address"] = req.IPv4
-		}
-		if req.IPv6 != "" {
-			nic["ipv6.address"] = req.IPv6
+		nic := map[string]string{"type": "nic"}
+		if networkManaged {
+			nic["network"] = network
+			if req.IPv4 != "" {
+				nic["ipv4.address"] = req.IPv4
+			}
+			if req.IPv6 != "" {
+				nic["ipv6.address"] = req.IPv6
+			}
+		} else {
+			nic["nictype"] = "macvlan"
+			nic["parent"] = network
 		}
 		devices["eth0"] = nic
 	}
