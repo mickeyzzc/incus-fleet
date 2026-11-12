@@ -15,10 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
+	"github.com/mickeyzzc/incus-fleet/internal/store"
 
 	"github.com/lxc/incus/v7/shared/api"
 )
@@ -32,6 +34,7 @@ const (
 type Deps struct {
 	Clusters   *clusters.Manager
 	Instances  *instances.Service
+	Assets     *assets.Service
 	Migrations *migrations.Service
 	Auth       *auth.Authenticator
 	StaticFS   fs.FS
@@ -43,6 +46,7 @@ type Deps struct {
 type API struct {
 	clusters   *clusters.Manager
 	instances  *instances.Service
+	assets     *assets.Service
 	migrations *migrations.Service
 	auth       *auth.Authenticator
 	logger     *slog.Logger
@@ -60,6 +64,7 @@ func New(deps Deps) *API {
 	api := &API{
 		clusters:   deps.Clusters,
 		instances:  deps.Instances,
+		assets:     deps.Assets,
 		migrations: deps.Migrations,
 		auth:       deps.Auth,
 		logger:     logger,
@@ -113,6 +118,17 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/files", a.requireAuth(http.HandlerFunc(a.instanceFiles)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/files", a.requireAuth(http.HandlerFunc(a.uploadInstanceFile)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/files", a.requireAuth(http.HandlerFunc(a.deleteInstanceFile)))
+	mux.Handle("GET /api/v1/keys", a.requireAuth(http.HandlerFunc(a.listKeys)))
+	mux.Handle("POST /api/v1/keys", a.requireAuth(http.HandlerFunc(a.createKey)))
+	mux.Handle("PATCH /api/v1/keys/{id}", a.requireAuth(http.HandlerFunc(a.updateKey)))
+	mux.Handle("DELETE /api/v1/keys/{id}", a.requireAuth(http.HandlerFunc(a.deleteKey)))
+	mux.Handle("GET /api/v1/scripts", a.requireAuth(http.HandlerFunc(a.listScripts)))
+	mux.Handle("POST /api/v1/scripts", a.requireAuth(http.HandlerFunc(a.createScript)))
+	mux.Handle("PATCH /api/v1/scripts/{id}", a.requireAuth(http.HandlerFunc(a.updateScript)))
+	mux.Handle("DELETE /api/v1/scripts/{id}", a.requireAuth(http.HandlerFunc(a.deleteScript)))
+	mux.Handle("POST /api/v1/batch/keys", a.requireAuth(http.HandlerFunc(a.batchKeys)))
+	mux.Handle("POST /api/v1/batch/scripts", a.requireAuth(http.HandlerFunc(a.batchScripts)))
+	mux.Handle("POST /api/v1/batch/power", a.requireAuth(http.HandlerFunc(a.batchPower)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/iso", a.requireAuth(http.HandlerFunc(a.listISOs)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/iso", a.requireAuth(http.HandlerFunc(a.importISO)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/iso/{pool}/{name}", a.requireAuth(http.HandlerFunc(a.deleteISO)))
@@ -770,6 +786,7 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code = http.StatusConflict, "conflict"
 	case errors.Is(err, migrations.ErrNotFound),
 		errors.Is(err, instances.ErrNotFound),
+		errors.Is(err, store.ErrNotFound),
 		errors.Is(err, clusters.ErrUnknownCluster):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, clusters.ErrUnavailable):

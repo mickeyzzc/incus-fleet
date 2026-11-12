@@ -70,8 +70,8 @@ func (s *Service) RunOps(ctx context.Context, clusterName, name string, req OpsR
 			return OpsResult{}, fmt.Errorf("%w: user is required", ErrInvalidRequest)
 		}
 		key := strings.TrimSpace(req.Key)
-		if key == "" || strings.ContainsAny(key, "\r\n") {
-			return OpsResult{}, fmt.Errorf("%w: key must be a single-line SSH public key", ErrInvalidRequest)
+		if key == "" || strings.Contains(key, "\r") {
+			return OpsResult{}, fmt.Errorf("%w: key must be unix-line-ending SSH public key material", ErrInvalidRequest)
 		}
 		command = []string{"sh", "-c",
 			`H=$(eval echo ~"$1"); install -d -m 700 "$H/.ssh" && cat >> "$H/.ssh/authorized_keys" && chmod 600 "$H/.ssh/authorized_keys"`,

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
@@ -86,11 +87,13 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 
 	instancesService := instances.New(manager)
 	migrationsService := migrations.New(manager, st, logger)
+	assetsService := assets.New(st, instancesService)
 	authenticator := auth.New(cfg.Server.AuthToken, 12*time.Hour)
 
 	handler := httpapi.New(httpapi.Deps{
 		Clusters:   manager,
 		Instances:  instancesService,
+		Assets:     assetsService,
 		Migrations: migrationsService,
 		Auth:       authenticator,
 		StaticFS:   o.staticFS,

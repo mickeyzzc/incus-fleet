@@ -39,6 +39,16 @@ type Store interface {
 	GetMigration(ctx context.Context, id string) (*Migration, error)
 	ListMigrations(ctx context.Context, limit int) ([]*Migration, error)
 	MarkInterrupted(ctx context.Context) error
+	CreateKeystone(ctx context.Context, key *Keystone) error
+	ListKeystones(ctx context.Context) ([]*Keystone, error)
+	GetKeystone(ctx context.Context, id string) (*Keystone, error)
+	UpdateKeystone(ctx context.Context, key *Keystone) error
+	DeleteKeystone(ctx context.Context, id string) error
+	CreateScript(ctx context.Context, script *Script) error
+	ListScripts(ctx context.Context) ([]*Script, error)
+	GetScript(ctx context.Context, id string) (*Script, error)
+	UpdateScript(ctx context.Context, script *Script) error
+	DeleteScript(ctx context.Context, id string) error
 	Ping(ctx context.Context) error
 	Close() error
 }
@@ -127,6 +137,10 @@ CREATE TABLE IF NOT EXISTS migrations (
 
 	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_migrations_created_at ON migrations(created_at DESC)`); err != nil {
 		return fmt.Errorf("store: create index: %w", err)
+	}
+
+	if _, err := s.db.ExecContext(ctx, assetSchema()); err != nil {
+		return fmt.Errorf("store: create asset schema: %w", err)
 	}
 
 	return nil

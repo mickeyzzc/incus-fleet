@@ -78,8 +78,12 @@ func TestRunOpsInjectKey(t *testing.T) {
 		t.Fatalf("key must travel via stdin, argv = %#v", exec[0].Command)
 	}
 
-	if _, err := svc.RunOps(context.Background(), "c1", "web", OpsRequest{Action: "inject-key", User: "deploy", Key: "two\nlines"}); !errors.Is(err, ErrInvalidRequest) {
+	// Multiple keys ride in one payload, one per line.
+	if _, err := svc.RunOps(context.Background(), "c1", "web", OpsRequest{Action: "inject-key", User: "deploy", Key: "ssh-ed25519 AAA one\nssh-ed25519 BBB two"}); err != nil {
 		t.Fatalf("RunOps() multiline key = %v", err)
+	}
+	if _, err := svc.RunOps(context.Background(), "c1", "web", OpsRequest{Action: "inject-key", User: "deploy", Key: "bad\rreturn"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("RunOps() carriage return key = %v", err)
 	}
 	if _, err := svc.RunOps(context.Background(), "c1", "web", OpsRequest{Action: "inject-key", User: "deploy", Key: ""}); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("RunOps() empty key = %v", err)

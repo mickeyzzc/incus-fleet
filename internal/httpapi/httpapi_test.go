@@ -17,6 +17,7 @@ import (
 
 	"github.com/lxc/incus/v7/shared/api"
 
+	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
@@ -72,6 +73,7 @@ func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 	handler := New(Deps{
 		Clusters:   manager,
 		Instances:  instances.New(manager),
+		Assets:     assets.New(st, instances.New(manager)),
 		Migrations: migrationService,
 		Auth:       auth.New("secret", time.Hour),
 		StaticFS:   staticFS,
