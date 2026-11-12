@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/gorilla/websocket"
 	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
 
@@ -25,23 +26,30 @@ type ExecRequest struct {
 }
 
 // ConsoleOp opens an interactive console operation for an instance. The
-// caller relays the operation websockets and waits for completion.
-func (s *Service) ConsoleOp(clusterName, name string) (incus.Operation, error) {
+// control channel arrives through the SDK callback; the returned getter hands
+// it to the relay once the daemon has connected it. The caller relays the
+// operation websockets and waits for completion.
+func (s *Service) ConsoleOp(clusterName, name string) (incus.Operation, func() *websocket.Conn, error) {
 	client, err := s.client(clusterName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	op, err := client.ConsoleInstance(name, api.InstanceConsolePost{
+	var controlConn *websocket.Conn
+	op, _, err := client.ConsoleInstanceDynamic(name, api.InstanceConsolePost{
 		Type:   "console",
 		Width:  80,
 		Height: 25,
-	}, &incus.InstanceConsoleArgs{})
+	}, &incus.InstanceConsoleArgs{
+		Control: func(conn *websocket.Conn) {
+			controlConn = conn
+		},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("instances: console %s:%s: %w", clusterName, name, err)
+		return nil, nil, fmt.Errorf("instances: console %s:%s: %w", clusterName, name, err)
 	}
 
-	return op, nil
+	return op, func() *websocket.Conn { return controlConn }, nil
 }
 
 // ExecOp starts an interactive command operation for an instance.

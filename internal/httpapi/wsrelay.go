@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"time"
 
 	"github.com/gorilla/websocket"
 	incus "github.com/lxc/incus/v7/client"
@@ -23,24 +24,22 @@ type terminalControl struct {
 // Binary frames carry raw terminal bytes in both directions. Text frames from
 // the browser are control messages; text frames from Incus carry base64
 // encoded output, which is decoded before it reaches the browser.
-func relayTerminal(ctx context.Context, browser *websocket.Conn, op incus.Operation) error {
+func relayTerminal(ctx context.Context, browser *websocket.Conn, op incus.Operation, control func() *websocket.Conn) error {
 	data, err := op.GetWebsocket("0")
 	if err != nil {
 		_ = browser.Close()
 		return err
 	}
 
-	// The control channel is optional: consoles and interactive exec provide
-	// it, but defensive relaying keeps the session alive without it.
-	control, controlErr := op.GetWebsocket("control")
-	if controlErr != nil {
-		control = nil
-	}
+	// The control channel is optional: consoles receive it through the SDK
+	// callback, exec through the operation fd; defensive relaying keeps the
+	// session alive without it.
+	controlConn := waitForControl(control, 3*time.Second)
 
 	done := make(chan error, 4)
 
 	go incusToBrowser(browser, data, done)
-	go browserToIncus(browser, data, control, done)
+	go browserToIncus(browser, data, controlConn, done)
 	go func() {
 		_ = op.WaitContext(ctx)
 		done <- nil
@@ -50,11 +49,26 @@ func relayTerminal(ctx context.Context, browser *websocket.Conn, op incus.Operat
 
 	_ = browser.Close()
 	_ = data.Close()
-	if control != nil {
-		_ = control.Close()
+	if controlConn != nil {
+		_ = controlConn.Close()
 	}
 
 	return first
+}
+
+// waitForControl polls the control getter; the console control connection is
+// delivered asynchronously by the SDK callback.
+func waitForControl(get func() *websocket.Conn, limit time.Duration) *websocket.Conn {
+	deadline := time.Now().Add(limit)
+	for {
+		if conn := get(); conn != nil {
+			return conn
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // incusToBrowser forwards terminal output to the browser.

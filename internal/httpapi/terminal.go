@@ -26,13 +26,13 @@ func (a *API) instanceTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	op, err := a.instances.ConsoleOp(r.PathValue("cluster"), r.PathValue("instance"))
+	op, control, err := a.instances.ConsoleOp(r.PathValue("cluster"), r.PathValue("instance"))
 	if err != nil {
 		closeWSWithError(conn, err)
 		return
 	}
 
-	_ = relayTerminal(r.Context(), conn, op)
+	_ = relayTerminal(r.Context(), conn, op, control)
 }
 
 // instanceExec opens an interactive exec websocket for an instance. The first
@@ -61,7 +61,14 @@ func (a *API) instanceExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = relayTerminal(r.Context(), conn, op)
+	_ = relayTerminal(r.Context(), conn, op, func() *websocket.Conn {
+		control, controlErr := op.GetWebsocket("control")
+		if controlErr != nil {
+			return nil
+		}
+
+		return control
+	})
 }
 
 // instanceFiles lists or downloads files from an instance.

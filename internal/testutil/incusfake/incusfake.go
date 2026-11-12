@@ -632,21 +632,21 @@ func (s *Server) GetImages() ([]api.Image, error) {
 	return s.Images, nil
 }
 
-// ConsoleInstance implements clusters.InstanceServer.
-func (s *Server) ConsoleInstance(instanceName string, _ api.InstanceConsolePost, _ *incus.InstanceConsoleArgs) (incus.Operation, error) {
-	s.record("ConsoleInstance:" + instanceName)
+// ConsoleInstanceDynamic implements clusters.InstanceServer.
+func (s *Server) ConsoleInstanceDynamic(instanceName string, _ api.InstanceConsolePost, _ *incus.InstanceConsoleArgs) (incus.Operation, func(io.ReadWriteCloser) error, error) {
+	s.record("ConsoleInstanceDynamic:" + instanceName)
 	s.mu.Lock()
 	s.consoleCalls++
 	s.mu.Unlock()
 
 	if s.ConsoleErr != nil {
-		return nil, s.ConsoleErr
+		return nil, nil, s.ConsoleErr
 	}
 	if s.Operation != nil {
-		return s.Operation, nil
+		return s.Operation, nil, nil
 	}
 
-	return &Operation{}, nil
+	return &Operation{}, nil, nil
 }
 
 // ExecInstance implements clusters.InstanceServer.

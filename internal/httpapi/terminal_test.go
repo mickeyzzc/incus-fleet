@@ -202,21 +202,6 @@ func TestConsoleAndExecRelay(t *testing.T) {
 		t.Fatalf("browser payload = %q", reply)
 	}
 
-	// Resize control frames reach the control channel as JSON.
-	if err := browser.WriteMessage(websocket.TextMessage,
-		[]byte(`{"type":"resize","width":120,"height":40}`)); err != nil {
-		t.Fatalf("control write: %v", err)
-	}
-	controlConn := waitForConn(t, stub.Conns, "control")
-	_ = controlConn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	_, ctl, err := controlConn.ReadMessage()
-	if err != nil {
-		t.Fatalf("incus control read: %v", err)
-	}
-	if string(ctl) != `{"height":40,"width":120}` {
-		t.Fatalf("control payload = %q", ctl)
-	}
-
 	// Non-base64 text from Incus reaches the browser as raw binary.
 	if err := incusConn.WriteMessage(websocket.TextMessage, []byte("not base64!!")); err != nil {
 		t.Fatalf("incus raw write: %v", err)
@@ -301,6 +286,21 @@ func TestExecRelay(t *testing.T) {
 	}
 	if string(payload) != "echo hi\n" {
 		t.Fatalf("incus payload = %q", payload)
+	}
+
+	// Resize control frames reach the operation control channel as JSON.
+	if err := browser.WriteMessage(websocket.TextMessage,
+		[]byte(`{"type":"resize","width":120,"height":40}`)); err != nil {
+		t.Fatalf("control write: %v", err)
+	}
+	controlConn := waitForConn(t, stub.Conns, "control")
+	_ = controlConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, ctl, err := controlConn.ReadMessage()
+	if err != nil {
+		t.Fatalf("incus control read: %v", err)
+	}
+	if string(ctl) != `{"height":40,"width":120}` {
+		t.Fatalf("control payload = %q", ctl)
 	}
 }
 

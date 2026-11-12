@@ -44,7 +44,7 @@ type InstanceServer interface {
 	UpdateInstance(name string, instance api.InstancePut, etag string) (incus.Operation, error)
 	CopyInstance(source incus.InstanceServer, instance api.Instance, args *incus.InstanceCopyArgs) (incus.RemoteOperation, error)
 	DeleteInstance(name string) (incus.Operation, error)
-	ConsoleInstance(instanceName string, console api.InstanceConsolePost, args *incus.InstanceConsoleArgs) (incus.Operation, error)
+	ConsoleInstanceDynamic(instanceName string, console api.InstanceConsolePost, args *incus.InstanceConsoleArgs) (incus.Operation, func(io.ReadWriteCloser) error, error)
 	ExecInstance(instanceName string, exec api.InstanceExecPost, args *incus.InstanceExecArgs) (incus.Operation, error)
 	GetInstanceFile(instanceName string, path string) (io.ReadCloser, *incus.InstanceFileResponse, error)
 	CreateInstanceFile(instanceName string, path string, args incus.InstanceFileArgs) error
