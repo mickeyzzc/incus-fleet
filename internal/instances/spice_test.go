@@ -62,7 +62,7 @@ func TestPrepareSPICE(t *testing.T) {
 	if strings.Contains(raw, "port=9999") {
 		t.Fatalf("old spice line must be replaced: %q", raw)
 	}
-	if !strings.Contains(raw, "port=5991,disable-ticketing=on") || !strings.Contains(raw, "-machine accel=kvm") {
+	if !strings.Contains(raw, "unix=off,port=5991,disable-ticketing=on") || !strings.Contains(raw, "-machine accel=kvm") {
 		t.Fatalf("raw.qemu = %q", raw)
 	}
 	// Power cycle: stop then start.

@@ -90,7 +90,7 @@ func (s *Service) PrepareSPICE(ctx context.Context, clusterName, name string, po
 			lines = append(lines, line)
 		}
 	}
-	lines = append(lines, fmt.Sprintf("%s port=%d,disable-ticketing=on,addr=%s", spiceArgMarker, port, spiceListenAddr))
+	lines = append(lines, fmt.Sprintf("%s unix=off,port=%d,disable-ticketing=on,addr=%s", spiceArgMarker, port, spiceListenAddr))
 	put.Config["raw.qemu"] = strings.Join(lines, "\n")
 
 	op, err := client.UpdateInstance(name, put, etag)
