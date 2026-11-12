@@ -43,6 +43,12 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'titles.migrations' },
   },
   {
+    path: '/assets',
+    name: 'assets',
+    component: () => import('@/views/AssetsView.vue'),
+    meta: { titleKey: 'titles.assets' },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },

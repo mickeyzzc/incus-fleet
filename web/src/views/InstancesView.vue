@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
+import BatchOpsDialog from '@/components/BatchOpsDialog.vue'
 import CloneInstanceDialog from '@/components/CloneInstanceDialog.vue'
+import { useAssetsStore } from '@/stores/assets'
 import InstanceActions from '@/components/InstanceActions.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
@@ -16,6 +18,7 @@ import type {
   InstanceType,
 } from '@/api/types'
 import { useVisiblePolling, useInstanceActions } from '@/composables/useInstanceActions'
+import { errorMessage } from '@/utils/errors'
 import { useClustersStore } from '@/stores/clusters'
 import { useInstancesStore } from '@/stores/instances'
 import { formatBytes, formatDateTime, primaryAddress } from '@/utils/format'
@@ -90,6 +93,56 @@ const cloneTarget = ref({ cluster: '', name: '' })
 function openClone(instance: { cluster: string; name: string }): void {
   cloneTarget.value = { cluster: instance.cluster, name: instance.name }
   cloneOpen.value = true
+}
+
+const assets = useAssetsStore()
+const selected = ref<Array<{ cluster: string; name: string }>>([])
+const batchOpen = ref(false)
+const batchMode = ref<'keys' | 'script'>('keys')
+const batchTargets = computed(() =>
+  selected.value.map((entry) => ({ cluster: entry.cluster, instance: entry.name })),
+)
+
+function handleSelectionChange(rows: Array<{ cluster: string; name: string }>): void {
+  selected.value = rows.map((row) => ({ cluster: row.cluster, name: row.name }))
+}
+
+function openBatch(mode: 'keys' | 'script'): void {
+  if (selected.value.length === 0) {
+    return
+  }
+  batchMode.value = mode
+  batchOpen.value = true
+}
+
+async function batchPower(action: 'start' | 'stop' | 'restart'): Promise<void> {
+  if (selected.value.length === 0) {
+    return
+  }
+
+  const summary = selected.value.map((entry) => entry.name).join(', ')
+  try {
+    await ElMessageBox.confirm(
+      t('batch.powerConfirm', { action: t(`batch.action.${action}`), names: summary }),
+      t('batch.powerTitle'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const items = await assets.batchPower(batchTargets.value, action)
+    const failed = items.filter((item) => !item.ok)
+    if (failed.length === 0) {
+      ElMessage.success(t('batch.allOk', { count: items.length }))
+    } else {
+      ElMessage.warning(t('batch.partial', { ok: items.length - failed.length, failed: failed.length }))
+    }
+    await load()
+  } catch (err) {
+    ElMessage.error(t('batch.failed', { error: errorMessage(err) }))
+  }
 }
 
 watch(
@@ -216,7 +269,22 @@ async function onSaved(): Promise<void> {
           <span class="muted">{{ t('common.shown', { count: filtered.length }) }}</span>
         </div>
 
-        <el-table v-loading="instances.loading" :data="paged" stripe>
+        <div v-if="selected.length > 0" class="batch-bar">
+          <span class="batch-count">{{ t('batch.selected', { count: selected.length }) }}</span>
+          <el-button size="small" type="primary" @click="openBatch('keys')">
+            {{ t('batch.keysAction') }}
+          </el-button>
+          <el-button size="small" type="primary" @click="openBatch('script')">
+            {{ t('batch.scriptAction') }}
+          </el-button>
+          <el-button size="small" @click="batchPower('start')">{{ t('batch.action.start') }}</el-button>
+          <el-button size="small" @click="batchPower('stop')">{{ t('batch.action.stop') }}</el-button>
+          <el-button size="small" @click="batchPower('restart')">{{ t('batch.action.restart') }}</el-button>
+          <el-button size="small" type="danger" plain @click="selected = []">
+            {{ t('batch.clearSelection') }}
+          </el-button>
+        </div>
+        <el-table v-loading="instances.loading" :data="paged" stripe @selection-change="handleSelectionChange">
           <el-table-column :label="t('common.name')" min-width="170">
             <template #default="{ row }">
               <el-button link type="primary" class="name-link" @click="openDetail(row)">
@@ -256,6 +324,7 @@ async function onSaved(): Promise<void> {
               <span v-else class="muted">{{ t('common.none') }}</span>
             </template>
           </el-table-column>
+          <el-table-column type="selection" width="42" />
           <el-table-column :label="t('common.actions')" width="420" fixed="right">
             <template #default="{ row }">
               <InstanceActions
@@ -303,6 +372,12 @@ async function onSaved(): Promise<void> {
       :instance="formInstance"
       @saved="onSaved"
     />
+    <BatchOpsDialog
+      v-model="batchOpen"
+      :mode="batchMode"
+      :targets="batchTargets"
+      @done="load()"
+    />
     <CloneInstanceDialog
       v-model="cloneOpen"
       :cluster="cloneTarget.cluster"
@@ -328,5 +403,19 @@ async function onSaved(): Promise<void> {
 .table-pagination {
   margin-top: 14px;
   justify-content: flex-end;
+}
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--el-color-primary-light-9);
+}
+
+.batch-count {
+  font-size: 13px;
+  font-weight: 600;
 }
 </style>

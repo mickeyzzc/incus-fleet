@@ -8,6 +8,7 @@ import {
   Odometer,
   Switch as SwitchIcon,
   SwitchButton,
+  Collection,
 } from '@element-plus/icons-vue'
 import en from 'element-plus/es/locale/lang/en'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
@@ -108,6 +109,11 @@ async function logout(): Promise<void> {
           <el-menu-item index="/migrations">
             <el-icon><SwitchIcon /></el-icon>
             <span>{{ t('nav.migrations') }}</span>
+          </el-menu-item>
+
+          <el-menu-item index="/assets">
+            <el-icon><Collection /></el-icon>
+            <span>{{ t('nav.assets') }}</span>
           </el-menu-item>
         </el-menu>
 

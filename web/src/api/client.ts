@@ -1,4 +1,8 @@
 import type {
+  BatchItem,
+  BatchKeysRequest,
+  BatchPowerRequest,
+  BatchScriptsRequest,
   ClusterResources,
   ClusterSummary,
   CloneRequest,
@@ -26,6 +30,8 @@ import type {
   SPICEPrepare,
   Profile,
   ProfileRequest,
+  Keystone,
+  StoredScript,
   SessionResponse,
   SnapshotRequest,
   StoragePoolRequest,
@@ -256,6 +262,55 @@ export class ApiClient {
       `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/clone`,
       request,
     )
+  }
+
+  async listKeys(): Promise<Keystone[]> {
+    const data = await this.request<{ keys: Keystone[] }>('GET', '/api/v1/keys')
+    return data.keys ?? []
+  }
+
+  async createKey(request: { name: string; public_key: string; comment?: string }): Promise<Keystone> {
+    return this.request<Keystone>('POST', '/api/v1/keys', request)
+  }
+
+  async updateKey(id: string, request: { name: string; public_key: string; comment?: string }): Promise<Keystone> {
+    return this.request<Keystone>('PATCH', `/api/v1/keys/${encodeURIComponent(id)}`, request)
+  }
+
+  async deleteKey(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/keys/${encodeURIComponent(id)}`)
+  }
+
+  async listScripts(): Promise<StoredScript[]> {
+    const data = await this.request<{ scripts: StoredScript[] }>('GET', '/api/v1/scripts')
+    return data.scripts ?? []
+  }
+
+  async createScript(request: { name: string; description?: string; body: string }): Promise<StoredScript> {
+    return this.request<StoredScript>('POST', '/api/v1/scripts', request)
+  }
+
+  async updateScript(id: string, request: { name: string; description?: string; body: string }): Promise<StoredScript> {
+    return this.request<StoredScript>('PATCH', `/api/v1/scripts/${encodeURIComponent(id)}`, request)
+  }
+
+  async deleteScript(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/scripts/${encodeURIComponent(id)}`)
+  }
+
+  async batchKeys(request: BatchKeysRequest): Promise<BatchItem[]> {
+    const data = await this.request<{ items: BatchItem[] }>('POST', '/api/v1/batch/keys', request)
+    return data.items ?? []
+  }
+
+  async batchScripts(request: BatchScriptsRequest): Promise<BatchItem[]> {
+    const data = await this.request<{ items: BatchItem[] }>('POST', '/api/v1/batch/scripts', request)
+    return data.items ?? []
+  }
+
+  async batchPower(request: BatchPowerRequest): Promise<BatchItem[]> {
+    const data = await this.request<{ items: BatchItem[] }>('POST', '/api/v1/batch/power', request)
+    return data.items ?? []
   }
 
   async prepareSPICE(cluster: string, instance: string, port?: number): Promise<SPICEPrepare> {

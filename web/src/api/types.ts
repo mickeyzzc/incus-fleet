@@ -285,6 +285,55 @@ export interface OpsResult {
   stderr: string
 }
 
+export interface Keystone {
+  id: string
+  name: string
+  public_key: string
+  comment?: string
+  created_at: string
+}
+
+export interface StoredScript {
+  id: string
+  name: string
+  description?: string
+  body: string
+  created_at: string
+  updated_at: string
+}
+
+export interface BatchTarget {
+  cluster: string
+  instance: string
+  user?: string
+}
+
+export interface BatchItem {
+  cluster: string
+  instance: string
+  ok: boolean
+  exit_code?: number
+  stdout?: string
+  stderr?: string
+  error?: string
+}
+
+export interface BatchKeysRequest {
+  targets: BatchTarget[]
+  key_ids: string[]
+}
+
+export interface BatchScriptsRequest {
+  targets: BatchTarget[]
+  script_id: string
+}
+
+export interface BatchPowerRequest {
+  targets: BatchTarget[]
+  action: 'start' | 'stop' | 'restart'
+  force?: boolean
+}
+
 export interface SPICEPrepare {
   port: number
   applied: boolean
