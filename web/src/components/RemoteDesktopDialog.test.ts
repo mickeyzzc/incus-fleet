@@ -17,10 +17,13 @@ const { SpiceMainConn, spiceStop } = vi.hoisted(() => {
 
 vi.mock('spice-client', () => ({ SpiceMainConn }))
 
+const waitReal = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
 function mountDialog(open = true) {
   return mount(RemoteDesktopDialog, {
     props: { modelValue: open, cluster: 'c1', instance: 'vm-01' },
     global: { plugins: [ElementPlus] },
+    attachTo: document.body,
   })
 }
 
@@ -34,6 +37,8 @@ describe('RemoteDesktopDialog', () => {
   it('starts a SPICE session when opened', async () => {
     mountDialog(true)
     await flushPromises()
+    await waitReal(250)
+    await flushPromises()
 
     expect(SpiceMainConn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -45,6 +50,8 @@ describe('RemoteDesktopDialog', () => {
 
   it('stops the session when closed', async () => {
     const wrapper = mountDialog(true)
+    await flushPromises()
+    await waitReal(250)
     await flushPromises()
     expect(SpiceMainConn).toHaveBeenCalled()
 
@@ -65,6 +72,8 @@ describe('RemoteDesktopDialog', () => {
     const wrapper = mountDialog(true)
     await flushPromises()
 
+    await waitReal(250)
+    await flushPromises()
     const options = ((SpiceMainConn as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0] ?? {}) as unknown as { onsuccess: () => void }
     options.onsuccess()
     await flushPromises()
@@ -74,6 +83,8 @@ describe('RemoteDesktopDialog', () => {
 
   it('shows and reports connection errors', async () => {
     const wrapper = mountDialog(true)
+    await flushPromises()
+    await waitReal(250)
     await flushPromises()
 
     const options = ((SpiceMainConn as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0] ?? {}) as unknown as { onerror: (err: unknown) => void }
