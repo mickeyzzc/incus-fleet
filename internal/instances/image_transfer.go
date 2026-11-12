@@ -24,7 +24,8 @@ const (
 func (s *Service) ImportImage(
 	ctx context.Context,
 	clusterName, filename, imageType, alias string,
-	reader io.Reader,
+	metaReader io.Reader,
+	rootfsReader io.Reader,
 ) (string, error) {
 	filename = strings.TrimSpace(filename)
 	imageType = strings.TrimSpace(imageType)
@@ -53,11 +54,17 @@ func (s *Service) ImportImage(
 	ctx, cancel := context.WithTimeout(ctx, importTimeout)
 	defer cancel()
 
-	op, err := client.CreateImage(post, &incus.ImageCreateArgs{
-		MetaFile: reader,
+	args := &incus.ImageCreateArgs{
+		MetaFile: metaReader,
 		MetaName: filename,
 		Type:     imageType,
-	})
+	}
+	if rootfsReader != nil {
+		args.RootfsFile = rootfsReader
+		args.RootfsName = filename
+	}
+
+	op, err := client.CreateImage(post, args)
 	if err != nil {
 		return "", fmt.Errorf("instances: import image %s: %w", clusterName, err)
 	}

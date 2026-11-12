@@ -468,14 +468,36 @@ func (a *API) detachDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) importImage(w http.ResponseWriter, r *http.Request) {
+	// Image uploads can be large; the body is bounded well above any
+	// realistic image while the multipart parser spills to temp files.
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<30)
+	if err := r.ParseMultipartForm(8 << 20); err != nil { //nolint:gosec // body bounded via MaxBytesReader
+		writeError(w, http.StatusBadRequest, "invalid_request", "multipart form required")
+		return
+	}
+
+	metaFile, header, err := r.FormFile("image")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "image file required")
+		return
+	}
+	defer metaFile.Close() //nolint:errcheck // upload cleanup
+
+	var rootfs io.Reader
+	if rootfsFile, _, rootfsErr := r.FormFile("rootfs"); rootfsErr == nil {
+		defer rootfsFile.Close() //nolint:errcheck // upload cleanup
+		rootfs = rootfsFile
+	}
+
 	query := r.URL.Query()
 	fingerprint, err := a.instances.ImportImage(
 		r.Context(),
 		r.PathValue("cluster"),
-		query.Get("filename"),
+		header.Filename,
 		query.Get("type"),
 		query.Get("alias"),
-		r.Body,
+		metaFile,
+		rootfs,
 	)
 	if err != nil {
 		a.serviceError(w, r, err)

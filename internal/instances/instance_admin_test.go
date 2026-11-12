@@ -416,7 +416,7 @@ func TestImageTransfer(t *testing.T) {
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": source, "c2": target})
 	ctx := context.Background()
 
-	fingerprint, err := svc.ImportImage(ctx, "c1", "debian13.tar", "container", "debian/13", strings.NewReader("tarball-bytes"))
+	fingerprint, err := svc.ImportImage(ctx, "c1", "debian13.tar", "container", "debian/13", strings.NewReader("tarball-bytes"), nil)
 	if err != nil {
 		t.Fatalf("ImportImage() error = %v", err)
 	}
@@ -435,11 +435,48 @@ func TestImageTransfer(t *testing.T) {
 		t.Fatalf("aliases = %#v", sourceCreated[0].Aliases)
 	}
 
-	if _, err := svc.ImportImage(ctx, "c1", "debian13.tar", "iso", "x", strings.NewReader("x")); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := svc.ImportImage(ctx, "c1", "debian13.tar", "iso", "x", strings.NewReader("x"), nil); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("ImportImage() bad type = %v", err)
 	}
-	if _, err := svc.ImportImage(ctx, "missing", "f", "container", "", strings.NewReader("x")); err == nil {
+	if _, err := svc.ImportImage(ctx, "c1", "", "container", "", strings.NewReader("x"), nil); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("ImportImage() empty filename = %v", err)
+	}
+	if _, err := svc.ImportImage(ctx, "missing", "f", "container", "", strings.NewReader("x"), nil); err == nil {
 		t.Fatal("ImportImage() expected unknown cluster error")
+	}
+
+	// Split uploads carry a separate rootfs tarball next to the metadata.
+	rootfsImport := &incusfake.Server{
+		Operation: &incusfake.Operation{Metadata: map[string]any{"fingerprint": "rootfs9feed"}},
+	}
+	rootfsSvc := newTestService(t, map[string]*incusfake.Server{"c1": rootfsImport})
+	fingerprint, err = rootfsSvc.ImportImage(ctx, "c1", "deb13", "container", "", strings.NewReader("meta"), strings.NewReader("rootfs"))
+	if err != nil || fingerprint != "rootfs9feed" {
+		t.Fatalf("ImportImage() split = %q, %v", fingerprint, err)
+	}
+	if len(rootfsImport.CreateImageArgs()) != 1 {
+		t.Fatal("ImportImage() split upload not recorded")
+	}
+
+	source.CreateImageErr = errors.New("daemon refused upload")
+	if _, err := svc.ImportImage(ctx, "c1", "debian13.tar", "container", "", strings.NewReader("x"), nil); err == nil {
+		t.Fatal("ImportImage() expected create error")
+	}
+	source.CreateImageErr = nil
+
+	// An operation that fails while waiting surfaces the daemon error.
+	opFail := &incusfake.Server{Operation: &incusfake.Operation{Err: errors.New("unpack failed")}}
+	failSvc := newTestService(t, map[string]*incusfake.Server{"c1": opFail})
+	if _, err := failSvc.ImportImage(ctx, "c1", "debian13.tar", "container", "", strings.NewReader("x"), nil); err == nil {
+		t.Fatal("ImportImage() expected operation error")
+	}
+
+	// An operation without fingerprint metadata completes with an empty
+	// result (the API layer answers 204).
+	opPlain := &incusfake.Server{Operation: &incusfake.Operation{}}
+	plainSvc := newTestService(t, map[string]*incusfake.Server{"c1": opPlain})
+	if fingerprint, err = plainSvc.ImportImage(ctx, "c1", "debian13.tar", "container", "", strings.NewReader("x"), nil); err != nil || fingerprint != "" {
+		t.Fatalf("ImportImage() plain op = %q, %v", fingerprint, err)
 	}
 
 	target.CopyImageErr = errors.New("copy refused")
@@ -474,4 +511,23 @@ func TestImageTransfer(t *testing.T) {
 	if err := svc.CopyImageTo(ctx, "c1", "abc123", "c2", ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("CopyImageTo() missing image = %v", err)
 	}
+	source.Images = []api.Image{{Fingerprint: "abc123def456", Type: "container"}}
+
+	// A remote transfer that fails while waiting propagates the daemon error.
+	target.RemoteOperation = &incusfake.RemoteOperation{Err: errors.New("transfer aborted")}
+	if err := svc.CopyImageTo(ctx, "c1", "abc123", "c2", ""); err == nil {
+		t.Fatal("CopyImageTo() expected remote wait error")
+	}
+
+	// A transfer that never finishes is cut off by the context deadline.
+	target.RemoteOperation = &incusfake.RemoteOperation{WaitFunc: func() error {
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := svc.CopyImageTo(cancelCtx, "c1", "abc123", "c2", ""); err == nil {
+		t.Fatal("CopyImageTo() expected context cancellation error")
+	}
+	target.RemoteOperation = nil
 }

@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -239,9 +242,17 @@ func TestImageImportAndCopyEndpoints(t *testing.T) {
 	f := newAPIFixture(t, source, target)
 	cookie := f.login(t)
 
-	rec := f.request(t, http.MethodPost,
-		"/api/v1/clusters/c1/images/import?filename=debian13.tar&type=container&alias=debian%2F13",
-		"raw-tarball-bytes", cookie, "")
+	importBody := &bytes.Buffer{}
+	importForm := multipart.NewWriter(importBody)
+	part, _ := importForm.CreateFormFile("image", "debian13.tar")
+	_, _ = part.Write([]byte("raw-tarball-bytes"))
+	_ = importForm.WriteField("type", "container")
+	_ = importForm.Close()
+	importReq := httptest.NewRequest(http.MethodPost,
+		"/api/v1/clusters/c1/images/import?type=container&alias=debian%2F13", importBody)
+	importReq.Header.Set("Content-Type", importForm.FormDataContentType())
+	importReq.AddCookie(cookie)
+	rec := f.serve(t, importReq)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("import status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -273,5 +284,64 @@ func TestImageImportAndCopyEndpoints(t *testing.T) {
 	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/images/import?filename=&type=container", "x", cookie, "")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("import missing filename status = %d", rec.Code)
+	}
+
+	// A multipart body without an image part is rejected.
+	noImageBody := &bytes.Buffer{}
+	noImageForm := multipart.NewWriter(noImageBody)
+	_ = noImageForm.WriteField("type", "container")
+	_ = noImageForm.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/clusters/c1/images/import?type=container", noImageBody)
+	req.Header.Set("Content-Type", noImageForm.FormDataContentType())
+	req.AddCookie(cookie)
+	rec = f.serve(t, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("import without image part status = %d", rec.Code)
+	}
+
+	// Split uploads carry a rootfs part alongside the metadata.
+	splitBody := &bytes.Buffer{}
+	splitForm := multipart.NewWriter(splitBody)
+	part, _ = splitForm.CreateFormFile("image", "deb13")
+	_, _ = part.Write([]byte("meta-bytes"))
+	part, _ = splitForm.CreateFormFile("rootfs", "deb13.root")
+	_, _ = part.Write([]byte("rootfs-bytes"))
+	_ = splitForm.Close()
+	splitReq := httptest.NewRequest(http.MethodPost,
+		"/api/v1/clusters/c1/images/import?type=container", splitBody)
+	splitReq.Header.Set("Content-Type", splitForm.FormDataContentType())
+	splitReq.AddCookie(cookie)
+	rec = f.serve(t, splitReq)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("split import status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	// An operation without fingerprint metadata answers 204 No Content.
+	emptySource := &incusfake.Server{Operation: &incusfake.Operation{}}
+	emptyFixture := newAPIFixture(t, emptySource, target)
+	emptyCookie := emptyFixture.login(t)
+	emptyBody := &bytes.Buffer{}
+	emptyForm := multipart.NewWriter(emptyBody)
+	part, _ = emptyForm.CreateFormFile("image", "debian13.tar")
+	_, _ = part.Write([]byte("raw"))
+	_ = emptyForm.Close()
+	emptyReq := httptest.NewRequest(http.MethodPost, "/api/v1/clusters/c1/images/import?type=container", emptyBody)
+	emptyReq.Header.Set("Content-Type", emptyForm.FormDataContentType())
+	emptyReq.AddCookie(emptyCookie)
+	rec = emptyFixture.serve(t, emptyReq)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("import without fingerprint status = %d", rec.Code)
+	}
+
+	// Malformed copy requests and refused copies surface as 400s.
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/images/abc123def456/copy", "not-json", cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("copy bad json status = %d", rec.Code)
+	}
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/images/abc123def456/copy", map[string]any{
+		"target_cluster": "c1",
+	}, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("copy same cluster status = %d body = %s", rec.Code, rec.Body.String())
 	}
 }
