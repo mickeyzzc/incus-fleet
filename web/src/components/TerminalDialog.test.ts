@@ -6,6 +6,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/api'
 import TerminalDialog from './TerminalDialog.vue'
 
+// xterm cannot render inside jsdom; stub the terminal surface.
+vi.mock('@xterm/xterm', () => ({
+  Terminal: class {
+    cols = 80
+    rows = 25
+    loadAddon(): void {}
+    open(): void {}
+    clear(): void {}
+    dispose(): void {}
+    write(): void {}
+  },
+}))
+vi.mock('@xterm/addon-fit', () => ({
+  FitAddon: class {
+    loadAddon(): void {}
+    fit(): void {}
+    dispose(): void {}
+  },
+}))
+
+async function settle(ms = 500): Promise<void> {
+  await flushPromises()
+  await new Promise((resolve) => setTimeout(resolve, ms))
+  await flushPromises()
+}
+
 class MockWebSocket {
   static instances: MockWebSocket[] = []
   static OPEN = 1
@@ -31,7 +57,9 @@ class MockWebSocket {
 }
 
 function mountDialog() {
+  // attachTo puts the dialog inside the document so getElementById works.
   return mount(TerminalDialog, {
+    attachTo: document.body,
     props: { modelValue: true, cluster: 'c1', instance: 'web' },
     global: { plugins: [ElementPlus] },
   })
@@ -50,11 +78,12 @@ describe('TerminalDialog', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    document.body.innerHTML = ''
   })
 
   it('connects a console websocket on open', async () => {
     const wrapper = mountDialog()
-    await flushPromises()
+    await settle()
 
     expect(MockWebSocket.instances).toHaveLength(1)
     expect(MockWebSocket.instances[0]?.url).toBe(
@@ -67,11 +96,11 @@ describe('TerminalDialog', () => {
 
   it('sends the start frame for the first exec command and raw lines after', async () => {
     const wrapper = mountDialog()
-    await flushPromises()
+    await settle()
 
     const radio = wrapper.findComponent({ name: 'ElRadioGroup' })
     radio.vm.$emit('update:modelValue', 'exec')
-    await flushPromises()
+    await settle(200)
 
     expect(MockWebSocket.instances).toHaveLength(2)
 
@@ -106,7 +135,7 @@ describe('TerminalDialog', () => {
 
   it('decodes incoming binary and string frames onto the terminal', async () => {
     const wrapper = mountDialog()
-    await flushPromises()
+    await settle()
 
     const socket = MockWebSocket.instances[0]
     if (!socket) {
@@ -123,7 +152,7 @@ describe('TerminalDialog', () => {
 
   it('sends resize frames on demand and reports socket errors', async () => {
     const wrapper = mountDialog()
-    await flushPromises()
+    await settle()
 
     const socket = MockWebSocket.instances[0]
     if (!socket) {
@@ -141,7 +170,7 @@ describe('TerminalDialog', () => {
 
   it('closes the socket when the dialog closes', async () => {
     const wrapper = mountDialog()
-    await flushPromises()
+    await settle()
 
     const socket = MockWebSocket.instances[0]
     if (!socket) {

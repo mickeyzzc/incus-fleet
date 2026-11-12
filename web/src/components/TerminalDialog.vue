@@ -37,7 +37,7 @@ watch(
   () => props.modelValue,
   (open) => {
     if (open) {
-      openSession()
+      void openSession()
       return
     }
 
@@ -46,32 +46,40 @@ watch(
   { immediate: true },
 )
 
-function openSession(): void {
+async function openSession(): Promise<void> {
   mode.value = 'console'
   statusMessage.value = ''
-  mountTerminal()
+  // The dialog body mounts asynchronously; wait for the host element before
+  // connecting so early output is not dropped.
+  if (!(await mountTerminal())) {
+    statusMessage.value = t('terminal.failed', { error: 'mount' })
+    return
+  }
+
   connect('console')
 }
 
-function mountTerminal(): void {
-  if (term) {
-    return
+async function mountTerminal(): Promise<boolean> {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const host = document.getElementById('terminal-host')
+    if (host) {
+      term = new Terminal({ convertEol: true, fontSize: 12 })
+      fitAddon = new FitAddon()
+      term.loadAddon(fitAddon)
+      term.open(host)
+      try {
+        fitAddon.fit()
+      } catch {
+        // Layout is not measurable during transitions; ignore.
+      }
+
+      return true
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
   }
 
-  const host = document.getElementById('terminal-host')
-  if (!host) {
-    return
-  }
-
-  term = new Terminal({ convertEol: true, fontSize: 12 })
-  fitAddon = new FitAddon()
-  term.loadAddon(fitAddon)
-  term.open(host)
-  try {
-    fitAddon.fit()
-  } catch {
-    // Layout is not measurable during transitions; ignore.
-  }
+  return false
 }
 
 function connect(kind: 'console' | 'exec'): void {
