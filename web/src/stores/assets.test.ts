@@ -10,9 +10,9 @@ describe('assets store', () => {
   })
 
   it('creates, updates, and deletes keys', async () => {
-    vi.mocked(api.createKey).mockResolvedValue({ id: 'k1', name: 'desk', public_key: 'ssh-ed25519 AAA' })
-    vi.mocked(api.listKeys).mockResolvedValue([{ id: 'k1', name: 'desk', public_key: 'ssh-ed25519 AAA' }])
-    vi.mocked(api.updateKey).mockResolvedValue({ id: 'k1', name: 'desk2', public_key: 'ssh-ed25519 BBB' })
+    vi.mocked(api.createKey).mockResolvedValue({ id: 'k1', name: 'desk', public_key: 'ssh-ed25519 AAA', created_at: '2026-01-01T00:00:00Z' })
+    vi.mocked(api.listKeys).mockResolvedValue([{ id: 'k1', name: 'desk', public_key: 'ssh-ed25519 AAA', created_at: '2026-01-01T00:00:00Z' }])
+    vi.mocked(api.updateKey).mockResolvedValue({ id: 'k1', name: 'desk2', public_key: 'ssh-ed25519 BBB', created_at: '2026-01-01T00:00:00Z' })
     vi.mocked(api.deleteKey).mockResolvedValue(undefined)
     const store = useAssetsStore()
 

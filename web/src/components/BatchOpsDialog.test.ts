@@ -22,10 +22,10 @@ describe('BatchOpsDialog', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.mocked(api.listKeys).mockResolvedValue([
-      { id: 'k1', name: 'desk', public_key: 'ssh-ed25519 AAA' },
+      { id: 'k1', name: 'desk', public_key: 'ssh-ed25519 AAA', created_at: '2026-01-01T00:00:00Z' },
     ])
     vi.mocked(api.listScripts).mockResolvedValue([
-      { id: 's1', name: 'init', body: '#!/bin/sh' },
+      { id: 's1', name: 'init', body: '#!/bin/sh', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
     ])
     vi.mocked(api.batchKeys).mockResolvedValue([
       { cluster: 'c1', instance: 'web', ok: true },
