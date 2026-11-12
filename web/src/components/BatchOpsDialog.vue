@@ -26,6 +26,11 @@ const selectedScript = ref('')
 const user = ref('root')
 const items = ref<BatchItem[]>([])
 const running = ref(false)
+// Freeze the targets at open time: refreshing the instance list clears the
+// parent selection and would otherwise empty a dialog that is still open.
+const targetSnapshot = ref<BatchTarget[]>([])
+
+const targetCount = computed(() => targetSnapshot.value.length)
 
 const visible = computed({
   get: () => props.modelValue,
@@ -39,6 +44,7 @@ watch(
   () => props.modelValue,
   (open) => {
     if (open) {
+      targetSnapshot.value = [...props.targets]
       selectedKeys.value = []
       selectedScript.value = ''
       user.value = 'root'
@@ -58,14 +64,14 @@ async function submit(): Promise<void> {
         ElMessage.error(t('batch.keysRequired'))
         return
       }
-      const targets = props.targets.map((target) => ({ ...target, user: user.value.trim() || 'root' }))
+      const targets = targetSnapshot.value.map((target) => ({ ...target, user: user.value.trim() || 'root' }))
       items.value = await assets.batchInjectKeys(targets, selectedKeys.value)
     } else {
       if (!selectedScript.value) {
         ElMessage.error(t('batch.scriptRequired'))
         return
       }
-      items.value = await assets.batchRunScript(props.targets, selectedScript.value)
+      items.value = await assets.batchRunScript(targetSnapshot.value, selectedScript.value)
     }
 
     if (failCount.value === 0) {
@@ -85,13 +91,13 @@ async function submit(): Promise<void> {
 <template>
   <el-dialog
     v-model="visible"
-    :title="mode === 'keys' ? t('batch.keysTitle', { count: targets.length }) : t('batch.scriptTitle', { count: targets.length })"
+    :title="mode === 'keys' ? t('batch.keysTitle', { count: targetCount }) : t('batch.scriptTitle', { count: targetCount })"
     width="680px"
     destroy-on-close
   >
     <p class="batch-hint">
       {{ mode === 'keys' ? t('batch.keysHint') : t('batch.scriptHint') }}
-      <span class="mono">{{ targets.map((target) => target.instance).join(', ') }}</span>
+      <span class="mono">{{ targetSnapshot.map((target) => target.instance).join(', ') }}</span>
     </p>
 
     <el-form label-position="top" @submit.prevent="submit">
