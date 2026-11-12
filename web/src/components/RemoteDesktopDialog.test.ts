@@ -65,7 +65,7 @@ describe('RemoteDesktopDialog', () => {
     const wrapper = mountDialog(true)
     await flushPromises()
 
-    const options = (SpiceMainConn.mock?.calls[0]?.[0] ?? {}) as unknown as { onsuccess: () => void }
+    const options = ((SpiceMainConn as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0] ?? {}) as unknown as { onsuccess: () => void }
     options.onsuccess()
     await flushPromises()
 
@@ -76,7 +76,7 @@ describe('RemoteDesktopDialog', () => {
     const wrapper = mountDialog(true)
     await flushPromises()
 
-    const options = (SpiceMainConn.mock?.calls[0]?.[0] ?? {}) as unknown as { onerror: (err: unknown) => void }
+    const options = ((SpiceMainConn as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0] ?? {}) as unknown as { onerror: (err: unknown) => void }
     options.onerror(new Error('tunnel down'))
     await flushPromises()
 
