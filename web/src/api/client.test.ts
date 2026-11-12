@@ -369,12 +369,14 @@ describe('ApiClient', () => {
     )
   })
 
-  it('uploads an image import as a raw file and copies images', async () => {
+  it('uploads an image import as multipart form data and copies images', async () => {
     const { client, fetchImpl } = clientWith(mockResponse({ fingerprint: 'abc123' }))
 
     const file = new File(['tarball'], 'debian13.tar', { type: 'application/octet-stream' })
+    const rootfs = new File(['rootfs'], 'debian13.root', { type: 'application/octet-stream' })
     const fingerprint = await client.importImage('c1', {
       file,
+      rootfs,
       type: 'container',
       alias: 'debian/13',
     })
@@ -382,11 +384,14 @@ describe('ApiClient', () => {
 
     expect(fingerprint).toBe('abc123')
     expect(fetchImpl.mock.calls[0]?.[0]).toBe(
-      'https://fleet.local/api/v1/clusters/c1/images/import?filename=debian13.tar&type=container&alias=debian%2F13',
+      'https://fleet.local/api/v1/clusters/c1/images/import?type=container&alias=debian%2F13',
     )
     const init = fetchImpl.mock.calls[0]?.[1] as RequestInit
     expect(init.method).toBe('POST')
-    expect(init.body).toBe(file)
+    const form = init.body as FormData
+    expect(form).toBeInstanceOf(FormData)
+    expect(form.get('image')).toEqual(file)
+    expect(form.get('rootfs')).toEqual(rootfs)
     expect(fetchImpl.mock.calls[1]?.[0]).toBe(
       'https://fleet.local/api/v1/clusters/c1/images/abc123/copy',
     )

@@ -21,7 +21,9 @@ const instances = useInstancesStore()
 const { t } = useI18n()
 
 const file = ref<File | null>(null)
+const rootfsFile = ref<File | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+const rootfsInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const form = reactive({
   type: 'container' as 'container' | 'virtual-machine',
@@ -38,6 +40,7 @@ watch(
   (open) => {
     if (open) {
       file.value = null
+      rootfsFile.value = null
       uploading.value = false
       form.type = 'container'
       form.alias = ''
@@ -50,9 +53,18 @@ function pickFile(): void {
   fileInput.value?.click()
 }
 
+function pickRootfs(): void {
+  rootfsInput.value?.click()
+}
+
 function onFileChange(event: Event): void {
   const input = event.target as HTMLInputElement
   file.value = input.files?.[0] ?? null
+}
+
+function onRootfsChange(event: Event): void {
+  const input = event.target as HTMLInputElement
+  rootfsFile.value = input.files?.[0] ?? null
 }
 
 async function submit(): Promise<void> {
@@ -65,6 +77,7 @@ async function submit(): Promise<void> {
   try {
     const fingerprint = await instances.importImage(props.cluster, {
       file: file.value,
+      rootfs: rootfsFile.value ?? undefined,
       type: form.type,
       alias: form.alias.trim(),
     })
@@ -101,6 +114,7 @@ async function submit(): Promise<void> {
       <p v-else class="upload-text">{{ t('images.chooseFile') }}</p>
     </div>
     <input ref="fileInput" type="file" class="hidden-input" @change="onFileChange" />
+    <input ref="rootfsInput" type="file" class="hidden-input" @change="onRootfsChange" />
 
     <el-form label-position="top" @submit.prevent="submit">
       <el-form-item :label="t('images.imageType')">
@@ -108,6 +122,13 @@ async function submit(): Promise<void> {
           <el-radio-button value="container">{{ t('common.container') }}</el-radio-button>
           <el-radio-button value="virtual-machine">{{ t('common.virtualMachine') }}</el-radio-button>
         </el-radio-group>
+      </el-form-item>
+
+      <el-form-item :label="t('images.rootfs')">
+        <el-button data-testid="pick-rootfs" @click="pickRootfs">
+          {{ rootfsFile ? rootfsFile.name : t('images.rootfsOptional') }}
+        </el-button>
+        <p class="field-hint">{{ t('images.rootfsHint') }}</p>
       </el-form-item>
 
       <el-form-item :label="t('images.alias')">

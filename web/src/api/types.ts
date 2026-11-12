@@ -241,6 +241,7 @@ export interface UpdateInstanceRequest {
 
 export interface ImportImageRequest {
   file: File
+  rootfs?: File
   type: 'container' | 'virtual-machine'
   alias?: string
 }

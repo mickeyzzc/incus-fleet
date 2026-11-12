@@ -64,6 +64,29 @@ describe('ImageImportDialog', () => {
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([false])
   })
 
+  it('passes an optional rootfs file for split images', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    pickFile(wrapper)
+    await flushPromises()
+
+    const inputs = wrapper.findAll('input[type="file"]')
+    const rootfs = new File(['rootfs'], 'debian13.root', { type: 'application/octet-stream' })
+    Object.defineProperty(inputs[1]?.element, 'files', { value: [rootfs] })
+    await inputs[1]?.trigger('change')
+
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.importImage).toHaveBeenCalledWith('c1', {
+      file: expect.any(File),
+      rootfs,
+      type: 'container',
+      alias: '',
+    })
+  })
+
   it('reports upload failures', async () => {
     vi.mocked(api.importImage).mockRejectedValue(new Error('upload failed'))
     const wrapper = mountDialog()

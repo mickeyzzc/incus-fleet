@@ -153,18 +153,21 @@ export class ApiClient {
     cluster: string,
     request: ImportImageRequest,
   ): Promise<string | null> {
-    const query = new URLSearchParams({
-      filename: request.file.name,
-      type: request.type,
-    })
+    const query = new URLSearchParams({ type: request.type })
     if (request.alias) {
       query.set('alias', request.alias)
+    }
+
+    const form = new FormData()
+    form.append('image', request.file, request.file.name)
+    if (request.rootfs) {
+      form.append('rootfs', request.rootfs, request.rootfs.name)
     }
 
     const data = await this.request<{ fingerprint?: string } | undefined>(
       'POST',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/images/import?${query.toString()}`,
-      request.file,
+      form,
     )
 
     return data?.fingerprint ?? null
@@ -419,7 +422,11 @@ export class ApiClient {
     }
 
     let payload: string | BodyInit | undefined
-    if (body instanceof File) {
+    if (body instanceof FormData) {
+      // The browser sets the multipart boundary; a manual Content-Type
+      // would drop it.
+      payload = body
+    } else if (body instanceof File) {
       payload = body
       headers['Content-Type'] = 'application/octet-stream'
     } else if (body !== undefined) {
