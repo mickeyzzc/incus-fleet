@@ -284,9 +284,13 @@ func TestVgaHandshake(t *testing.T) {
 	header := http.Header{"Cookie": []string{cookie.Name + "=" + cookie.Value}}
 	vgaURL := "ws" + strings.TrimPrefix(server.URL, "http") +
 		"/api/v1/clusters/c1/instances/vm/vga"
-	browser, _, err := dialer.Dial(vgaURL, header)
+	dialer.Subprotocols = []string{"binary"}
+	browser, resp, err := dialer.Dial(vgaURL, header)
 	if err != nil {
 		t.Fatalf("dial vga: %v", err)
+	}
+	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != "binary" {
+		t.Fatalf("negotiated subprotocol = %q, want binary", got)
 	}
 	_ = browser.Close()
 }

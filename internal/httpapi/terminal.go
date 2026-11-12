@@ -13,10 +13,13 @@ import (
 )
 
 // wsUpgrader upgrades browser connections to websockets. Origin checking is
-// left to the session cookie plus the framework's same-origin defaults.
+// left to the session cookie plus the framework's same-origin defaults. The
+// SPICE client negotiates the "binary" subprotocol and browsers abort the
+// handshake unless the server echoes it back.
 var wsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  32 << 10,
 	WriteBufferSize: 32 << 10,
+	Subprotocols:    []string{"binary"},
 }
 
 // instanceTerminal opens an interactive console websocket for an instance.
