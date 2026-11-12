@@ -70,7 +70,8 @@ func TestPrepareSPICE(t *testing.T) {
 		t.Fatalf("state args = %#v", running.UpdateStateArgs())
 	}
 
-	// An idle VM keeps the config applied without a restart.
+	// apply guarantees a running VM: a stopped instance is booted after the
+	// config lands (no stop step needed).
 	stopped := &incusfake.Server{
 		Instance: &api.Instance{
 			Name:       "vm-02",
@@ -87,8 +88,9 @@ func TestPrepareSPICE(t *testing.T) {
 	if !result.Applied || result.RestartRequired {
 		t.Fatalf("stopped result = %#v", result)
 	}
-	if len(stopped.UpdateStateArgs()) != 0 {
-		t.Fatalf("stopped VM must not be power cycled: %#v", stopped.UpdateStateArgs())
+	states := stopped.UpdateStateArgs()
+	if len(states) != 1 || states[0].Action != "start" {
+		t.Fatalf("state args = %#v", states)
 	}
 
 	if _, err = svc.PrepareSPICE(ctx, "c1", "vm-01", 80, true); !errors.Is(err, ErrInvalidRequest) {

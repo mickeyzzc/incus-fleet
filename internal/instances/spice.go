@@ -102,17 +102,20 @@ func (s *Service) PrepareSPICE(ctx context.Context, clusterName, name string, po
 	}
 
 	result := SPICEPrepare{Port: port}
-	if wasRunning && apply {
-		if err := s.Action(ctx, clusterName, name, ActionRequest{Action: "start"}); err != nil {
-			return SPICEPrepare{}, fmt.Errorf("instances: cycle %s:%s: %w", clusterName, name, err)
-		}
-		result.Applied = true
-		result.RestartRequired = false
+	if wasRunning && !apply {
+		// Config is armed; the owner chooses when to power cycle.
+		result.Applied = false
+		result.RestartRequired = true
 		return result, nil
 	}
 
-	result.Applied = !wasRunning
-	result.RestartRequired = wasRunning
+	// apply guarantees a running VM: the browser is about to open the
+	// desktop, so boot the instance regardless of its previous state.
+	if err := s.Action(ctx, clusterName, name, ActionRequest{Action: "start"}); err != nil {
+		return SPICEPrepare{}, fmt.Errorf("instances: cycle %s:%s: %w", clusterName, name, err)
+	}
+	result.Applied = true
+	result.RestartRequired = false
 
 	return result, nil
 }
