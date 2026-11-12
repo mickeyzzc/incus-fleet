@@ -65,6 +65,19 @@ func (s *Service) PrepareSPICE(ctx context.Context, clusterName, name string, po
 		return SPICEPrepare{}, fmt.Errorf("instances: get %s:%s: %w", clusterName, name, err)
 	}
 
+	// Incus refuses raw.qemu updates while the VM runs; stop it up front and
+	// boot it again once the new qemu args are in place.
+	wasRunning := instance.StatusCode == api.Running || instance.StatusCode == api.Starting
+	if wasRunning && apply {
+		if err := s.Action(ctx, clusterName, name, ActionRequest{Action: "stop", Force: true}); err != nil {
+			return SPICEPrepare{}, fmt.Errorf("instances: cycle %s:%s: %w", clusterName, name, err)
+		}
+		instance, etag, err = client.GetInstance(name)
+		if err != nil {
+			return SPICEPrepare{}, fmt.Errorf("instances: get %s:%s: %w", clusterName, name, err)
+		}
+	}
+
 	put := instance.InstancePut
 	put.Config = copyConfig(instance.Config)
 	put.Devices = copyDevices(instance.Devices)
@@ -89,11 +102,7 @@ func (s *Service) PrepareSPICE(ctx context.Context, clusterName, name string, po
 	}
 
 	result := SPICEPrepare{Port: port}
-	running := instance.StatusCode == api.Running || instance.StatusCode == api.Starting
-	if running && apply {
-		if err := s.Action(ctx, clusterName, name, ActionRequest{Action: "stop", Force: true}); err != nil {
-			return SPICEPrepare{}, fmt.Errorf("instances: cycle %s:%s: %w", clusterName, name, err)
-		}
+	if wasRunning && apply {
 		if err := s.Action(ctx, clusterName, name, ActionRequest{Action: "start"}); err != nil {
 			return SPICEPrepare{}, fmt.Errorf("instances: cycle %s:%s: %w", clusterName, name, err)
 		}
@@ -102,8 +111,8 @@ func (s *Service) PrepareSPICE(ctx context.Context, clusterName, name string, po
 		return result, nil
 	}
 
-	result.Applied = !running
-	result.RestartRequired = running
+	result.Applied = !wasRunning
+	result.RestartRequired = wasRunning
 
 	return result, nil
 }
