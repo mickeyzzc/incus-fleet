@@ -49,11 +49,19 @@ async function connect(): Promise<void> {
     // the SPICE client can attach its canvas before opening the websocket.
     await waitForHost()
 
-    // The Incus VGA console websocket speaks the SPICE protocol directly;
-    // the client renders it into the host element below.
+    // Arm the qemu SPICE TCP listener (a running VM gets power cycled so
+    // the qemu args take effect), then bridge every SPICE channel onto it.
+    status.value = t('desktop.preparing')
+    const prepared = await api.prepareSPICE(props.cluster, props.instance)
+    if (prepared.restart_required) {
+      status.value = t('desktop.needsRestart')
+      connecting.value = false
+      return
+    }
+
     const { SpiceMainConn } = await import('spice-client')
     spice = new SpiceMainConn({
-      uri: api.vgaURL(props.cluster, props.instance),
+      uri: api.spiceURL(props.cluster, props.instance, prepared.port),
       screen_id: 'remote-desktop-host',
       onsuccess: () => {
         connected.value = true

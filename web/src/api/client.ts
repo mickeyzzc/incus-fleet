@@ -23,6 +23,7 @@ import type {
   NetworkRequest,
   OpsRequest,
   OpsResult,
+  SPICEPrepare,
   Profile,
   ProfileRequest,
   SessionResponse,
@@ -255,6 +256,19 @@ export class ApiClient {
       `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/clone`,
       request,
     )
+  }
+
+  async prepareSPICE(cluster: string, instance: string, port?: number): Promise<SPICEPrepare> {
+    return this.request<SPICEPrepare>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/spice/prepare`,
+      port ? { port, apply: true } : { apply: true },
+    )
+  }
+
+  spiceURL(cluster: string, instance: string, port: number): string {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    return `${proto}://${window.location.host}/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/spice?port=${port}`
   }
 
   vgaURL(cluster: string, instance: string): string {

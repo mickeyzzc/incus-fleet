@@ -32,6 +32,14 @@ describe('RemoteDesktopDialog', () => {
     SpiceMainConn.mockClear()
     spiceStop.mockClear()
     vi.mocked(api.vgaURL).mockReturnValue('ws://fleet.local/api/v1/clusters/c1/instances/vm-01/vga')
+    vi.mocked(api.prepareSPICE).mockResolvedValue({
+      port: 5931,
+      applied: true,
+      restart_required: false,
+    })
+    vi.mocked(api.spiceURL).mockReturnValue(
+      'ws://fleet.local/api/v1/clusters/c1/instances/vm-01/spice?port=5931',
+    )
   })
 
   it('starts a SPICE session when opened', async () => {
@@ -40,9 +48,10 @@ describe('RemoteDesktopDialog', () => {
     await waitReal(250)
     await flushPromises()
 
+    expect(api.prepareSPICE).toHaveBeenCalledWith('c1', 'vm-01')
     expect(SpiceMainConn).toHaveBeenCalledWith(
       expect.objectContaining({
-        uri: 'ws://fleet.local/api/v1/clusters/c1/instances/vm-01/vga',
+        uri: 'ws://fleet.local/api/v1/clusters/c1/instances/vm-01/spice?port=5931',
         screen_id: 'remote-desktop-host',
       }),
     )

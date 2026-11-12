@@ -285,6 +285,12 @@ export interface OpsResult {
   stderr: string
 }
 
+export interface SPICEPrepare {
+  port: number
+  applied: boolean
+  restart_required: boolean
+}
+
 export interface CloneRequest {
   target: string
   start?: boolean

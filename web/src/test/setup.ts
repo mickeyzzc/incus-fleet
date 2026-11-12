@@ -93,6 +93,8 @@ vi.mock('@/api', async (importOriginal) => {
       rebuildInstance: vi.fn(),
       cloneInstance: vi.fn(),
       vgaURL: vi.fn(() => 'ws://fleet.local/api/v1/clusters/c1/instances/web/vga'),
+      prepareSPICE: vi.fn(),
+      spiceURL: vi.fn(() => 'ws://fleet.local/api/v1/clusters/c1/instances/web/spice?port=5931'),
       uploadInstanceFile: vi.fn(),
       mkdirInstanceDir: vi.fn(),
       deleteInstanceFile: vi.fn(),
