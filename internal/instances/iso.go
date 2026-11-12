@@ -203,10 +203,17 @@ func (s *Service) LaunchFromISO(ctx context.Context, clusterName string, req Lau
 		start = *req.Start
 	}
 
+	// Arm a qemu SPICE TCP listener up front so the remote desktop is
+	// available from the very first boot without another restart.
+	config := api.ConfigMap{}
+	config["raw.qemu"] = fmt.Sprintf("%s port=%d,disable-ticketing=on,addr=%s",
+		spiceArgMarker, SPICEPortFor(req.Name), spiceListenAddr)
+
 	post := api.InstancesPost{
 		Name: req.Name,
 		Type: api.InstanceTypeVM,
 		InstancePut: api.InstancePut{
+			Config:  config,
 			Devices: devices,
 		},
 		Source: api.InstanceSource{Type: "none"},

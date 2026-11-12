@@ -107,6 +107,8 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/devices/{device}", a.requireAuth(http.HandlerFunc(a.detachDevice)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/console", a.requireAuth(http.HandlerFunc(a.instanceTerminal)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/vga", a.requireAuth(http.HandlerFunc(a.instanceVga)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/spice", a.requireAuth(http.HandlerFunc(a.instanceSPICE)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/spice/prepare", a.requireAuth(http.HandlerFunc(a.prepareSPICE)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/exec", a.requireAuth(http.HandlerFunc(a.instanceExec)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/files", a.requireAuth(http.HandlerFunc(a.instanceFiles)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/files", a.requireAuth(http.HandlerFunc(a.uploadInstanceFile)))
