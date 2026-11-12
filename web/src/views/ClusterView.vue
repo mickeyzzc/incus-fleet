@@ -8,15 +8,23 @@ import { useI18n } from 'vue-i18n'
 import InstanceActions from '@/components/InstanceActions.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
+import MemberDialog from '@/components/MemberDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
+import NetworkDialog from '@/components/NetworkDialog.vue'
+import ProfileDialog from '@/components/ProfileDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import StorageBar from '@/components/StorageBar.vue'
+import StoragePoolDialog from '@/components/StoragePoolDialog.vue'
 import type {
-  InstanceAction,
+  ClusterMember,
   InstanceDetail,
   InstanceSummary,
   InstanceType,
+  NetworkResource,
+  Profile,
+  StoragePoolResource,
 } from '@/api/types'
+import { useInstanceActions, useVisiblePolling } from '@/composables/useInstanceActions'
 import { useClustersStore } from '@/stores/clusters'
 import { useInstancesStore } from '@/stores/instances'
 import { errorMessage } from '@/utils/errors'
@@ -36,9 +44,18 @@ const migrateInstance = ref<InstanceSummary | null>(null)
 const formOpen = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const formInstance = ref<InstanceDetail | null>(null)
+const poolDialogOpen = ref(false)
+const poolEditing = ref<StoragePoolResource | null>(null)
+const networkDialogOpen = ref(false)
+const networkEditing = ref<NetworkResource | null>(null)
+const profileDialogOpen = ref(false)
+const profileEditing = ref<Profile | null>(null)
+const memberDialogOpen = ref(false)
+const memberEditing = ref<ClusterMember | null>(null)
 
 const summary = computed(() => clusters.byName(props.cluster))
 const resources = computed(() => instances.resources(props.cluster))
+const profiles = computed(() => instances.profiles(props.cluster))
 const filtered = computed(() =>
   instances.items.filter(
     (instance) => typeFilter.value === 'any' || instance.type === typeFilter.value,
@@ -59,10 +76,12 @@ async function load(force = false): Promise<void> {
     clusters.fetchAll(),
     instances.fetchCluster(props.cluster, typeFilter.value),
     instances.fetchResources(props.cluster, force),
+    instances.fetchProfiles(props.cluster, force),
   ])
 }
 
 onMounted(() => load())
+useVisiblePolling(load)
 
 watch(
   () => props.cluster,
@@ -70,6 +89,8 @@ watch(
     await load()
   },
 )
+
+const { act, confirmDelete, isBusy } = useInstanceActions(() => load())
 
 watch(typeFilter, async (type) => {
   await instances.fetchCluster(props.cluster, type)
@@ -108,6 +129,7 @@ async function openEditDetail(instance: InstanceSummary | InstanceDetail): Promi
   const detail =
     'config' in instance ? instance : await instances.fetchDetail(instance.cluster, instance.name)
   if (!detail) {
+    ElMessage.error(instances.error || t('detail.unavailable'))
     return
   }
 
@@ -116,53 +138,88 @@ async function openEditDetail(instance: InstanceSummary | InstanceDetail): Promi
   formOpen.value = true
 }
 
-async function act(
-  instance: InstanceSummary | InstanceDetail,
-  action: InstanceAction,
-): Promise<void> {
-  try {
-    await instances.instanceAction(instance.cluster, instance.name, action)
-    ElMessage.success(
-      t('instances.actionSuccess', {
-        action: t(`instances.actionDone.${action}`),
-        name: instance.name,
-      }),
-    )
-    await Promise.all([instances.fetchCluster(props.cluster, typeFilter.value), clusters.fetchAll()])
-  } catch (err) {
-    ElMessage.error(t('instances.actionFailed', { error: errorMessage(err) }))
-  }
+async function onSaved(): Promise<void> {
+  await load()
 }
 
-async function confirmDelete(instance: InstanceSummary | InstanceDetail): Promise<void> {
+function openPoolDialog(pool: StoragePoolResource | null = null): void {
+  poolEditing.value = pool
+  poolDialogOpen.value = true
+}
+
+async function confirmDeletePool(pool: StoragePoolResource): Promise<void> {
   try {
     await ElMessageBox.confirm(
-      t('instances.deleteConfirm', { name: instance.name }),
-      t('instances.deleteTitle'),
-      {
-        type: 'warning',
-        confirmButtonText: t('common.delete'),
-        cancelButtonText: t('common.cancel'),
-      },
+      t('admin.poolDeleteConfirm', { name: pool.name }),
+      t('admin.editPool'),
+      { type: 'warning', confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel') },
     )
   } catch {
     return
   }
 
   try {
-    await instances.deleteInstance(instance.cluster, instance.name, true)
-    if (detailOpen.value && detailName.value === instance.name) {
-      detailOpen.value = false
-    }
-    ElMessage.success(t('instances.deleteSuccess', { name: instance.name }))
-    await Promise.all([instances.fetchCluster(props.cluster, typeFilter.value), clusters.fetchAll()])
+    await instances.deleteStoragePool(props.cluster, pool.name)
+    ElMessage.success(t('admin.poolDeleted', { name: pool.name }))
+    await instances.fetchResources(props.cluster, true)
   } catch (err) {
-    ElMessage.error(t('instances.actionFailed', { error: errorMessage(err) }))
+    ElMessage.error(errorMessage(err))
   }
 }
 
-async function onSaved(): Promise<void> {
-  await Promise.all([instances.fetchCluster(props.cluster, typeFilter.value), clusters.fetchAll()])
+function openNetworkDialog(network: NetworkResource | null = null): void {
+  networkEditing.value = network
+  networkDialogOpen.value = true
+}
+
+async function confirmDeleteNetwork(network: NetworkResource): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      t('admin.networkDeleteConfirm', { name: network.name }),
+      t('admin.editNetwork'),
+      { type: 'warning', confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await instances.deleteNetwork(props.cluster, network.name)
+    ElMessage.success(t('admin.networkDeleted', { name: network.name }))
+    await instances.fetchResources(props.cluster, true)
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  }
+}
+
+function openProfileDialog(profile: Profile | null = null): void {
+  profileEditing.value = profile
+  profileDialogOpen.value = true
+}
+
+async function confirmDeleteProfile(profile: Profile): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      t('admin.profileDeleteConfirm', { name: profile.name }),
+      t('admin.editProfile'),
+      { type: 'warning', confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await instances.deleteProfile(props.cluster, profile.name)
+    ElMessage.success(t('admin.profileDeleted', { name: profile.name }))
+    await instances.fetchProfiles(props.cluster, true)
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  }
+}
+
+function openMemberDialog(member: ClusterMember): void {
+  memberEditing.value = member
+  memberDialogOpen.value = true
 }
 
 function instanceTypeLabel(type: string): string {
@@ -266,7 +323,15 @@ function instanceTypeLabel(type: string): string {
         />
 
         <div class="cluster-tags">
-          <el-tag v-for="member in summary.members" :key="member.name" size="small" effect="plain">
+          <el-tag
+            v-for="member in summary.members"
+            :key="member.name"
+            size="small"
+            effect="plain"
+            class="member-tag"
+            :title="t('admin.clickMemberHint')"
+            @click="openMemberDialog(member)"
+          >
             {{ member.name }} · {{ memberStatusLabel(member.status) }}
           </el-tag>
           <el-tag v-for="network in summary.networks" :key="network" size="small" effect="plain">
@@ -339,6 +404,7 @@ function instanceTypeLabel(type: string): string {
             <template #default="{ row }">
               <InstanceActions
                 :instance="row"
+                :busy="isBusy(row)"
                 @action="act(row, $event)"
                 @edit="openEdit(row)"
                 @migrate="openMigrate(row)"
@@ -355,9 +421,14 @@ function instanceTypeLabel(type: string): string {
 
     <section class="panel">
       <div class="panel-body">
-        <div class="section-heading">
-          <h3 class="section-title">{{ t('cluster.storagePools') }}</h3>
-          <p class="subtitle">{{ t('cluster.storagePoolsHint') }}</p>
+        <div class="section-heading page-header">
+          <div>
+            <h3 class="section-title">{{ t('cluster.storagePools') }}</h3>
+            <p class="subtitle">{{ t('cluster.storagePoolsHint') }}</p>
+          </div>
+          <div class="page-actions">
+            <el-button :icon="Plus" @click="openPoolDialog()">{{ t('admin.addPool') }}</el-button>
+          </div>
         </div>
 
         <el-table v-loading="instances.resourcesLoading" :data="resources?.storage_pools ?? []" stripe>
@@ -384,6 +455,16 @@ function instanceTypeLabel(type: string): string {
               {{ t('cluster.usedByCount', { count: row.used_by.length }) }}
             </template>
           </el-table-column>
+          <el-table-column :label="t('common.actions')" width="150" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openPoolDialog(row)">
+                {{ t('common.edit') }}
+              </el-button>
+              <el-button link type="danger" @click="confirmDeletePool(row)">
+                {{ t('common.delete') }}
+              </el-button>
+            </template>
+          </el-table-column>
           <template #empty>
             <el-empty :description="t('cluster.noPools')" />
           </template>
@@ -393,9 +474,16 @@ function instanceTypeLabel(type: string): string {
 
     <section class="panel">
       <div class="panel-body">
-        <div class="section-heading">
-          <h3 class="section-title">{{ t('cluster.networks') }}</h3>
-          <p class="subtitle">{{ t('cluster.networksHint') }}</p>
+        <div class="section-heading page-header">
+          <div>
+            <h3 class="section-title">{{ t('cluster.networks') }}</h3>
+            <p class="subtitle">{{ t('cluster.networksHint') }}</p>
+          </div>
+          <div class="page-actions">
+            <el-button :icon="Plus" @click="openNetworkDialog()">
+              {{ t('admin.addNetwork') }}
+            </el-button>
+          </div>
         </div>
 
         <el-table v-loading="instances.resourcesLoading" :data="resources?.networks ?? []" stripe>
@@ -428,8 +516,77 @@ function instanceTypeLabel(type: string): string {
               {{ t('cluster.usedByCount', { count: row.used_by.length }) }}
             </template>
           </el-table-column>
+          <el-table-column :label="t('common.actions')" width="150" fixed="right">
+            <template #default="{ row }">
+              <template v-if="row.managed">
+                <el-button link type="primary" @click="openNetworkDialog(row)">
+                  {{ t('common.edit') }}
+                </el-button>
+                <el-button link type="danger" @click="confirmDeleteNetwork(row)">
+                  {{ t('common.delete') }}
+                </el-button>
+              </template>
+              <span v-else class="muted" :title="t('admin.unmanagedHint')">—</span>
+            </template>
+          </el-table-column>
           <template #empty>
             <el-empty :description="t('cluster.noNetworks')" />
+          </template>
+        </el-table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-body">
+        <div class="section-heading page-header">
+          <div>
+            <h3 class="section-title">{{ t('cluster.profiles') }}</h3>
+            <p class="subtitle">{{ t('cluster.profilesHint') }}</p>
+          </div>
+          <div class="page-actions">
+            <el-button :icon="Plus" @click="openProfileDialog()">
+              {{ t('admin.addProfile') }}
+            </el-button>
+          </div>
+        </div>
+
+        <el-table v-loading="instances.profilesLoading" :data="profiles" stripe>
+          <el-table-column :label="t('common.name')" min-width="160">
+            <template #default="{ row }">
+              <strong>{{ row.name }}</strong>
+              <span v-if="row.description" class="mini-label">{{ row.description }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('admin.config')" min-width="180">
+            <template #default="{ row }">
+              <span v-if="Object.keys(row.config).length" class="mono config-preview">
+                {{ Object.keys(row.config).join(', ') }}
+              </span>
+              <span v-else class="muted">{{ t('common.none') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('admin.profileDevices')" width="110">
+            <template #default="{ row }">
+              {{ Object.keys(row.devices).length }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.usedBy')" width="130">
+            <template #default="{ row }">
+              {{ t('cluster.usedByCount', { count: row.used_by.length }) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" width="150" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openProfileDialog(row)">
+                {{ t('common.edit') }}
+              </el-button>
+              <el-button link type="danger" @click="confirmDeleteProfile(row)">
+                {{ t('common.delete') }}
+              </el-button>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty :description="t('cluster.noProfiles')" />
           </template>
         </el-table>
       </div>
@@ -457,6 +614,25 @@ function instanceTypeLabel(type: string): string {
       :clusters="clusters.items"
       @submitted="load()"
     />
+    <StoragePoolDialog
+      v-model="poolDialogOpen"
+      :cluster="cluster"
+      :pool="poolEditing"
+      @saved="instances.fetchResources(cluster, true)"
+    />
+    <NetworkDialog
+      v-model="networkDialogOpen"
+      :cluster="cluster"
+      :network="networkEditing"
+      @saved="instances.fetchResources(cluster, true)"
+    />
+    <ProfileDialog
+      v-model="profileDialogOpen"
+      :cluster="cluster"
+      :profile="profileEditing"
+      @saved="instances.fetchProfiles(cluster, true)"
+    />
+    <MemberDialog v-model="memberDialogOpen" :cluster="cluster" :member="memberEditing" />
   </div>
 </template>
 
@@ -481,5 +657,16 @@ function instanceTypeLabel(type: string): string {
   padding: 0;
   height: auto;
   font-weight: 600;
+}
+
+.member-tag {
+  cursor: pointer;
+}
+
+.config-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
 }
 </style>

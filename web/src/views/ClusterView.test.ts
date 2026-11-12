@@ -6,10 +6,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
 import { setLocale } from '@/i18n'
+import MemberDialog from '@/components/MemberDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
-import { clusterResources, clusterSummary, instanceDetail, instanceSummary } from '@/test/fixtures'
+import NetworkDialog from '@/components/NetworkDialog.vue'
+import ProfileDialog from '@/components/ProfileDialog.vue'
+import StoragePoolDialog from '@/components/StoragePoolDialog.vue'
+import {
+  clusterResources,
+  clusterSummary,
+  instanceDetail,
+  instanceSummary,
+  profileSummary,
+} from '@/test/fixtures'
 import ClusterView from './ClusterView.vue'
 
 const Blank = { template: '<div />' }
@@ -38,8 +48,19 @@ function mockFleet() {
   vi.mocked(api.reconnectCluster).mockResolvedValue(clusterSummary({ online: true }))
   vi.mocked(api.getResources).mockResolvedValue(clusterResources())
   vi.mocked(api.listImages).mockResolvedValue([])
+  vi.mocked(api.listProfiles).mockResolvedValue([
+    profileSummary({ name: 'default', description: 'base profile' }),
+  ])
   vi.mocked(api.instanceAction).mockResolvedValue(undefined)
   vi.mocked(api.deleteInstance).mockResolvedValue(undefined)
+  vi.mocked(api.createStoragePool).mockResolvedValue(undefined)
+  vi.mocked(api.updateStoragePool).mockResolvedValue(undefined)
+  vi.mocked(api.deleteStoragePool).mockResolvedValue(undefined)
+  vi.mocked(api.updateNetwork).mockResolvedValue(undefined)
+  vi.mocked(api.deleteNetwork).mockResolvedValue(undefined)
+  vi.mocked(api.createProfile).mockResolvedValue(undefined)
+  vi.mocked(api.deleteProfile).mockResolvedValue(undefined)
+  vi.mocked(api.updateMember).mockResolvedValue(undefined)
 }
 
 async function mountCluster(cluster = 'c1') {
@@ -215,5 +236,128 @@ describe('ClusterView', () => {
     await flushPromises()
 
     expect(router.currentRoute.value.name).toBe('dashboard')
+  })
+
+  it('creates a storage pool through the dialog', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Add storage pool').trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(StoragePoolDialog)
+    expect(dialog.props('modelValue')).toBe(true)
+
+    const inputs = dialog.findAll('input')
+    await inputs[0]?.setValue('fast')
+    dialog.findComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', 'zfs')
+    await flushPromises()
+    await dialog.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.createStoragePool).toHaveBeenCalledWith('c1', {
+      name: 'fast',
+      driver: 'zfs',
+      description: '',
+      config: undefined,
+    })
+    expect(ElMessage.success).toHaveBeenCalledWith('Storage pool fast saved.')
+  })
+
+  it('edits and deletes a storage pool from the table', async () => {
+    const { wrapper } = await mountCluster()
+
+    const poolRow = wrapper.findAll('.el-table__row').find((row) => row.text().includes('default'))
+    await poolRow?.findAll('button').find((b) => b.text().includes('Edit'))?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findComponent(StoragePoolDialog).props('pool')).toMatchObject({ name: 'default' })
+
+    await poolRow?.findAll('button').find((b) => b.text().includes('Delete'))?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteStoragePool).toHaveBeenCalledWith('c1', 'default')
+    expect(ElMessage.success).toHaveBeenCalledWith('Storage pool default deleted.')
+  })
+
+  it('edits managed networks and skips unmanaged ones', async () => {
+    const { wrapper } = await mountCluster()
+
+    const rows = wrapper.findAll('.el-table__row').filter((row) => row.text().includes('incusbr0') || row.text().includes('lo'))
+    const managedRow = rows.find((row) => row.text().includes('incusbr0'))
+    const unmanagedRow = rows.find((row) => row.text().includes('lo'))
+
+    await managedRow?.findAll('button').find((b) => b.text().includes('Edit'))?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findComponent(NetworkDialog).props('network')).toMatchObject({ name: 'incusbr0' })
+    expect(unmanagedRow?.findAll('button').some((b) => b.text().includes('Delete'))).toBe(false)
+
+    await managedRow?.findAll('button').find((b) => b.text().includes('Delete'))?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteNetwork).toHaveBeenCalledWith('c1', 'incusbr0')
+  })
+
+  it('renders profiles and deletes one after confirmation', async () => {
+    const { wrapper } = await mountCluster()
+
+    expect(wrapper.text()).toContain('base profile')
+
+    await buttonByText(wrapper, 'Add profile').trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent(ProfileDialog).props('modelValue')).toBe(true)
+    wrapper.findComponent(ProfileDialog).vm.$emit('update:modelValue', false)
+    await flushPromises()
+
+    const profileRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('base profile'))
+    await profileRow?.findAll('button').find((b) => b.text().includes('Delete'))?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteProfile).toHaveBeenCalledWith('c1', 'default')
+    expect(ElMessage.success).toHaveBeenCalledWith('Profile default deleted.')
+  })
+
+  it('opens the member dialog from a member tag and saves changes', async () => {
+    const { wrapper } = await mountCluster()
+
+    await wrapper.find('.member-tag').trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(MemberDialog)
+    expect(dialog.props('member')).toMatchObject({ name: 'node-1' })
+
+    const inputs = dialog.findAll('input')
+    await inputs[0]?.setValue('primary node, nvme')
+    await dialog.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.updateMember).toHaveBeenCalledWith('c1', 'node-1', {
+      description: 'primary node, nvme',
+      failure_domain: undefined,
+      groups: undefined,
+    })
+    expect(ElMessage.success).toHaveBeenCalledWith('Member node-1 updated.')
+  })
+
+  it('force-retries a timed-out stop after confirming', async () => {
+    const { wrapper } = await mountCluster()
+    vi.mocked(api.instanceAction)
+      .mockRejectedValueOnce(new Error('Instance is busy: timed out'))
+      .mockResolvedValueOnce(undefined)
+
+    await buttonByText(wrapper, 'Stop').trigger('click')
+    await flushPromises()
+
+    expect(api.instanceAction).toHaveBeenNthCalledWith(1, 'c1', 'web', {
+      action: 'stop',
+      force: false,
+    })
+    expect(api.instanceAction).toHaveBeenNthCalledWith(2, 'c1', 'web', {
+      action: 'stop',
+      force: true,
+    })
+    expect(ElMessage.success).toHaveBeenCalledWith('Stopped web.')
   })
 })

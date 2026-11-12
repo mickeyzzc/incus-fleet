@@ -531,6 +531,12 @@ func TestResources(t *testing.T) {
 	if !resources.Networks[0].Managed || resources.Networks[0].Description != "main" {
 		t.Fatalf("network = %#v", resources.Networks[0])
 	}
+	if resources.StoragePools[0].Config["source"] != "/srv/incus" {
+		t.Fatalf("default pool config = %#v", resources.StoragePools[0].Config)
+	}
+	if resources.Networks[0].Config["ipv4.address"] != "10.0.0.0.1/24" {
+		t.Fatalf("network config = %#v", resources.Networks[0].Config)
+	}
 
 	if _, err := svc.Resources("missing"); err == nil {
 		t.Fatal("Resources() expected unknown cluster error")

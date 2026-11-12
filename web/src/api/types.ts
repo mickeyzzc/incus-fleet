@@ -143,6 +143,7 @@ export interface StoragePoolResource {
   source?: string
   status?: string
   description?: string
+  config?: Record<string, string>
   used_by: string[]
   locations: string[]
   total: number
@@ -158,6 +159,7 @@ export interface NetworkResource {
   description?: string
   ipv4?: string
   ipv6?: string
+  config?: Record<string, string>
   used_by: string[]
   locations: string[]
 }

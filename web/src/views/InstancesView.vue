@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
@@ -10,14 +10,13 @@ import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type {
-  InstanceAction,
   InstanceDetail,
   InstanceSummary,
   InstanceType,
 } from '@/api/types'
+import { useVisiblePolling, useInstanceActions } from '@/composables/useInstanceActions'
 import { useClustersStore } from '@/stores/clusters'
 import { useInstancesStore } from '@/stores/instances'
-import { errorMessage } from '@/utils/errors'
 import { formatBytes, formatDateTime, primaryAddress } from '@/utils/format'
 
 const clusters = useClustersStore()
@@ -27,6 +26,8 @@ const { t } = useI18n()
 const search = ref('')
 const clusterFilter = ref('')
 const typeFilter = ref<InstanceType>('any')
+const page = ref(1)
+const pageSize = ref(20)
 const detailOpen = ref(false)
 const detailCluster = ref('')
 const detailName = ref('')
@@ -59,15 +60,43 @@ const filtered = computed(() => {
   })
 })
 
+const paged = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+
+  return filtered.value.slice(start, start + pageSize.value)
+})
+
 async function load(): Promise<void> {
   await Promise.all([clusters.fetchAll(), instances.fetchAll(typeFilter.value)])
 }
 
 onMounted(load)
+useVisiblePolling(load)
+
+watch([search, clusterFilter, typeFilter], () => {
+  page.value = 1
+})
 
 watch(typeFilter, async (type) => {
   await instances.fetchAll(type)
 })
+
+const { act, confirmDelete, isBusy } = useInstanceActions(load)
+
+watch(
+  () => instances.items,
+  (items) => {
+    if (
+      detailOpen.value &&
+      !items.some(
+        (instance) => instance.cluster === detailCluster.value && instance.name === detailName.value,
+      )
+    ) {
+      detailOpen.value = false
+    }
+  },
+  { deep: true },
+)
 
 function openDetail(instance: InstanceSummary): void {
   detailCluster.value = instance.cluster
@@ -97,6 +126,7 @@ async function openEditDetail(instance: InstanceSummary | InstanceDetail): Promi
       ? instance
       : await instances.fetchDetail(instance.cluster, instance.name)
   if (!detail) {
+    ElMessage.error(instances.error || t('detail.unavailable'))
     return
   }
 
@@ -106,50 +136,8 @@ async function openEditDetail(instance: InstanceSummary | InstanceDetail): Promi
   formOpen.value = true
 }
 
-async function act(instance: InstanceSummary | InstanceDetail, action: InstanceAction): Promise<void> {
-  try {
-    await instances.instanceAction(instance.cluster, instance.name, action)
-    ElMessage.success(
-      t('instances.actionSuccess', {
-        action: t(`instances.actionDone.${action}`),
-        name: instance.name,
-      }),
-    )
-    await Promise.all([instances.fetchAll(typeFilter.value), clusters.fetchAll()])
-  } catch (err) {
-    ElMessage.error(t('instances.actionFailed', { error: errorMessage(err) }))
-  }
-}
-
-async function confirmDelete(instance: InstanceSummary | InstanceDetail): Promise<void> {
-  try {
-    await ElMessageBox.confirm(
-      t('instances.deleteConfirm', { name: instance.name }),
-      t('instances.deleteTitle'),
-      {
-        type: 'warning',
-        confirmButtonText: t('common.delete'),
-        cancelButtonText: t('common.cancel'),
-      },
-    )
-  } catch {
-    return
-  }
-
-  try {
-    await instances.deleteInstance(instance.cluster, instance.name, true)
-    if (detailOpen.value && detailName.value === instance.name) {
-      detailOpen.value = false
-    }
-    ElMessage.success(t('instances.deleteSuccess', { name: instance.name }))
-    await Promise.all([instances.fetchAll(typeFilter.value), clusters.fetchAll()])
-  } catch (err) {
-    ElMessage.error(t('instances.actionFailed', { error: errorMessage(err) }))
-  }
-}
-
 async function onSaved(): Promise<void> {
-  await Promise.all([instances.fetchAll(typeFilter.value), clusters.fetchAll()])
+  await load()
 }
 </script>
 
@@ -219,7 +207,7 @@ async function onSaved(): Promise<void> {
           <span class="muted">{{ t('common.shown', { count: filtered.length }) }}</span>
         </div>
 
-        <el-table v-loading="instances.loading" :data="filtered" stripe>
+        <el-table v-loading="instances.loading" :data="paged" stripe>
           <el-table-column :label="t('common.name')" min-width="170">
             <template #default="{ row }">
               <el-button link type="primary" class="name-link" @click="openDetail(row)">
@@ -263,6 +251,7 @@ async function onSaved(): Promise<void> {
             <template #default="{ row }">
               <InstanceActions
                 :instance="row"
+                :busy="isBusy(row)"
                 @action="act(row, $event)"
                 @edit="openEdit(row)"
                 @migrate="openMigrate(row)"
@@ -274,6 +263,15 @@ async function onSaved(): Promise<void> {
             <el-empty :description="t('instances.empty')" />
           </template>
         </el-table>
+
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :total="filtered.length"
+          :page-sizes="[20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          class="table-pagination"
+        />
       </div>
     </section>
 
@@ -307,5 +305,10 @@ async function onSaved(): Promise<void> {
   padding: 0;
   height: auto;
   font-weight: 600;
+}
+
+.table-pagination {
+  margin-top: 14px;
+  justify-content: flex-end;
 }
 </style>

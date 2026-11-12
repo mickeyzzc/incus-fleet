@@ -75,7 +75,8 @@ describe('InstancesView', () => {
 
     await wrapper.find('input').setValue('')
     const selects = wrapper.findAllComponents({ name: 'ElSelect' })
-    expect(selects).toHaveLength(2)
+    // Type filter, cluster filter, plus the pagination page-size select.
+    expect(selects).toHaveLength(3)
     selects[1]?.vm.$emit('update:modelValue', 'c1')
     await flushPromises()
     expect(wrapper.text()).toContain('Showing 2')

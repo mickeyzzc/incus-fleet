@@ -31,7 +31,7 @@ function buttonByText(wrapper: ReturnType<typeof mount>, text: string) {
   return button
 }
 
-function selectAt(wrapper: ReturnType<typeof mount>, index: number, value: string) {
+function selectAt(wrapper: ReturnType<typeof mount>, index: number, value: string | string[]) {
   const selects = wrapper.findAllComponents({ name: 'ElSelect' })
   const select = selects[index]
   if (!select) {
@@ -54,25 +54,27 @@ describe('InstanceFormDialog', () => {
       }),
     ])
     vi.mocked(api.getResources).mockResolvedValue(clusterResources())
+    vi.mocked(api.listProfiles).mockResolvedValue([])
     vi.mocked(api.createInstance).mockResolvedValue(instanceDetail({ name: 'newct' }))
     vi.mocked(api.updateInstance).mockResolvedValue(instanceDetail({ description: 'after' }))
   })
 
-  it('loads images and resources and creates an instance', async () => {
+  it('loads images, resources, and profiles and creates an instance', async () => {
     const wrapper = mountDialog()
     await flushPromises()
 
     expect(api.listImages).toHaveBeenCalledWith('c1')
     expect(api.getResources).toHaveBeenCalledWith('c1')
+    expect(api.listProfiles).toHaveBeenCalledWith('c1')
 
     await wrapper.find('input[placeholder="e.g. web-01"]').setValue('newct')
     selectAt(wrapper, 0, '053059ea4e28')
     await wrapper.find('input[placeholder="Optional note for operators"]').setValue('new note')
-    await wrapper.find('input[placeholder="default, production"]').setValue('default, prod')
+    selectAt(wrapper, 1, ['default', 'prod'])
     await wrapper.find('input[placeholder="e.g. 2 or 0-3"]').setValue('2')
     await wrapper.find('input[placeholder="e.g. 512MiB or 2GiB"]').setValue('1GiB')
     await wrapper.find('input[placeholder="e.g. 10GiB"]').setValue('10GiB')
-    selectAt(wrapper, 2, 'incusbr0')
+    selectAt(wrapper, 3, 'incusbr0')
     await wrapper.find('input[placeholder="e.g. 10.0.0.0.50"]').setValue('10.0.0.0.50')
     await wrapper.find('input[placeholder="e.g. fd42::50"]').setValue('fd42::50')
 

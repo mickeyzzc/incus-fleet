@@ -9,7 +9,7 @@ import MigrateDialog from './MigrateDialog.vue'
 
 const clusters = [
   clusterSummary(),
-  clusterSummary({ name: 'c2', display_name: 'Cluster 63', endpoint: 'https://198.51.100.11:8443' }),
+  clusterSummary({ name: 'c2', display_name: 'Cluster 63', endpoint: 'https://192.0.2.11:8443' }),
 ]
 
 function mountDialog(instance = instanceSummary({ type: 'virtual-machine', migration_stateful: true })) {

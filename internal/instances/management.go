@@ -83,28 +83,30 @@ type Image struct {
 
 // StoragePool describes one cluster storage pool.
 type StoragePool struct {
-	Name        string   `json:"name"`
-	Driver      string   `json:"driver"`
-	Source      string   `json:"source,omitempty"`
-	Status      string   `json:"status,omitempty"`
-	Description string   `json:"description,omitempty"`
-	UsedBy      []string `json:"used_by"`
-	Locations   []string `json:"locations"`
-	Total       int64    `json:"total"`
-	Used        int64    `json:"used"`
+	Name        string            `json:"name"`
+	Driver      string            `json:"driver"`
+	Source      string            `json:"source,omitempty"`
+	Status      string            `json:"status,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Config      map[string]string `json:"config,omitempty"`
+	UsedBy      []string          `json:"used_by"`
+	Locations   []string          `json:"locations"`
+	Total       int64             `json:"total"`
+	Used        int64             `json:"used"`
 }
 
 // Network describes one cluster network.
 type Network struct {
-	Name        string   `json:"name"`
-	Type        string   `json:"type"`
-	Managed     bool     `json:"managed"`
-	Status      string   `json:"status,omitempty"`
-	Description string   `json:"description,omitempty"`
-	IPv4        string   `json:"ipv4,omitempty"`
-	IPv6        string   `json:"ipv6,omitempty"`
-	UsedBy      []string `json:"used_by"`
-	Locations   []string `json:"locations"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	Managed     bool              `json:"managed"`
+	Status      string            `json:"status,omitempty"`
+	Description string            `json:"description,omitempty"`
+	IPv4        string            `json:"ipv4,omitempty"`
+	IPv6        string            `json:"ipv6,omitempty"`
+	Config      map[string]string `json:"config,omitempty"`
+	UsedBy      []string          `json:"used_by"`
+	Locations   []string          `json:"locations"`
 }
 
 // Resources groups the storage pools and networks of one cluster.
@@ -454,6 +456,7 @@ func (s *Service) Resources(clusterName string) (Resources, error) {
 			Source:      pool.Config["source"],
 			Status:      pool.Status,
 			Description: pool.Description,
+			Config:      copyConfig(pool.Config),
 			UsedBy:      copyStrings(pool.UsedBy),
 			Locations:   copyStrings(pool.Locations),
 			Total:       clampUint64ToInt64(usage.Space.Total),
@@ -479,6 +482,7 @@ func (s *Service) Resources(clusterName string) (Resources, error) {
 			Description: network.Description,
 			IPv4:        network.Config["ipv4.address"],
 			IPv6:        network.Config["ipv6.address"],
+			Config:      copyConfig(network.Config),
 			UsedBy:      copyStrings(network.UsedBy),
 			Locations:   copyStrings(network.Locations),
 		})

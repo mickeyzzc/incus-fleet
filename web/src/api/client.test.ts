@@ -231,4 +231,70 @@ describe('ApiClient', () => {
     expect(error.code).toBe('teapot')
     expect(error.message).toBe('short and stout')
   })
+
+  it('creates, updates, and deletes storage pools', async () => {
+    const { client, fetchImpl } = clientWith()
+
+    await client.createStoragePool('c1', { name: 'fast', driver: 'zfs' })
+    await client.updateStoragePool('c1', 'fast', { description: 'ssd' })
+    await client.deleteStoragePool('c1', 'fast')
+
+    expect(fetchImpl.mock.calls.map(([url, init]) => [url, (init as RequestInit).method])).toEqual([
+      ['https://fleet.local/api/v1/clusters/c1/storage-pools', 'POST'],
+      ['https://fleet.local/api/v1/clusters/c1/storage-pools/fast', 'PATCH'],
+      ['https://fleet.local/api/v1/clusters/c1/storage-pools/fast', 'DELETE'],
+    ])
+    expect(JSON.parse((fetchImpl.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
+      name: 'fast',
+      driver: 'zfs',
+    })
+  })
+
+  it('creates, updates, and deletes managed networks', async () => {
+    const { client, fetchImpl } = clientWith()
+
+    await client.createNetwork('c1', { name: 'fleet0', type: 'bridge' })
+    await client.updateNetwork('c1', 'fleet0', { description: 'fleet' })
+    await client.deleteNetwork('c1', 'fleet0')
+
+    expect(fetchImpl.mock.calls.map(([url, init]) => [url, (init as RequestInit).method])).toEqual([
+      ['https://fleet.local/api/v1/clusters/c1/networks', 'POST'],
+      ['https://fleet.local/api/v1/clusters/c1/networks/fleet0', 'PATCH'],
+      ['https://fleet.local/api/v1/clusters/c1/networks/fleet0', 'DELETE'],
+    ])
+  })
+
+  it('lists, creates, updates, and deletes profiles', async () => {
+    const { client, fetchImpl } = clientWith(
+      mockResponse({ profiles: [{ name: 'default', config: {}, devices: {}, used_by: [] }] }),
+    )
+
+    const profiles = await client.listProfiles('c1')
+    await client.createProfile('c1', { name: 'gpu' })
+    await client.updateProfile('c1', 'gpu', { description: 'passthrough' })
+    await client.deleteProfile('c1', 'gpu')
+
+    expect(profiles).toHaveLength(1)
+    expect(fetchImpl.mock.calls.map(([url, init]) => [url, (init as RequestInit).method])).toEqual([
+      ['https://fleet.local/api/v1/clusters/c1/profiles', 'GET'],
+      ['https://fleet.local/api/v1/clusters/c1/profiles', 'POST'],
+      ['https://fleet.local/api/v1/clusters/c1/profiles/gpu', 'PATCH'],
+      ['https://fleet.local/api/v1/clusters/c1/profiles/gpu', 'DELETE'],
+    ])
+  })
+
+  it('updates cluster member metadata', async () => {
+    const { client, fetchImpl } = clientWith()
+
+    await client.updateMember('c1', 'node-1', { description: 'primary', groups: ['rack-a'] })
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/clusters/c1/members/node-1',
+      expect.objectContaining({ method: 'PATCH' }),
+    )
+    expect(JSON.parse((fetchImpl.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
+      description: 'primary',
+      groups: ['rack-a'],
+    })
+  })
 })

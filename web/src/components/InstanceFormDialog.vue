@@ -42,7 +42,7 @@ const form = reactive({
   type: 'container' as 'container' | 'virtual-machine',
   image: '',
   description: '',
-  profiles: 'default',
+  profiles: ['default'] as string[],
   cpu: '',
   memory: '',
   rootDiskSize: '',
@@ -87,7 +87,7 @@ function resetForm(): void {
   form.type = 'container'
   form.image = ''
   form.description = ''
-  form.profiles = 'default'
+  form.profiles = ['default']
   form.cpu = ''
   form.memory = ''
   form.rootDiskSize = ''
@@ -106,7 +106,7 @@ function resetForm(): void {
   form.name = detail.name
   form.type = detail.type === 'virtual-machine' ? 'virtual-machine' : 'container'
   form.description = detail.description ?? ''
-  form.profiles = detail.profiles.join(', ')
+  form.profiles = detail.profiles.length > 0 ? [...detail.profiles] : ['default']
   form.cpu = detail.config['limits.cpu'] ?? ''
   form.memory = detail.config['limits.memory'] ?? ''
   form.rootDiskSize = detail.devices.root?.size ?? ''
@@ -132,7 +132,11 @@ async function loadClusterResources(cluster: string): Promise<void> {
 
   pendingCluster = cluster
   try {
-    await Promise.all([instances.fetchImages(cluster), instances.fetchResources(cluster)])
+    await Promise.all([
+      instances.fetchImages(cluster),
+      instances.fetchResources(cluster),
+      instances.fetchProfiles(cluster),
+    ])
   } finally {
     pendingCluster = ''
   }
@@ -200,10 +204,7 @@ function createRequest(): CreateInstanceRequest {
     request.description = form.description.trim()
   }
 
-  const profiles = form.profiles
-    .split(',')
-    .map((profile) => profile.trim())
-    .filter(Boolean)
+  const profiles = form.profiles.map((profile) => profile.trim()).filter(Boolean)
   if (profiles.length > 0) {
     request.profiles = profiles
   }
@@ -350,7 +351,23 @@ async function submit(): Promise<void> {
         </el-form-item>
 
         <el-form-item v-if="!isEdit" :label="t('form.profiles')" class="form-span">
-          <el-input v-model="form.profiles" :placeholder="t('form.profilesPlaceholder')" />
+          <el-select
+            v-model="form.profiles"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :loading="instances.profilesLoading"
+            :placeholder="t('form.profilesPlaceholder')"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="profile in instances.profiles(form.cluster)"
+              :key="profile.name"
+              :label="profile.description ? `${profile.name} · ${profile.description}` : profile.name"
+              :value="profile.name"
+            />
+          </el-select>
           <p class="field-hint">{{ t('form.profilesHint') }}</p>
         </el-form-item>
 

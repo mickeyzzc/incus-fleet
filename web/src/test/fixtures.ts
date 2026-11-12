@@ -6,6 +6,7 @@ import type {
   InstanceSummary,
   Migration,
   MigrationStatus,
+  Profile,
 } from '@/api/types'
 
 export function clusterSummary(overrides: Partial<ClusterSummary> = {}): ClusterSummary {
@@ -108,6 +109,17 @@ export function instanceImage(overrides: Partial<InstanceImage> = {}): InstanceI
   }
 }
 
+export function profileSummary(overrides: Partial<Profile> = {}): Profile {
+  return {
+    name: 'default',
+    description: '',
+    config: {},
+    devices: {},
+    used_by: [],
+    ...overrides,
+  }
+}
+
 export function clusterResources(overrides: Partial<ClusterResources> = {}): ClusterResources {
   return {
     storage_pools: [
@@ -116,6 +128,7 @@ export function clusterResources(overrides: Partial<ClusterResources> = {}): Clu
         driver: 'dir',
         source: '/srv/incus',
         status: 'Created',
+        config: { source: '/srv/incus' },
         used_by: ['/1.0/instances/web'],
         locations: [],
         total: 1_000_000_000_000,
@@ -129,6 +142,7 @@ export function clusterResources(overrides: Partial<ClusterResources> = {}): Clu
         managed: true,
         ipv4: '10.0.0.0.1/24',
         ipv6: 'none',
+        config: { 'ipv4.address': '10.0.0.0.1/24', 'ipv6.address': 'none' },
         used_by: ['/1.0/instances/web'],
         locations: [],
       },
