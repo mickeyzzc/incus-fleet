@@ -297,4 +297,75 @@ describe('ApiClient', () => {
       groups: ['rack-a'],
     })
   })
+
+  it('manages instance snapshots', async () => {
+    const { client, fetchImpl } = clientWith(
+      mockResponse({ snapshots: [{ name: 'snap0', size: 1024, stateful: true }] }),
+    )
+
+    const snapshots = await client.listSnapshots('c1', 'web')
+    await client.createSnapshot('c1', 'web', { name: 'snap1', stateful: true })
+    await client.restoreSnapshot('c1', 'web', 'snap0')
+    await client.deleteSnapshot('c1', 'web', 'snap0')
+
+    expect(snapshots).toHaveLength(1)
+    expect(fetchImpl.mock.calls.map(([url, init]) => [url, (init as RequestInit).method])).toEqual([
+      ['https://fleet.local/api/v1/clusters/c1/instances/web/snapshots', 'GET'],
+      ['https://fleet.local/api/v1/clusters/c1/instances/web/snapshots', 'POST'],
+      ['https://fleet.local/api/v1/clusters/c1/instances/web/snapshots/snap0/restore', 'POST'],
+      ['https://fleet.local/api/v1/clusters/c1/instances/web/snapshots/snap0', 'DELETE'],
+    ])
+  })
+
+  it('manages custom storage volumes', async () => {
+    const { client, fetchImpl } = clientWith(
+      mockResponse({ volumes: [{ name: 'data', type: 'custom', config: {}, used_by: [] }] }),
+    )
+
+    const volumes = await client.listVolumes('c1', 'default')
+    await client.createVolume('c1', 'default', { name: 'assets', size: '5GiB' })
+    await client.deleteVolume('c1', 'default', 'assets')
+
+    expect(volumes).toHaveLength(1)
+    expect(fetchImpl.mock.calls.map(([url, init]) => [url, (init as RequestInit).method])).toEqual([
+      ['https://fleet.local/api/v1/clusters/c1/storage-pools/default/volumes', 'GET'],
+      ['https://fleet.local/api/v1/clusters/c1/storage-pools/default/volumes', 'POST'],
+      ['https://fleet.local/api/v1/clusters/c1/storage-pools/default/volumes/assets', 'DELETE'],
+    ])
+  })
+
+  it('attaches and detaches instance devices', async () => {
+    const detail = { name: 'web', cluster: 'c1' }
+    const { client, fetchImpl } = clientWith(mockResponse(detail))
+
+    const attached = await client.attachDevice('c1', 'web', {
+      name: 'data',
+      type: 'disk',
+      path: '/data',
+    })
+    const detached = await client.detachDevice('c1', 'web', 'data')
+
+    expect(attached).toMatchObject({ name: 'web' })
+    expect(detached).toMatchObject({ name: 'web' })
+    expect(fetchImpl.mock.calls.map(([url, init]) => [url, (init as RequestInit).method])).toEqual([
+      ['https://fleet.local/api/v1/clusters/c1/instances/web/devices', 'POST'],
+      ['https://fleet.local/api/v1/clusters/c1/instances/web/devices/data', 'DELETE'],
+    ])
+    expect(JSON.parse((fetchImpl.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
+      name: 'data',
+      type: 'disk',
+      path: '/data',
+    })
+  })
+
+  it('deletes an image', async () => {
+    const { client, fetchImpl } = clientWith()
+
+    await client.deleteImage('c1', '053059ea4e28')
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/clusters/c1/images/053059ea4e28',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
 })

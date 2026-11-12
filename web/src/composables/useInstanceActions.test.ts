@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 import ElementPlus, { ElMessage, ElMessageBox } from 'element-plus'
+import type { MessageBoxData } from 'element-plus'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { mount } from '@vue/test-utils'
@@ -32,7 +33,7 @@ describe('useInstanceActions', () => {
     setActivePinia(createPinia())
     vi.mocked(api.instanceAction).mockResolvedValue(undefined)
     vi.mocked(api.deleteInstance).mockResolvedValue(undefined)
-    vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm')
+    vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as MessageBoxData)
   })
 
   it('runs start without a confirmation and refreshes', async () => {
@@ -94,7 +95,7 @@ describe('useInstanceActions', () => {
 
     vi.mocked(api.instanceAction).mockRejectedValueOnce(new Error('stop timed out'))
     vi.mocked(ElMessageBox.confirm)
-      .mockResolvedValueOnce('confirm')
+      .mockResolvedValueOnce('confirm' as MessageBoxData)
       .mockRejectedValueOnce('cancel')
 
     await result.act(instance, 'stop')

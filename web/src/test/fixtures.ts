@@ -3,10 +3,12 @@ import type {
   ClusterSummary,
   InstanceDetail,
   InstanceImage,
+  InstanceSnapshot,
   InstanceSummary,
   Migration,
   MigrationStatus,
   Profile,
+  StorageVolume,
 } from '@/api/types'
 
 export function clusterSummary(overrides: Partial<ClusterSummary> = {}): ClusterSummary {
@@ -105,6 +107,28 @@ export function instanceImage(overrides: Partial<InstanceImage> = {}): InstanceI
     size: 272_237_676,
     cached: false,
     created_at: '2026-11-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+export function instanceSnapshot(overrides: Partial<InstanceSnapshot> = {}): InstanceSnapshot {
+  return {
+    name: 'snap0',
+    created_at: '2026-11-10T08:00:00Z',
+    size: 1024,
+    stateful: false,
+    ...overrides,
+  }
+}
+
+export function storageVolume(overrides: Partial<StorageVolume> = {}): StorageVolume {
+  return {
+    name: 'data',
+    type: 'custom',
+    content_type: 'filesystem',
+    description: '',
+    config: {},
+    used_by: [],
     ...overrides,
   }
 }

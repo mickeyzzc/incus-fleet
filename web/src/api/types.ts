@@ -246,6 +246,52 @@ export interface InstanceActionRequest {
   force?: boolean
 }
 
+/** One instance snapshot. */
+export interface InstanceSnapshot {
+  name: string
+  created_at?: string
+  size: number
+  stateful: boolean
+}
+
+/** Request used to create an instance snapshot. */
+export interface SnapshotRequest {
+  name: string
+  stateful?: boolean
+}
+
+/** One custom storage volume. */
+export interface StorageVolume {
+  name: string
+  type: string
+  content_type?: string
+  description?: string
+  config: Record<string, string>
+  used_by: string[]
+  location?: string
+}
+
+/** Request used to create a custom storage volume. */
+export interface VolumeRequest {
+  name: string
+  description?: string
+  size?: string
+  config?: Record<string, string>
+}
+
+/** Request used to attach one disk or NIC device to an instance. */
+export interface DeviceRequest {
+  name: string
+  type: 'disk' | 'nic'
+  pool?: string
+  source?: string
+  path?: string
+  size?: string
+  network?: string
+  ipv4?: string
+  ipv6?: string
+}
+
 export interface Migration {
   id: string
   source_cluster: string

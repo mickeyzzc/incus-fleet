@@ -3,7 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
 import type { ClusterResources, InstanceImage, Profile } from '@/api/types'
-import { instanceDetail, instanceSummary } from '@/test/fixtures'
+import {
+  instanceDetail,
+  instanceImage,
+  instanceSnapshot,
+  instanceSummary,
+  storageVolume,
+} from '@/test/fixtures'
 import { useInstancesStore } from './instances'
 
 function sampleImage(): InstanceImage {
@@ -442,5 +448,100 @@ describe('instances store', () => {
 
     expect(store.error).toBe('member failed')
     expect(store.saving).toBe(false)
+  })
+
+  it('fetches, creates, restores, and deletes snapshots', async () => {
+    vi.mocked(api.listSnapshots).mockResolvedValue([instanceSnapshot()])
+    vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+    vi.mocked(api.createSnapshot).mockResolvedValue(undefined)
+    vi.mocked(api.restoreSnapshot).mockResolvedValue(undefined)
+    vi.mocked(api.deleteSnapshot).mockResolvedValue(undefined)
+    const store = useInstancesStore()
+
+    await store.fetchSnapshots('c1', 'web')
+    await store.fetchSnapshots('c1', 'web')
+    expect(api.listSnapshots).toHaveBeenCalledTimes(1)
+    expect(store.snapshots('c1', 'web')).toHaveLength(1)
+
+    await store.createSnapshot('c1', 'web', { name: 'snap1', stateful: true })
+    expect(api.createSnapshot).toHaveBeenCalledWith('c1', 'web', { name: 'snap1', stateful: true })
+    expect(api.listSnapshots).toHaveBeenCalledTimes(2)
+
+    await store.restoreSnapshot('c1', 'web', 'snap0')
+    expect(api.restoreSnapshot).toHaveBeenCalledWith('c1', 'web', 'snap0')
+    expect(api.getInstance).toHaveBeenCalledWith('c1', 'web')
+
+    await store.deleteSnapshot('c1', 'web', 'snap0')
+    expect(api.deleteSnapshot).toHaveBeenCalledWith('c1', 'web', 'snap0')
+    expect(api.listSnapshots).toHaveBeenCalledTimes(3)
+  })
+
+  it('records snapshot errors and surfaces them on the store', async () => {
+    vi.mocked(api.listSnapshots).mockRejectedValue(new Error('snapshots offline'))
+    vi.mocked(api.createSnapshot).mockRejectedValue(new Error('snapshot failed'))
+    const store = useInstancesStore()
+
+    await store.fetchSnapshots('c1', 'web')
+    expect(store.error).toBe('snapshots offline')
+    expect(store.snapshots('c1', 'web')).toEqual([])
+
+    await expect(store.createSnapshot('c1', 'web', { name: 'x' })).rejects.toThrow('snapshot failed')
+    expect(store.error).toBe('snapshot failed')
+  })
+
+  it('fetches, creates, and deletes custom volumes', async () => {
+    vi.mocked(api.listVolumes).mockResolvedValue([storageVolume()])
+    vi.mocked(api.createVolume).mockResolvedValue(undefined)
+    vi.mocked(api.deleteVolume).mockResolvedValue(undefined)
+    const store = useInstancesStore()
+
+    await store.fetchVolumes('c1', 'default')
+    await store.fetchVolumes('c1', 'default')
+    expect(api.listVolumes).toHaveBeenCalledTimes(1)
+    expect(store.volumes('c1', 'default')).toHaveLength(1)
+
+    await store.createVolume('c1', 'default', { name: 'assets', size: '5GiB' })
+    expect(api.createVolume).toHaveBeenCalledWith('c1', 'default', { name: 'assets', size: '5GiB' })
+    expect(api.listVolumes).toHaveBeenCalledTimes(2)
+
+    await store.deleteVolume('c1', 'default', 'assets')
+    expect(api.deleteVolume).toHaveBeenCalledWith('c1', 'default', 'assets')
+    expect(api.listVolumes).toHaveBeenCalledTimes(3)
+
+    vi.mocked(api.deleteVolume).mockRejectedValue(new Error('volume in use'))
+    await expect(store.deleteVolume('c1', 'default', 'assets')).rejects.toThrow('volume in use')
+  })
+
+  it('attaches and detaches devices into the cached detail', async () => {
+    vi.mocked(api.attachDevice).mockResolvedValue(instanceDetail({ devices: { data: { type: 'disk', path: '/data' } } }))
+    vi.mocked(api.detachDevice).mockResolvedValue(instanceDetail())
+    const store = useInstancesStore()
+
+    const attached = await store.attachDevice('c1', 'web', {
+      name: 'data',
+      type: 'disk',
+      path: '/data',
+    })
+    expect(api.attachDevice).toHaveBeenCalledWith('c1', 'web', { name: 'data', type: 'disk', path: '/data' })
+    expect(store.detail('c1', 'web')?.devices.data).toBeDefined()
+
+    const detached = await store.detachDevice('c1', 'web', 'data')
+    expect(api.detachDevice).toHaveBeenCalledWith('c1', 'web', 'data')
+    expect(detached.name).toBe('web')
+    expect(attached.name).toBe('web')
+
+    vi.mocked(api.attachDevice).mockRejectedValue(new Error('attach failed'))
+    await expect(store.attachDevice('c1', 'web', { name: 'x', type: 'disk', path: '/x' })).rejects.toThrow('attach failed')
+  })
+
+  it('deletes an image and invalidates the image cache', async () => {
+    vi.mocked(api.listImages).mockResolvedValue([instanceImage()])
+    vi.mocked(api.deleteImage).mockResolvedValue(undefined)
+    const store = useInstancesStore()
+
+    await store.fetchImages('c1')
+    await store.deleteImage('c1', '053059ea4e28')
+    expect(api.deleteImage).toHaveBeenCalledWith('c1', '053059ea4e28')
+    expect(store.imageCache.c1).toBeUndefined()
   })
 })

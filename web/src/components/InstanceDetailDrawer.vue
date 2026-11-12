@@ -4,6 +4,8 @@ import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import InstanceActions from '@/components/InstanceActions.vue'
+import InstanceDevices from '@/components/InstanceDevices.vue'
+import InstanceSnapshots from '@/components/InstanceSnapshots.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type { InstanceAction, InstanceDetail } from '@/api/types'
 import { useInstancesStore } from '@/stores/instances'
@@ -31,6 +33,7 @@ const instances = useInstancesStore()
 const { t } = useI18n()
 
 const actionLoading = ref(false)
+const activeTab = ref('overview')
 
 const visible = computed({
   get: () => props.modelValue,
@@ -42,7 +45,8 @@ const detail = computed(() => instances.detail(props.cluster, props.name))
 watch(
   () => [props.modelValue, props.cluster, props.name] as const,
   ([open, cluster, name]) => {
-    if (open && cluster && name && !detail.value) {
+    if (open && cluster && name) {
+      activeTab.value = 'overview'
       void instances.fetchDetail(cluster, name)
     }
   },
@@ -69,6 +73,10 @@ async function handleAction(action: InstanceAction): Promise<void> {
     actionLoading.value = false
   }
 }
+
+function onDevicesChanged(updated: InstanceDetail): void {
+  instances.details[`${props.cluster}/${props.name}`] = updated
+}
 </script>
 
 <template>
@@ -89,8 +97,10 @@ async function handleAction(action: InstanceAction): Promise<void> {
           />
         </div>
 
-        <div class="drawer-section">
-          <h4>{{ t('detail.instance') }}</h4>
+        <el-tabs v-model="activeTab" class="drawer-tabs">
+          <el-tab-pane :label="t('detail.tabOverview')" name="overview">
+            <div class="drawer-section">
+              <h4>{{ t('detail.instance') }}</h4>
           <div class="detail-grid">
             <div class="detail-item">
               <div class="label">{{ t('detail.type') }}</div>
@@ -197,19 +207,21 @@ async function handleAction(action: InstanceAction): Promise<void> {
             </div>
           </div>
         </div>
+          </el-tab-pane>
 
-        <div class="drawer-section">
-          <h4>{{ t('detail.devices') }}</h4>
-          <div class="config-list">
-            <div v-for="(device, key) in detail.devices" :key="key" class="config-row">
-              <span class="muted">{{ key }}</span>
-              <code>{{ Object.entries(device).map(([k, v]) => `${k}=${v}`).join(' ') }}</code>
-            </div>
-            <div v-if="Object.keys(detail.devices).length === 0" class="muted">
-              {{ t('detail.noDevices') }}
-            </div>
-          </div>
-        </div>
+          <el-tab-pane :label="t('detail.tabSnapshots')" name="snapshots">
+            <InstanceSnapshots :cluster="cluster" :instance="name" :summary="detail" />
+          </el-tab-pane>
+
+          <el-tab-pane :label="t('detail.tabDevices')" name="devices">
+            <InstanceDevices
+              :cluster="cluster"
+              :instance="name"
+              :detail="detail"
+              @changed="onDevicesChanged"
+            />
+          </el-tab-pane>
+        </el-tabs>
       </template>
 
       <el-empty v-else-if="!instances.detailLoading" :description="t('detail.unavailable')" />

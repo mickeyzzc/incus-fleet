@@ -2,10 +2,12 @@ import type {
   ClusterResources,
   ClusterSummary,
   CreateInstanceRequest,
+  DeviceRequest,
   HealthResponse,
   InstanceActionRequest,
   InstanceDetail,
   InstanceImage,
+  InstanceSnapshot,
   InstanceSummary,
   InstanceType,
   MemberUpdateRequest,
@@ -15,9 +17,12 @@ import type {
   Profile,
   ProfileRequest,
   SessionResponse,
+  SnapshotRequest,
   StoragePoolRequest,
+  StorageVolume,
   UpdateInstanceRequest,
   VersionResponse,
+  VolumeRequest,
 } from './types'
 
 /** Error thrown for non-successful API responses. */
@@ -139,6 +144,85 @@ export class ApiClient {
       `/api/v1/clusters/${encodeURIComponent(cluster)}/images`,
     )
     return data.images ?? []
+  }
+
+  async deleteImage(cluster: string, fingerprint: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/images/${encodeURIComponent(fingerprint)}`,
+    )
+  }
+
+  async listSnapshots(cluster: string, instance: string): Promise<InstanceSnapshot[]> {
+    const data = await this.request<{ snapshots: InstanceSnapshot[] }>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/snapshots`,
+    )
+    return data.snapshots ?? []
+  }
+
+  async createSnapshot(cluster: string, instance: string, request: SnapshotRequest): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/snapshots`,
+      request,
+    )
+  }
+
+  async restoreSnapshot(cluster: string, instance: string, snapshot: string): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/snapshots/${encodeURIComponent(snapshot)}/restore`,
+    )
+  }
+
+  async deleteSnapshot(cluster: string, instance: string, snapshot: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/snapshots/${encodeURIComponent(snapshot)}`,
+    )
+  }
+
+  async listVolumes(cluster: string, pool: string): Promise<StorageVolume[]> {
+    const data = await this.request<{ volumes: StorageVolume[] }>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/storage-pools/${encodeURIComponent(pool)}/volumes`,
+    )
+    return data.volumes ?? []
+  }
+
+  async createVolume(cluster: string, pool: string, request: VolumeRequest): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/storage-pools/${encodeURIComponent(pool)}/volumes`,
+      request,
+    )
+  }
+
+  async deleteVolume(cluster: string, pool: string, name: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/storage-pools/${encodeURIComponent(pool)}/volumes/${encodeURIComponent(name)}`,
+    )
+  }
+
+  async attachDevice(
+    cluster: string,
+    instance: string,
+    request: DeviceRequest,
+  ): Promise<InstanceDetail> {
+    return this.request<InstanceDetail>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/devices`,
+      request,
+    )
+  }
+
+  async detachDevice(cluster: string, instance: string, device: string): Promise<InstanceDetail> {
+    return this.request<InstanceDetail>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/devices/${encodeURIComponent(device)}`,
+    )
   }
 
   async getResources(cluster: string): Promise<ClusterResources> {

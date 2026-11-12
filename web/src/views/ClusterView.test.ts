@@ -13,10 +13,12 @@ import MigrateDialog from '@/components/MigrateDialog.vue'
 import NetworkDialog from '@/components/NetworkDialog.vue'
 import ProfileDialog from '@/components/ProfileDialog.vue'
 import StoragePoolDialog from '@/components/StoragePoolDialog.vue'
+import StorageVolumesDialog from '@/components/StorageVolumesDialog.vue'
 import {
   clusterResources,
   clusterSummary,
   instanceDetail,
+  instanceImage,
   instanceSummary,
   profileSummary,
 } from '@/test/fixtures'
@@ -47,7 +49,12 @@ function mockFleet() {
   vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
   vi.mocked(api.reconnectCluster).mockResolvedValue(clusterSummary({ online: true }))
   vi.mocked(api.getResources).mockResolvedValue(clusterResources())
-  vi.mocked(api.listImages).mockResolvedValue([])
+  vi.mocked(api.listImages).mockResolvedValue([
+    instanceImage({ cached: true }),
+    instanceImage({ fingerprint: 'fedcba098765', aliases: ['ubuntu'], os: 'Ubuntu', cached: false }),
+  ])
+  vi.mocked(api.deleteImage).mockResolvedValue(undefined)
+  vi.mocked(api.listVolumes).mockResolvedValue([])
   vi.mocked(api.listProfiles).mockResolvedValue([
     profileSummary({ name: 'default', description: 'base profile' }),
   ])
@@ -359,5 +366,46 @@ describe('ClusterView', () => {
       force: true,
     })
     expect(ElMessage.success).toHaveBeenCalledWith('Stopped web.')
+  })
+
+  it('renders images and deletes one after confirmation', async () => {
+    const { wrapper } = await mountCluster()
+
+    expect(wrapper.text()).toContain('ubuntu')
+
+    const imageRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('053059ea4e28'))
+    await imageRow?.findAll('button').find((b) => b.text().includes('Delete'))?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteImage).toHaveBeenCalledWith('c1', '053059ea4e28')
+    expect(ElMessage.success).toHaveBeenCalledWith('Image deleted.')
+  })
+
+  it('cleans up cached images only', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Remove cached images').trigger('click')
+    await flushPromises()
+
+    expect(api.deleteImage).toHaveBeenCalledTimes(1)
+    expect(api.deleteImage).toHaveBeenCalledWith('c1', '053059ea4e28')
+    expect(ElMessage.success).toHaveBeenCalledWith('Removed 1 cached images.')
+  })
+
+  it('opens the volumes dialog for a pool', async () => {
+    const { wrapper } = await mountCluster()
+
+    const poolRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('/srv/incus'))
+    await poolRow?.findAll('button').find((b) => b.text().includes('Volumes'))?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(StorageVolumesDialog)
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('pool')).toMatchObject({ name: 'default' })
+    expect(api.listVolumes).toHaveBeenCalledWith('c1', 'default')
   })
 })

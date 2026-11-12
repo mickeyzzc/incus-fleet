@@ -4,7 +4,7 @@ import ElementPlus, { ElMessage } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
-import { instanceDetail } from '@/test/fixtures'
+import { instanceDetail, instanceSnapshot } from '@/test/fixtures'
 import InstanceDetailDrawer from './InstanceDetailDrawer.vue'
 
 describe('InstanceDetailDrawer', () => {
@@ -24,8 +24,21 @@ describe('InstanceDetailDrawer', () => {
     expect(wrapper.text()).toContain('web · c1')
     expect(wrapper.text()).toContain('Debian GNU/Linux')
     expect(wrapper.text()).toContain('image.os')
-    expect(wrapper.text()).toContain('type=disk')
+    expect(wrapper.text()).toContain('pool=default · path=/')
     expect(wrapper.text()).toContain('Storage pool')
+  })
+
+  it('lists snapshots in the snapshots tab', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+    vi.mocked(api.listSnapshots).mockResolvedValue([instanceSnapshot()])
+    const wrapper = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'web' },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    expect(api.listSnapshots).toHaveBeenCalledWith('c1', 'web')
+    expect(wrapper.text()).toContain('snap0')
   })
 
   it('does not fetch while closed and fetches when opened', async () => {

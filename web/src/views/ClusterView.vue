@@ -15,6 +15,7 @@ import ProfileDialog from '@/components/ProfileDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import StorageBar from '@/components/StorageBar.vue'
 import StoragePoolDialog from '@/components/StoragePoolDialog.vue'
+import StorageVolumesDialog from '@/components/StorageVolumesDialog.vue'
 import type {
   ClusterMember,
   InstanceDetail,
@@ -52,10 +53,14 @@ const profileDialogOpen = ref(false)
 const profileEditing = ref<Profile | null>(null)
 const memberDialogOpen = ref(false)
 const memberEditing = ref<ClusterMember | null>(null)
+const volumesDialogOpen = ref(false)
+const volumesPool = ref<StoragePoolResource | null>(null)
 
 const summary = computed(() => clusters.byName(props.cluster))
 const resources = computed(() => instances.resources(props.cluster))
 const profiles = computed(() => instances.profiles(props.cluster))
+const clusterImages = computed(() => instances.images(props.cluster))
+const cachedImageCount = computed(() => clusterImages.value.filter((image) => image.cached).length)
 const filtered = computed(() =>
   instances.items.filter(
     (instance) => typeFilter.value === 'any' || instance.type === typeFilter.value,
@@ -77,6 +82,7 @@ async function load(force = false): Promise<void> {
     instances.fetchCluster(props.cluster, typeFilter.value),
     instances.fetchResources(props.cluster, force),
     instances.fetchProfiles(props.cluster, force),
+    instances.fetchImages(props.cluster, force),
   ])
 }
 
@@ -220,6 +226,53 @@ async function confirmDeleteProfile(profile: Profile): Promise<void> {
 function openMemberDialog(member: ClusterMember): void {
   memberEditing.value = member
   memberDialogOpen.value = true
+}
+
+function openVolumesDialog(pool: StoragePoolResource): void {
+  volumesPool.value = pool
+  volumesDialogOpen.value = true
+}
+
+async function deleteImage(fingerprint: string): Promise<void> {
+  try {
+    await instances.deleteImage(props.cluster, fingerprint)
+    ElMessage.success(t('images.deleted'))
+    await instances.fetchImages(props.cluster, true)
+  } catch (err) {
+    ElMessage.error(t('images.failed', { error: errorMessage(err) }))
+  }
+}
+
+async function cleanupCachedImages(): Promise<void> {
+  const cached = instances.images(props.cluster).filter((image) => image.cached)
+  if (cached.length === 0) {
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      t('images.cleanupConfirm', { count: cached.length }),
+      t('images.cleanup'),
+      { type: 'warning', confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
+
+  let removed = 0
+  for (const image of cached) {
+    try {
+      await instances.deleteImage(props.cluster, image.fingerprint)
+      removed += 1
+    } catch (err) {
+      ElMessage.error(t('images.failed', { error: errorMessage(err) }))
+    }
+  }
+
+  if (removed > 0) {
+    ElMessage.success(t('images.cleanupDone', { count: removed }))
+  }
+  await instances.fetchImages(props.cluster, true)
 }
 
 function instanceTypeLabel(type: string): string {
@@ -455,8 +508,11 @@ function instanceTypeLabel(type: string): string {
               {{ t('cluster.usedByCount', { count: row.used_by.length }) }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.actions')" width="150" fixed="right">
+          <el-table-column :label="t('common.actions')" width="200" fixed="right">
             <template #default="{ row }">
+              <el-button link type="primary" @click="openVolumesDialog(row)">
+                {{ t('volumes.manage') }}
+              </el-button>
               <el-button link type="primary" @click="openPoolDialog(row)">
                 {{ t('common.edit') }}
               </el-button>
@@ -467,6 +523,68 @@ function instanceTypeLabel(type: string): string {
           </el-table-column>
           <template #empty>
             <el-empty :description="t('cluster.noPools')" />
+          </template>
+        </el-table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-body">
+        <div class="section-heading page-header">
+          <div>
+            <h3 class="section-title">{{ t('images.title') }}</h3>
+            <p class="subtitle">{{ t('form.imageHint') }}</p>
+          </div>
+          <div class="page-actions">
+            <el-button
+              v-if="cachedImageCount > 0"
+              :loading="instances.saving"
+              @click="cleanupCachedImages"
+            >
+              {{ t('images.cleanup') }} ({{ cachedImageCount }})
+            </el-button>
+          </div>
+        </div>
+
+        <el-table v-loading="instances.imagesLoading" :data="clusterImages" size="small" stripe>
+          <el-table-column :label="t('form.image')" min-width="180">
+            <template #default="{ row }">
+              <strong>{{ row.aliases[0] || row.os || row.fingerprint.slice(0, 12) }}</strong>
+              <span v-if="row.release" class="mini-label">{{ row.release }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('images.fingerprint')" min-width="140">
+            <template #default="{ row }">
+              <span class="mono">{{ row.fingerprint.slice(0, 12) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.type')" width="130">
+            <template #default="{ row }">
+              {{ instanceTypeLabel(row.type || 'container') }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.size')" width="100">
+            <template #default="{ row }">
+              {{ formatBytes(row.size) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('images.cached')" width="90">
+            <template #default="{ row }">
+              <el-tag v-if="row.cached" size="small" type="warning" effect="light">
+                {{ t('images.cached') }}
+              </el-tag>
+              <span v-else class="muted">{{ t('common.none') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" width="90">
+            <template #default="{ row }">
+              <el-button link type="danger" @click="deleteImage(row.fingerprint)">
+                {{ t('common.delete') }}
+              </el-button>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty :description="t('images.empty')" />
           </template>
         </el-table>
       </div>
@@ -633,6 +751,11 @@ function instanceTypeLabel(type: string): string {
       @saved="instances.fetchProfiles(cluster, true)"
     />
     <MemberDialog v-model="memberDialogOpen" :cluster="cluster" :member="memberEditing" />
+    <StorageVolumesDialog
+      v-model="volumesDialogOpen"
+      :cluster="cluster"
+      :pool="volumesPool"
+    />
   </div>
 </template>
 

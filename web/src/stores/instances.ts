@@ -5,17 +5,22 @@ import { api } from '@/api'
 import type {
   ClusterResources,
   CreateInstanceRequest,
+  DeviceRequest,
   InstanceAction,
   InstanceDetail,
   InstanceImage,
+  InstanceSnapshot,
   InstanceSummary,
   InstanceType,
   MemberUpdateRequest,
   NetworkRequest,
   Profile,
   ProfileRequest,
+  SnapshotRequest,
   StoragePoolRequest,
+  StorageVolume,
   UpdateInstanceRequest,
+  VolumeRequest,
 } from '@/api/types'
 import { errorMessage } from '@/utils/errors'
 
@@ -26,11 +31,15 @@ export const useInstancesStore = defineStore('instances', () => {
   const imageCache = ref<Record<string, InstanceImage[]>>({})
   const resourceCache = ref<Record<string, ClusterResources>>({})
   const profileCache = ref<Record<string, Profile[]>>({})
+  const snapshotCache = ref<Record<string, InstanceSnapshot[]>>({})
+  const volumeCache = ref<Record<string, StorageVolume[]>>({})
   const loading = ref(false)
   const detailLoading = ref(false)
   const imagesLoading = ref(false)
   const resourcesLoading = ref(false)
   const profilesLoading = ref(false)
+  const snapshotsLoading = ref(false)
+  const volumesLoading = ref(false)
   const saving = ref(false)
   const error = ref('')
   const filter = ref<InstanceType>('any')
@@ -45,6 +54,14 @@ export const useInstancesStore = defineStore('instances', () => {
 
   function detailKey(cluster: string, name: string): string {
     return `${cluster}/${name}`
+  }
+
+  function snapshotKey(cluster: string, name: string): string {
+    return `${cluster}/${name}`
+  }
+
+  function volumeKey(cluster: string, pool: string): string {
+    return `${cluster}/${pool}`
   }
 
   /** Fetches instances from all clusters, optionally filtered by type. */
@@ -383,6 +400,192 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
+  /** Deletes an image from a cluster and invalidates the cached image list. */
+  async function deleteImage(cluster: string, fingerprint: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.deleteImage(cluster, fingerprint)
+      delete imageCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Lists instance snapshots, reusing the cache unless forced. */
+  async function fetchSnapshots(
+    cluster: string,
+    instance: string,
+    force = false,
+  ): Promise<void> {
+    const key = snapshotKey(cluster, instance)
+    if (!force && snapshotCache.value[key]) {
+      return
+    }
+
+    snapshotsLoading.value = true
+    error.value = ''
+
+    try {
+      snapshotCache.value[key] = await api.listSnapshots(cluster, instance)
+    } catch (err) {
+      error.value = errorMessage(err)
+      delete snapshotCache.value[key]
+    } finally {
+      snapshotsLoading.value = false
+    }
+  }
+
+  /** Creates a snapshot and refreshes the cached list. */
+  async function createSnapshot(
+    cluster: string,
+    instance: string,
+    request: SnapshotRequest,
+  ): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.createSnapshot(cluster, instance, request)
+      await fetchSnapshots(cluster, instance, true)
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Restores a snapshot and refreshes the instance detail. */
+  async function restoreSnapshot(cluster: string, instance: string, snapshot: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.restoreSnapshot(cluster, instance, snapshot)
+      await fetchDetail(cluster, instance)
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Deletes a snapshot and refreshes the cached list. */
+  async function deleteSnapshot(cluster: string, instance: string, snapshot: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.deleteSnapshot(cluster, instance, snapshot)
+      await fetchSnapshots(cluster, instance, true)
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Lists custom volumes of one pool, reusing the cache unless forced. */
+  async function fetchVolumes(cluster: string, pool: string, force = false): Promise<void> {
+    const key = volumeKey(cluster, pool)
+    if (!force && volumeCache.value[key]) {
+      return
+    }
+
+    volumesLoading.value = true
+    error.value = ''
+
+    try {
+      volumeCache.value[key] = await api.listVolumes(cluster, pool)
+    } catch (err) {
+      error.value = errorMessage(err)
+      delete volumeCache.value[key]
+    } finally {
+      volumesLoading.value = false
+    }
+  }
+
+  /** Creates a custom volume and refreshes the cached list. */
+  async function createVolume(cluster: string, pool: string, request: VolumeRequest): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.createVolume(cluster, pool, request)
+      await fetchVolumes(cluster, pool, true)
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Deletes a custom volume and refreshes the cached list. */
+  async function deleteVolume(cluster: string, pool: string, name: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.deleteVolume(cluster, pool, name)
+      await fetchVolumes(cluster, pool, true)
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Attaches a device and caches the returned detail. */
+  async function attachDevice(
+    cluster: string,
+    instance: string,
+    request: DeviceRequest,
+  ): Promise<InstanceDetail> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const detail = await api.attachDevice(cluster, instance, request)
+      details.value[detailKey(cluster, instance)] = detail
+      return detail
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Detaches a device and caches the returned detail. */
+  async function detachDevice(
+    cluster: string,
+    instance: string,
+    device: string,
+  ): Promise<InstanceDetail> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const detail = await api.detachDevice(cluster, instance, device)
+      details.value[detailKey(cluster, instance)] = detail
+      return detail
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
   /** Updates safe cluster member metadata. */
   async function updateMember(
     cluster: string,
@@ -422,17 +625,29 @@ export const useInstancesStore = defineStore('instances', () => {
     return items.value.filter((instance) => instance.cluster === cluster)
   }
 
+  function snapshots(cluster: string, instance: string): InstanceSnapshot[] {
+    return snapshotCache.value[snapshotKey(cluster, instance)] ?? []
+  }
+
+  function volumes(cluster: string, pool: string): StorageVolume[] {
+    return volumeCache.value[volumeKey(cluster, pool)] ?? []
+  }
+
   return {
     items,
     details,
     imageCache,
     resourceCache,
     profileCache,
+    snapshotCache,
+    volumeCache,
     loading,
     detailLoading,
     imagesLoading,
     resourcesLoading,
     profilesLoading,
+    snapshotsLoading,
+    volumesLoading,
     saving,
     error,
     filter,
@@ -445,6 +660,8 @@ export const useInstancesStore = defineStore('instances', () => {
     fetchImages,
     fetchResources,
     fetchProfiles,
+    fetchSnapshots,
+    fetchVolumes,
     createInstance,
     updateInstance,
     instanceAction,
@@ -459,10 +676,20 @@ export const useInstancesStore = defineStore('instances', () => {
     updateProfile,
     deleteProfile,
     updateMember,
+    deleteImage,
+    createSnapshot,
+    restoreSnapshot,
+    deleteSnapshot,
+    createVolume,
+    deleteVolume,
+    attachDevice,
+    detachDevice,
     detail,
     images,
     resources,
     profiles,
+    snapshots,
+    volumes,
     byCluster,
   }
 })
