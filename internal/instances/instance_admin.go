@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,10 +50,10 @@ type VolumeRequest struct {
 	Config      map[string]string `json:"config,omitempty"`
 }
 
-// DeviceRequest attaches one disk or NIC device to an instance.
+// DeviceRequest attaches one disk, NIC, or proxy device to an instance.
 type DeviceRequest struct {
 	Name    string `json:"name"`
-	Type    string `json:"type"` // disk or nic
+	Type    string `json:"type"` // disk, nic, or proxy
 	Pool    string `json:"pool,omitempty"`
 	Source  string `json:"source,omitempty"` // volume name or host path
 	Path    string `json:"path,omitempty"`
@@ -60,6 +61,9 @@ type DeviceRequest struct {
 	Network string `json:"network,omitempty"`
 	IPv4    string `json:"ipv4,omitempty"`
 	IPv6    string `json:"ipv6,omitempty"`
+	Listen  string `json:"listen,omitempty"`  // proxy: tcp:host:port
+	Connect string `json:"connect,omitempty"` // proxy: tcp:instance:port
+	Boot    string `json:"boot,omitempty"`    // disk: boot.priority for installer ISOs
 }
 
 // ListSnapshots returns the snapshots of one instance.
@@ -457,7 +461,41 @@ func buildDevice(
 		}
 
 		return device, nil
+	case "proxy":
+		listen := strings.TrimSpace(req.Listen)
+		connect := strings.TrimSpace(req.Connect)
+		if listen == "" || connect == "" {
+			return nil, fmt.Errorf("%w: proxy device %q requires listen and connect", ErrInvalidRequest, deviceName)
+		}
+		if err := validateProxyEndpoint("listen", listen); err != nil {
+			return nil, err
+		}
+		if err := validateProxyEndpoint("connect", connect); err != nil {
+			return nil, err
+		}
+
+		return map[string]string{"type": "proxy", "listen": listen, "connect": connect}, nil
 	default:
-		return nil, fmt.Errorf("%w: device type must be disk or nic", ErrInvalidRequest)
+		return nil, fmt.Errorf("%w: device type must be disk, nic, or proxy", ErrInvalidRequest)
 	}
+}
+
+// validateProxyEndpoint checks a tcp:/udp: proxy endpoint shape.
+func validateProxyEndpoint(field, value string) error {
+	if !strings.HasPrefix(value, "tcp:") && !strings.HasPrefix(value, "udp:") {
+		return fmt.Errorf("%w: proxy %s must start with tcp: or udp:", ErrInvalidRequest, field)
+	}
+
+	addr := value[strings.Index(value, ":")+1:]
+	host, port, ok := strings.Cut(addr, ":")
+	if !ok || host == "" || port == "" {
+		return fmt.Errorf("%w: proxy %s must be <proto>:<host>:<port>", ErrInvalidRequest, field)
+	}
+
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 {
+		return fmt.Errorf("%w: proxy %s port must be between 1 and 65535", ErrInvalidRequest, field)
+	}
+
+	return nil
 }

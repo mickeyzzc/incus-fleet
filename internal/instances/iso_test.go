@@ -1,0 +1,150 @@
+package instances
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/lxc/incus/v7/shared/api"
+
+	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
+)
+
+func TestImportISO(t *testing.T) {
+	source := &incusfake.Server{}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": source})
+	ctx := context.Background()
+
+	name, err := svc.ImportISO(ctx, "c1", "default", "debian-13.1-amd64.iso", strings.NewReader("iso-bytes"))
+	if err != nil {
+		t.Fatalf("ImportISO() error = %v", err)
+	}
+	if name != "debian-13.1-amd64" {
+		t.Fatalf("ImportISO() name = %q", name)
+	}
+	imports := source.CreateISOArgs()
+	if len(imports) != 1 || imports[0].Pool != "default" || imports[0].Name != "debian-13.1-amd64" || !imports[0].Reader {
+		t.Fatalf("import args = %#v", imports)
+	}
+
+	if _, err = svc.ImportISO(ctx, "c1", "default", "", strings.NewReader("x")); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("ImportISO() empty filename = %v", err)
+	}
+	if _, err = svc.ImportISO(ctx, "c1", "", "a.iso", strings.NewReader("x")); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("ImportISO() empty pool = %v", err)
+	}
+	if _, err = svc.ImportISO(ctx, "missing", "default", "a.iso", strings.NewReader("x")); err == nil {
+		t.Fatal("ImportISO() expected unknown cluster error")
+	}
+
+	source.CreateISOErr = errors.New("disk full")
+	if _, err = svc.ImportISO(ctx, "c1", "default", "a.iso", strings.NewReader("x")); err == nil {
+		t.Fatal("ImportISO() expected daemon error")
+	}
+
+	// A failed import operation surfaces the daemon error.
+	isoFail := &incusfake.Server{Operation: &incusfake.Operation{Err: errors.New("import failed")}}
+	failSvc := newTestService(t, map[string]*incusfake.Server{"c1": isoFail})
+	if _, err = failSvc.ImportISO(ctx, "c1", "default", "a.iso", strings.NewReader("x")); err == nil {
+		t.Fatal("ImportISO() expected operation error")
+	}
+}
+
+func TestListISOs(t *testing.T) {
+	source := &incusfake.Server{
+		Volumes: []api.StorageVolume{
+			{Name: "debian-13", Type: "custom", ContentType: "iso", Description: "Debian 13 installer"},
+			{Name: "data", Type: "custom", ContentType: "filesystem"},
+		},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": source})
+
+	isos, err := svc.ListISOs("c1")
+	if err != nil {
+		t.Fatalf("ListISOs() error = %v", err)
+	}
+	if len(isos) != 1 || isos[0].Name != "debian-13" || isos[0].Pool != "default" || isos[0].Description != "Debian 13 installer" {
+		t.Fatalf("isos = %#v", isos)
+	}
+}
+
+func TestDeleteISO(t *testing.T) {
+	source := &incusfake.Server{}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": source})
+
+	if err := svc.DeleteISO("c1", "default", "debian-13"); err != nil {
+		t.Fatalf("DeleteISO() error = %v", err)
+	}
+	deleted := source.DeleteVolumeArgs()
+	if len(deleted) != 1 || deleted[0].Pool != "default" || deleted[0].Type != "custom" || deleted[0].Name != "debian-13" {
+		t.Fatalf("delete args = %#v", deleted)
+	}
+
+	if err := svc.DeleteISO("c1", "default", ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("DeleteISO() empty name = %v", err)
+	}
+	if err := svc.DeleteISO("missing", "default", "x"); err == nil {
+		t.Fatal("DeleteISO() expected unknown cluster error")
+	}
+}
+
+func TestLaunchFromISO(t *testing.T) {
+	start := true
+	source := &incusfake.Server{
+		Instance: &api.Instance{
+			Name:       "installer",
+			Type:       "virtual-machine",
+			Status:     "Running",
+			StatusCode: api.Running,
+		},
+		NetworkNames: []string{"incusbr0"},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": source})
+	ctx := context.Background()
+
+	detail, err := svc.LaunchFromISO(ctx, "c1", LaunchISORequest{
+		Name:        "installer",
+		ISOName:     "debian-13",
+		StoragePool: "default",
+		Network:     "incusbr0",
+		RootDisk:    "20GiB",
+		Start:       &start,
+	})
+	if err != nil {
+		t.Fatalf("LaunchFromISO() error = %v", err)
+	}
+	if detail.Name != "installer" {
+		t.Fatalf("detail = %#v", detail)
+	}
+
+	created := source.CreateArgs()
+	if len(created) != 1 {
+		t.Fatalf("create args = %#v", created)
+	}
+	post := created[0]
+	if post.Type != api.InstanceTypeVM || post.Source.Type != "none" || !post.Start {
+		t.Fatalf("post = %#v", post)
+	}
+	iso := post.Devices["iso0"]
+	if iso["type"] != "disk" || iso["pool"] != "default" || iso["source"] != "debian-13" || iso["boot.priority"] != "1" {
+		t.Fatalf("iso device = %#v", iso)
+	}
+	root := post.Devices["root"]
+	if root["size"] != "20GiB" {
+		t.Fatalf("root device = %#v", root)
+	}
+	if post.Devices["eth0"]["network"] != "incusbr0" {
+		t.Fatalf("nic = %#v", post.Devices["eth0"])
+	}
+
+	if _, err = svc.LaunchFromISO(ctx, "c1", LaunchISORequest{Name: "", ISOName: "debian-13"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("LaunchFromISO() empty name = %v", err)
+	}
+	if _, err = svc.LaunchFromISO(ctx, "c1", LaunchISORequest{Name: "x", ISOName: ""}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("LaunchFromISO() empty iso = %v", err)
+	}
+	if _, err = svc.LaunchFromISO(ctx, "c1", LaunchISORequest{Name: "x", ISOName: "debian-13", StoragePool: "missing"}); err == nil {
+		t.Fatal("LaunchFromISO() expected unknown pool error")
+	}
+}

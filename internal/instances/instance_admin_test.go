@@ -409,6 +409,15 @@ func TestDeviceAndImageErrorPaths(t *testing.T) {
 
 func TestImageTransfer(t *testing.T) {
 	source := &incusfake.Server{
+		Instance: &api.Instance{
+			Name:       "web",
+			Type:       "container",
+			Status:     "Running",
+			StatusCode: api.Running,
+			InstancePut: api.InstancePut{
+				Profiles: []string{"default"},
+			},
+		},
 		Images:    []api.Image{{Fingerprint: "abc123def456", Filename: "debian13.tar", Type: "container"}},
 		Operation: &incusfake.Operation{Metadata: map[string]any{"fingerprint": "abc123def456"}},
 	}
@@ -512,6 +521,33 @@ func TestImageTransfer(t *testing.T) {
 		t.Fatalf("CopyImageTo() missing image = %v", err)
 	}
 	source.Images = []api.Image{{Fingerprint: "abc123def456", Type: "container"}}
+
+	// Proxy port-forward devices validate listen/connect endpoints.
+	if _, err := svc.AttachDevice(ctx, "c1", "web", DeviceRequest{Name: "web80", Type: "proxy", Listen: "tcp:0.0.0.0:8080", Connect: "tcp:127.0.0.1:80"}); err != nil {
+		t.Fatalf("AttachDevice() proxy error = %v", err)
+	}
+	proxy := source.UpdateArgs()[len(source.UpdateArgs())-1].Instance.Devices["web80"]
+	if proxy["type"] != "proxy" || proxy["listen"] != "tcp:0.0.0.0:8080" || proxy["connect"] != "tcp:127.0.0.1:80" {
+		t.Fatalf("proxy device = %#v", proxy)
+	}
+	bad := []DeviceRequest{
+		{Name: "p", Type: "proxy", Listen: "tcp:0.0.0.0:8080"},
+		{Name: "p", Type: "proxy", Connect: "tcp:127.0.0.1:80"},
+		{Name: "p", Type: "proxy", Listen: "http://x:80", Connect: "tcp:127.0.0.1:80"},
+		{Name: "p", Type: "proxy", Listen: "tcp:0.0.0.0:notaport", Connect: "tcp:127.0.0.1:80"},
+	}
+	for _, req := range bad {
+		if _, err := svc.AttachDevice(ctx, "c1", "web", req); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("AttachDevice() invalid proxy %s = %v", req.Listen, err)
+		}
+	}
+
+	// An unknown instance surfaces the daemon lookup error.
+	source.InstanceErr = errors.New("missing")
+	if _, err := svc.AttachDevice(ctx, "c1", "web", DeviceRequest{Name: "x", Type: "proxy", Listen: "tcp:0.0.0.0:8443", Connect: "tcp:127.0.0.1:443"}); err == nil {
+		t.Fatal("AttachDevice() expected instance lookup error")
+	}
+	source.InstanceErr = nil
 
 	// A remote transfer that fails while waiting propagates the daemon error.
 	target.RemoteOperation = &incusfake.RemoteOperation{Err: errors.New("transfer aborted")}

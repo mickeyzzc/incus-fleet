@@ -35,6 +35,7 @@ type Server struct {
 	Instances         []api.InstanceFull
 	InstancesErr      error
 	Instance          *api.Instance
+	ExtraInstances    []api.Instance
 	InstanceErr       error
 	State             *api.InstanceState
 	StateFunc         func(name string) (*api.InstanceState, error)
@@ -46,11 +47,16 @@ type Server struct {
 	DeleteErr         error
 	ConsoleErr        error
 	ExecErr           error
+	ExecOutput        string
+	ExecErrOutput     string
 	GetFileErr        error
 	CreateFileErr     error
 	ImageErr          error
 	CreateImageErr    error
 	CopyImageErr      error
+	CreateISOErr      error
+	RebuildErr        error
+	RefreshImageErr   error
 	DeleteFileErr     error
 	ListFilesErr      error
 	MkdirErr          error
@@ -124,6 +130,9 @@ type Server struct {
 	deleteImages    []string
 	createdImages   []ImageArgs
 	copiedImages    []ImageArgs
+	isoImports      []ISOArgs
+	rebuilds        []RebuildArgs
+	refreshedImages []string
 	createVolumes   []VolumeArgs
 	deleteVolumes   []VolumeArgs
 	consoleCalls    int
@@ -220,6 +229,19 @@ type VolumeArgs struct {
 	Volume api.StorageVolumesPost
 }
 
+// ISOArgs records one CreateStoragePoolVolumeFromISO call.
+type ISOArgs struct {
+	Pool   string
+	Name   string
+	Reader bool
+}
+
+// RebuildArgs records one RebuildInstance call.
+type RebuildArgs struct {
+	Instance string
+	Source   api.InstanceSource
+}
+
 // CreateSnapshotArgs returns the arguments recorded by CreateInstanceSnapshot.
 func (s *Server) CreateSnapshotArgs() []SnapshotArgs {
 	s.mu.Lock()
@@ -258,6 +280,30 @@ func (s *Server) DeleteVolumeArgs() []VolumeArgs {
 	defer s.mu.Unlock()
 
 	return append([]VolumeArgs(nil), s.deleteVolumes...)
+}
+
+// ISOArgs returns the calls recorded by CreateStoragePoolVolumeFromISO.
+func (s *Server) CreateISOArgs() []ISOArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]ISOArgs(nil), s.isoImports...)
+}
+
+// RebuildArgs returns the calls recorded by RebuildInstance.
+func (s *Server) RebuildArgs() []RebuildArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]RebuildArgs(nil), s.rebuilds...)
+}
+
+// RefreshImageArgs returns the fingerprints recorded by RefreshImage.
+func (s *Server) RefreshImageArgs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.refreshedImages...)
 }
 
 // UpdateStoragePoolArgs records one UpdateStoragePool call.
@@ -522,6 +568,11 @@ func (s *Server) GetInstance(name string) (*api.Instance, string, error) {
 	if s.Instance != nil && (s.Instance.Name == name || s.Instance.Name == "") {
 		return s.Instance, "", nil
 	}
+	for i := range s.ExtraInstances {
+		if s.ExtraInstances[i].Name == name {
+			return &s.ExtraInstances[i], "", nil
+		}
+	}
 
 	return nil, "", api.StatusErrorf(http.StatusNotFound, "Instance %q not found", name)
 }
@@ -727,6 +778,63 @@ func (s *Server) CopyImage(_ incus.ImageServer, image api.Image, args *incus.Ima
 	return &RemoteOperation{}, nil
 }
 
+// CreateStoragePoolVolumeFromISO implements clusters.InstanceServer.
+func (s *Server) CreateStoragePoolVolumeFromISO(pool string, args incus.StorageVolumeBackupArgs) (incus.Operation, error) {
+	s.record("CreateStoragePoolVolumeFromISO:" + pool + "/" + args.Name)
+	entry := ISOArgs{Pool: pool, Name: args.Name}
+	if args.BackupFile != nil {
+		entry.Reader = true
+		_, _ = io.Copy(io.Discard, args.BackupFile)
+	}
+
+	s.mu.Lock()
+	s.isoImports = append(s.isoImports, entry)
+	s.mu.Unlock()
+
+	if s.CreateISOErr != nil {
+		return nil, s.CreateISOErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// RebuildInstance implements clusters.InstanceServer.
+func (s *Server) RebuildInstance(instanceName string, req api.InstanceRebuildPost) (incus.Operation, error) {
+	s.record("RebuildInstance:" + instanceName)
+	s.mu.Lock()
+	s.rebuilds = append(s.rebuilds, RebuildArgs{Instance: instanceName, Source: req.Source})
+	s.mu.Unlock()
+
+	if s.RebuildErr != nil {
+		return nil, s.RebuildErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// RefreshImage implements clusters.InstanceServer.
+func (s *Server) RefreshImage(fingerprint string) (incus.Operation, error) {
+	s.record("RefreshImage:" + fingerprint)
+	s.mu.Lock()
+	s.refreshedImages = append(s.refreshedImages, fingerprint)
+	s.mu.Unlock()
+
+	if s.RefreshImageErr != nil {
+		return nil, s.RefreshImageErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
 // UseProject implements the full SDK interface; the fake ignores projects
 // and returns itself so test doubles survive reconnects with a project set.
 func (s *Server) UseProject(project string) incus.InstanceServer {
@@ -753,7 +861,7 @@ func (s *Server) ConsoleInstanceDynamic(instanceName string, _ api.InstanceConso
 }
 
 // ExecInstance implements clusters.InstanceServer.
-func (s *Server) ExecInstance(instanceName string, exec api.InstanceExecPost, _ *incus.InstanceExecArgs) (incus.Operation, error) {
+func (s *Server) ExecInstance(instanceName string, exec api.InstanceExecPost, args *incus.InstanceExecArgs) (incus.Operation, error) {
 	s.record("ExecInstance:" + instanceName)
 	s.mu.Lock()
 	s.execArgs = append(s.execArgs, exec)
@@ -762,6 +870,20 @@ func (s *Server) ExecInstance(instanceName string, exec api.InstanceExecPost, _ 
 	if s.ExecErr != nil {
 		return nil, s.ExecErr
 	}
+
+	// Emulate a non-interactive run: canned output and closed data channel.
+	if args != nil {
+		if s.ExecOutput != "" && args.Stdout != nil {
+			_, _ = io.WriteString(args.Stdout, s.ExecOutput)
+		}
+		if s.ExecErrOutput != "" && args.Stderr != nil {
+			_, _ = io.WriteString(args.Stderr, s.ExecErrOutput)
+		}
+		if args.DataDone != nil {
+			close(args.DataDone)
+		}
+	}
+
 	if s.Operation != nil {
 		return s.Operation, nil
 	}

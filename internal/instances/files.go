@@ -50,6 +50,26 @@ func (s *Service) ConsoleOp(clusterName, name string) (incus.Operation, error) {
 	return op, nil
 }
 
+// VgaOp opens the graphical console of a running virtual machine. The data
+// channel carries the raw SPICE protocol, which the browser client speaks.
+func (s *Service) VgaOp(clusterName, name string) (incus.Operation, error) {
+	client, err := s.client(clusterName)
+	if err != nil {
+		return nil, err
+	}
+
+	op, _, err := client.ConsoleInstanceDynamic(name, api.InstanceConsolePost{
+		Type: "vga",
+	}, &incus.InstanceConsoleArgs{
+		Control: func(*websocket.Conn) {},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("instances: vga console %s:%s: %w", clusterName, name, err)
+	}
+
+	return op, nil
+}
+
 // ExecOp starts an interactive command operation for an instance.
 func (s *Service) ExecOp(clusterName, name string, req ExecRequest) (incus.Operation, error) {
 	if len(req.Command) == 0 {

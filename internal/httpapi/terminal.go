@@ -35,6 +35,22 @@ func (a *API) instanceTerminal(w http.ResponseWriter, r *http.Request) {
 	_ = relayTerminal(r.Context(), conn, op, terminalDebugf(a, r))
 }
 
+// instanceVga opens the graphical (SPICE) console websocket of a VM.
+func (a *API) instanceVga(w http.ResponseWriter, r *http.Request) {
+	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+
+	op, err := a.instances.VgaOp(r.PathValue("cluster"), r.PathValue("instance"))
+	if err != nil {
+		closeWSWithError(conn, err)
+		return
+	}
+
+	_ = relayTerminal(r.Context(), conn, op, terminalDebugf(a, r))
+}
+
 // instanceExec opens an interactive exec websocket for an instance. The first
 // browser frame carries the JSON start request.
 func (a *API) instanceExec(w http.ResponseWriter, r *http.Request) {

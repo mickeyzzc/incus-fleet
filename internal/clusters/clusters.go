@@ -62,6 +62,9 @@ type InstanceServer interface {
 	GetStoragePoolVolumes(pool string) ([]api.StorageVolume, error)
 	CreateStoragePoolVolume(pool string, volume api.StorageVolumesPost) error
 	DeleteStoragePoolVolume(pool string, volType string, name string) error
+	CreateStoragePoolVolumeFromISO(pool string, args incus.StorageVolumeBackupArgs) (incus.Operation, error)
+	RebuildInstance(instanceName string, req api.InstanceRebuildPost) (incus.Operation, error)
+	RefreshImage(fingerprint string) (incus.Operation, error)
 	GetStoragePoolNames() ([]string, error)
 	GetStoragePools() ([]api.StoragePool, error)
 	GetStoragePool(name string) (*api.StoragePool, string, error)
