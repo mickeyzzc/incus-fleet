@@ -26,13 +26,13 @@ func (a *API) instanceTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	op, control, err := a.instances.ConsoleOp(r.PathValue("cluster"), r.PathValue("instance"))
+	op, err := a.instances.ConsoleOp(r.PathValue("cluster"), r.PathValue("instance"))
 	if err != nil {
 		closeWSWithError(conn, err)
 		return
 	}
 
-	_ = relayTerminal(r.Context(), conn, op, control)
+	_ = relayTerminal(r.Context(), conn, op, terminalDebugf(a, r))
 }
 
 // instanceExec opens an interactive exec websocket for an instance. The first
@@ -61,14 +61,7 @@ func (a *API) instanceExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = relayTerminal(r.Context(), conn, op, func() *websocket.Conn {
-		control, controlErr := op.GetWebsocket("control")
-		if controlErr != nil {
-			return nil
-		}
-
-		return control
-	})
+	_ = relayTerminal(r.Context(), conn, op, terminalDebugf(a, r))
 }
 
 // instanceFiles lists or downloads files from an instance.
@@ -151,6 +144,13 @@ func (a *API) deleteInstanceFile(w http.ResponseWriter, r *http.Request) {
 // decodeJSONBytes decodes a JSON payload already read from a frame.
 func decodeJSONBytes(payload []byte, target any) error {
 	return json.Unmarshal(payload, target)
+}
+
+// terminalDebugf logs relay lifecycle details for one session.
+func terminalDebugf(a *API, r *http.Request) func(string, ...any) {
+	return func(format string, args ...any) {
+		a.logger.Info("terminal relay", "instance", r.PathValue("instance"), "msg", fmt.Sprintf(format, args...))
+	}
 }
 
 func closeWSWithError(conn *websocket.Conn, err error) {

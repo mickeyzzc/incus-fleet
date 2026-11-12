@@ -1135,6 +1135,9 @@ type Operation struct {
 	Err              error
 	WaitFunc         func() error
 	GetWebsocketFunc func(string) (*websocket.Conn, error)
+	// FDSecrets mirrors the daemon operation metadata so relay code can
+	// resolve fd names into websocket secrets.
+	FDSecrets map[string]string
 }
 
 // AddHandler implements incus.Operation.
@@ -1149,7 +1152,16 @@ func (o *Operation) Cancel() error {
 
 // Get implements incus.Operation.
 func (o *Operation) Get() api.Operation {
-	return api.Operation{}
+	op := api.Operation{}
+	if len(o.FDSecrets) > 0 {
+		fds := make(map[string]any, len(o.FDSecrets))
+		for name, secret := range o.FDSecrets {
+			fds[name] = secret
+		}
+		op.Metadata = map[string]any{"fds": fds}
+	}
+
+	return op
 }
 
 // GetWebsocket implements incus.Operation.
@@ -1215,8 +1227,15 @@ func NewWebsocketStub() *WebsocketStub {
 
 	dialer := websocket.Dialer{}
 	closed := make(chan struct{})
+	secrets := map[string]string{"0": "secret-data", "control": "secret-control"}
+	names := map[string]string{"secret-data": "0", "secret-control": "control"}
 	op := &Operation{
-		GetWebsocketFunc: func(fd string) (*websocket.Conn, error) {
+		FDSecrets: secrets,
+		GetWebsocketFunc: func(secret string) (*websocket.Conn, error) {
+			fd, ok := names[secret]
+			if !ok {
+				fd = secret
+			}
 			url := "ws" + strings.TrimPrefix(server.URL, "http") + "/?fd=" + fd
 			conn, _, err := dialer.Dial(url, nil)
 			if err != nil {

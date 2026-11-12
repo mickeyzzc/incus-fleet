@@ -32,12 +32,12 @@ func TestConsoleOpErrors(t *testing.T) {
 	srv := &incusfake.Server{}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
-	if _, _, err := svc.ConsoleOp("missing", "web"); err == nil {
+	if _, err := svc.ConsoleOp("missing", "web"); err == nil {
 		t.Fatal("ConsoleOp() expected unknown cluster error")
 	}
 
 	srv.ConsoleErr = errors.New("console unavailable")
-	if _, _, err := svc.ConsoleOp("c1", "web"); err == nil {
+	if _, err := svc.ConsoleOp("c1", "web"); err == nil {
 		t.Fatal("ConsoleOp() expected propagated error")
 	}
 }

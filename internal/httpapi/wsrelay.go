@@ -24,24 +24,49 @@ type terminalControl struct {
 // Binary frames carry raw terminal bytes in both directions. Text frames from
 // the browser are control messages; text frames from Incus carry base64
 // encoded output, which is decoded before it reaches the browser.
-func relayTerminal(ctx context.Context, browser *websocket.Conn, op incus.Operation, control func() *websocket.Conn) error {
-	data, err := op.GetWebsocket("0")
+func relayTerminal(ctx context.Context, browser *websocket.Conn, op incus.Operation, debugf func(string, ...any)) error {
+	// The daemon hands out per-fd secrets in the operation metadata; the
+	// GetWebsocket argument is the secret value, not the fd name.
+	opAPI := op.Get()
+	fds, _ := opAPI.Metadata["fds"].(map[string]any)
+	secretFor := func(name string) string {
+		value, _ := fds[name].(string)
+		return value
+	}
+
+	data, err := op.GetWebsocket(secretFor("0"))
 	if err != nil {
+		debugf("relay: data channel failed: %v", err)
 		_ = browser.Close()
 		return err
 	}
+	debugf("relay: data channel connected")
 
 	// The control channel is optional: consoles receive it through the SDK
 	// callback, exec through the operation fd; defensive relaying keeps the
 	// session alive without it.
-	controlConn := waitForControl(control, 3*time.Second)
+	controlConn := waitForControl(func() *websocket.Conn {
+		secret := secretFor("control")
+		if secret == "" {
+			return nil
+		}
+
+		conn, err := op.GetWebsocket(secret)
+		if err != nil {
+			return nil
+		}
+
+		return conn
+	}, 3*time.Second)
+	debugf("relay: control channel present: %v", controlConn != nil)
 
 	done := make(chan error, 4)
 
 	go incusToBrowser(browser, data, done)
 	go browserToIncus(browser, data, controlConn, done)
 	go func() {
-		_ = op.WaitContext(ctx)
+		waitErr := op.WaitContext(ctx)
+		debugf("relay: operation finished: %v", waitErr)
 		done <- nil
 	}()
 
@@ -79,6 +104,8 @@ func incusToBrowser(browser, data *websocket.Conn, done chan<- error) {
 			done <- nil
 			return
 		}
+		_ = msgType
+		_ = payload
 
 		if msgType == websocket.TextMessage {
 			if decoded, decodeErr := base64.StdEncoding.DecodeString(string(payload)); decodeErr == nil {

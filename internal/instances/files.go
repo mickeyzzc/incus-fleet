@@ -26,30 +26,28 @@ type ExecRequest struct {
 }
 
 // ConsoleOp opens an interactive console operation for an instance. The
-// control channel arrives through the SDK callback; the returned getter hands
-// it to the relay once the daemon has connected it. The caller relays the
-// operation websockets and waits for completion.
-func (s *Service) ConsoleOp(clusterName, name string) (incus.Operation, func() *websocket.Conn, error) {
+// relay reads the data and control channels from the operation metadata
+// secrets and waits for completion.
+func (s *Service) ConsoleOp(clusterName, name string) (incus.Operation, error) {
 	client, err := s.client(clusterName)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	var controlConn *websocket.Conn
+	// The relay reads the data and control channels from the operation
+	// metadata secrets directly; the callback only satisfies the SDK check.
 	op, _, err := client.ConsoleInstanceDynamic(name, api.InstanceConsolePost{
 		Type:   "console",
 		Width:  80,
 		Height: 25,
 	}, &incus.InstanceConsoleArgs{
-		Control: func(conn *websocket.Conn) {
-			controlConn = conn
-		},
+		Control: func(*websocket.Conn) {},
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("instances: console %s:%s: %w", clusterName, name, err)
+		return nil, fmt.Errorf("instances: console %s:%s: %w", clusterName, name, err)
 	}
 
-	return op, func() *websocket.Conn { return controlConn }, nil
+	return op, nil
 }
 
 // ExecOp starts an interactive command operation for an instance.
