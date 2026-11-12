@@ -93,10 +93,20 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/state", a.requireAuth(http.HandlerFunc(a.instanceAction)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}", a.requireAuth(http.HandlerFunc(a.deleteInstance)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/images", a.requireAuth(http.HandlerFunc(a.listImages)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/images/{fingerprint}", a.requireAuth(http.HandlerFunc(a.deleteImage)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/resources", a.requireAuth(http.HandlerFunc(a.getResources)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.listSnapshots)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.createSnapshot)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore", a.requireAuth(http.HandlerFunc(a.restoreSnapshot)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}", a.requireAuth(http.HandlerFunc(a.deleteSnapshot)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/devices", a.requireAuth(http.HandlerFunc(a.attachDevice)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/devices/{device}", a.requireAuth(http.HandlerFunc(a.detachDevice)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/storage-pools", a.requireAuth(http.HandlerFunc(a.createStoragePool)))
 	mux.Handle("PATCH /api/v1/clusters/{cluster}/storage-pools/{pool}", a.requireAuth(http.HandlerFunc(a.updateStoragePool)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/storage-pools/{pool}", a.requireAuth(http.HandlerFunc(a.deleteStoragePool)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/storage-pools/{pool}/volumes", a.requireAuth(http.HandlerFunc(a.listVolumes)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/storage-pools/{pool}/volumes", a.requireAuth(http.HandlerFunc(a.createVolume)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/storage-pools/{pool}/volumes/{volume}", a.requireAuth(http.HandlerFunc(a.deleteVolume)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/networks", a.requireAuth(http.HandlerFunc(a.createNetwork)))
 	mux.Handle("PATCH /api/v1/clusters/{cluster}/networks/{network}", a.requireAuth(http.HandlerFunc(a.updateNetwork)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/networks/{network}", a.requireAuth(http.HandlerFunc(a.deleteNetwork)))
@@ -338,6 +348,118 @@ func (a *API) deleteInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.instances.Delete(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), force); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) listSnapshots(w http.ResponseWriter, r *http.Request) {
+	snapshots, err := a.instances.ListSnapshots(r.PathValue("cluster"), r.PathValue("instance"))
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"snapshots": snapshots})
+}
+
+func (a *API) createSnapshot(w http.ResponseWriter, r *http.Request) {
+	var req instances.SnapshotRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.CreateSnapshot(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) restoreSnapshot(w http.ResponseWriter, r *http.Request) {
+	if err := a.instances.RestoreSnapshot(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), r.PathValue("snapshot")); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
+	if err := a.instances.DeleteSnapshot(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), r.PathValue("snapshot")); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) listVolumes(w http.ResponseWriter, r *http.Request) {
+	volumes, err := a.instances.Volumes(r.PathValue("cluster"), r.PathValue("pool"))
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"volumes": volumes})
+}
+
+func (a *API) createVolume(w http.ResponseWriter, r *http.Request) {
+	var req instances.VolumeRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.CreateVolume(r.PathValue("cluster"), r.PathValue("pool"), req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (a *API) deleteVolume(w http.ResponseWriter, r *http.Request) {
+	if err := a.instances.DeleteVolume(r.PathValue("cluster"), r.PathValue("pool"), r.PathValue("volume")); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) attachDevice(w http.ResponseWriter, r *http.Request) {
+	var req instances.DeviceRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	detail, err := a.instances.AttachDevice(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), req)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, detail)
+}
+
+func (a *API) detachDevice(w http.ResponseWriter, r *http.Request) {
+	detail, err := a.instances.DetachDevice(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), r.PathValue("device"))
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, detail)
+}
+
+func (a *API) deleteImage(w http.ResponseWriter, r *http.Request) {
+	if err := a.instances.DeleteImage(r.Context(), r.PathValue("cluster"), r.PathValue("fingerprint")); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}

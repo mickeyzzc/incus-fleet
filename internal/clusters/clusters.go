@@ -38,6 +38,13 @@ type InstanceServer interface {
 	CopyInstance(source incus.InstanceServer, instance api.Instance, args *incus.InstanceCopyArgs) (incus.RemoteOperation, error)
 	DeleteInstance(name string) (incus.Operation, error)
 	GetImages() ([]api.Image, error)
+	DeleteImage(fingerprint string) (incus.Operation, error)
+	GetInstanceSnapshots(instanceName string) ([]api.InstanceSnapshot, error)
+	CreateInstanceSnapshot(instanceName string, snapshot api.InstanceSnapshotsPost) (incus.Operation, error)
+	DeleteInstanceSnapshot(instanceName string, name string) (incus.Operation, error)
+	GetStoragePoolVolumes(pool string) ([]api.StorageVolume, error)
+	CreateStoragePoolVolume(pool string, volume api.StorageVolumesPost) error
+	DeleteStoragePoolVolume(pool string, volType string, name string) error
 	GetStoragePoolNames() ([]string, error)
 	GetStoragePools() ([]api.StoragePool, error)
 	GetStoragePool(name string) (*api.StoragePool, string, error)

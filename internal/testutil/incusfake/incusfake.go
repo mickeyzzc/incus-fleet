@@ -16,60 +16,69 @@ import (
 // Server is a configurable fake Incus server implementing the narrow
 // interface used by the fleet services.
 type Server struct {
-	Server           *api.Server
-	ServerErr        error
-	Cluster          *api.Cluster
-	ClusterErr       error
-	Members          []api.ClusterMember
-	MembersErr       error
-	Instances        []api.InstanceFull
-	InstancesErr     error
-	Instance         *api.Instance
-	InstanceErr      error
-	State            *api.InstanceState
-	StateFunc        func(name string) (*api.InstanceState, error)
-	StateErr         error
-	UpdateStateErr   error
-	CreateErr        error
-	UpdateErr        error
-	CopyErr          error
-	DeleteErr        error
-	Images           []api.Image
-	ImagesErr        error
-	Pools            []api.StoragePool
-	PoolsErr         error
-	Pool             *api.StoragePool
-	PoolErr          error
-	CreatePoolErr    error
-	UpdatePoolErr    error
-	DeletePoolErr    error
-	Networks         []api.Network
-	NetworksErr      error
-	Network          *api.Network
-	NetworkErr       error
-	CreateNetworkErr error
-	UpdateNetworkErr error
-	DeleteNetworkErr error
-	Profiles         []api.Profile
-	ProfilesErr      error
-	Profile          *api.Profile
-	ProfileErr       error
-	CreateProfileErr error
-	UpdateProfileErr error
-	DeleteProfileErr error
-	Member           *api.ClusterMember
-	MemberErr        error
-	UpdateMemberErr  error
-	PoolNames        []string
-	PoolNamesErr     error
-	NetworkNames     []string
-	NetworkNamesErr  error
-	PoolResources    *api.ResourcesStoragePool
-	PoolResourcesErr error
-	Clustered        bool
-	RemoteOperation  *RemoteOperation
-	Operation        *Operation
-	Disconnects      int
+	Server            *api.Server
+	ServerErr         error
+	Cluster           *api.Cluster
+	ClusterErr        error
+	Members           []api.ClusterMember
+	MembersErr        error
+	Instances         []api.InstanceFull
+	InstancesErr      error
+	Instance          *api.Instance
+	InstanceErr       error
+	State             *api.InstanceState
+	StateFunc         func(name string) (*api.InstanceState, error)
+	StateErr          error
+	UpdateStateErr    error
+	CreateErr         error
+	UpdateErr         error
+	CopyErr           error
+	DeleteErr         error
+	Images            []api.Image
+	ImagesErr         error
+	DeleteImageErr    error
+	Snapshots         []api.InstanceSnapshot
+	SnapshotsErr      error
+	CreateSnapshotErr error
+	DeleteSnapshotErr error
+	Volumes           []api.StorageVolume
+	VolumesErr        error
+	CreateVolumeErr   error
+	DeleteVolumeErr   error
+	Pools             []api.StoragePool
+	PoolsErr          error
+	Pool              *api.StoragePool
+	PoolErr           error
+	CreatePoolErr     error
+	UpdatePoolErr     error
+	DeletePoolErr     error
+	Networks          []api.Network
+	NetworksErr       error
+	Network           *api.Network
+	NetworkErr        error
+	CreateNetworkErr  error
+	UpdateNetworkErr  error
+	DeleteNetworkErr  error
+	Profiles          []api.Profile
+	ProfilesErr       error
+	Profile           *api.Profile
+	ProfileErr        error
+	CreateProfileErr  error
+	UpdateProfileErr  error
+	DeleteProfileErr  error
+	Member            *api.ClusterMember
+	MemberErr         error
+	UpdateMemberErr   error
+	PoolNames         []string
+	PoolNamesErr      error
+	NetworkNames      []string
+	NetworkNamesErr   error
+	PoolResources     *api.ResourcesStoragePool
+	PoolResourcesErr  error
+	Clustered         bool
+	RemoteOperation   *RemoteOperation
+	Operation         *Operation
+	Disconnects       int
 
 	mu              sync.Mutex
 	calls           []string
@@ -88,6 +97,66 @@ type Server struct {
 	updateProfiles  []UpdateProfileArgs
 	deleteProfiles  []string
 	updateMembers   []UpdateMemberArgs
+	createSnapshots []SnapshotArgs
+	deleteSnapshots []SnapshotArgs
+	deleteImages    []string
+	createVolumes   []VolumeArgs
+	deleteVolumes   []VolumeArgs
+}
+
+// SnapshotArgs records one instance snapshot call.
+type SnapshotArgs struct {
+	Instance string
+	Name     string
+	Stateful bool
+}
+
+// VolumeArgs records one storage volume call.
+type VolumeArgs struct {
+	Pool   string
+	Type   string
+	Name   string
+	Volume api.StorageVolumesPost
+}
+
+// CreateSnapshotArgs returns the arguments recorded by CreateInstanceSnapshot.
+func (s *Server) CreateSnapshotArgs() []SnapshotArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]SnapshotArgs(nil), s.createSnapshots...)
+}
+
+// DeleteSnapshotArgs returns the arguments recorded by DeleteInstanceSnapshot.
+func (s *Server) DeleteSnapshotArgs() []SnapshotArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]SnapshotArgs(nil), s.deleteSnapshots...)
+}
+
+// DeleteImageArgs returns the fingerprints recorded by DeleteImage.
+func (s *Server) DeleteImageArgs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.deleteImages...)
+}
+
+// CreateVolumeArgs returns the arguments recorded by CreateStoragePoolVolume.
+func (s *Server) CreateVolumeArgs() []VolumeArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]VolumeArgs(nil), s.createVolumes...)
+}
+
+// DeleteVolumeArgs returns the keys recorded by DeleteStoragePoolVolume.
+func (s *Server) DeleteVolumeArgs() []VolumeArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]VolumeArgs(nil), s.deleteVolumes...)
 }
 
 // UpdateStoragePoolArgs records one UpdateStoragePool call.
@@ -495,6 +564,117 @@ func (s *Server) GetImages() ([]api.Image, error) {
 	}
 
 	return s.Images, nil
+}
+
+// DeleteImage implements clusters.InstanceServer.
+func (s *Server) DeleteImage(fingerprint string) (incus.Operation, error) {
+	s.record("DeleteImage:" + fingerprint)
+	s.mu.Lock()
+	s.deleteImages = append(s.deleteImages, fingerprint)
+	s.mu.Unlock()
+
+	if s.DeleteImageErr != nil {
+		return nil, s.DeleteImageErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// GetInstanceSnapshots implements clusters.InstanceServer.
+func (s *Server) GetInstanceSnapshots(instanceName string) ([]api.InstanceSnapshot, error) {
+	s.record("GetInstanceSnapshots:" + instanceName)
+	if s.SnapshotsErr != nil {
+		return nil, s.SnapshotsErr
+	}
+	if !s.knowsInstance(instanceName) {
+		return nil, api.StatusErrorf(http.StatusNotFound, "Instance %q not found", instanceName)
+	}
+
+	return append([]api.InstanceSnapshot(nil), s.Snapshots...), nil
+}
+
+// knowsInstance reports whether the fake serves an instance with this name.
+func (s *Server) knowsInstance(instanceName string) bool {
+	if s.Instance == nil && s.Instances == nil {
+		return true
+	}
+	if s.Instance != nil && (s.Instance.Name == instanceName || s.Instance.Name == "") {
+		return true
+	}
+	for i := range s.Instances {
+		if s.Instances[i].Name == instanceName {
+			return true
+		}
+	}
+
+	return false
+}
+
+// CreateInstanceSnapshot implements clusters.InstanceServer.
+func (s *Server) CreateInstanceSnapshot(instanceName string, snapshot api.InstanceSnapshotsPost) (incus.Operation, error) {
+	s.record("CreateInstanceSnapshot:" + instanceName + "/" + snapshot.Name)
+	s.mu.Lock()
+	s.createSnapshots = append(s.createSnapshots, SnapshotArgs{Instance: instanceName, Name: snapshot.Name, Stateful: snapshot.Stateful})
+	s.mu.Unlock()
+
+	if s.CreateSnapshotErr != nil {
+		return nil, s.CreateSnapshotErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// DeleteInstanceSnapshot implements clusters.InstanceServer.
+func (s *Server) DeleteInstanceSnapshot(instanceName string, name string) (incus.Operation, error) {
+	s.record("DeleteInstanceSnapshot:" + instanceName + "/" + name)
+	s.mu.Lock()
+	s.deleteSnapshots = append(s.deleteSnapshots, SnapshotArgs{Instance: instanceName, Name: name})
+	s.mu.Unlock()
+
+	if s.DeleteSnapshotErr != nil {
+		return nil, s.DeleteSnapshotErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// GetStoragePoolVolumes implements clusters.InstanceServer.
+func (s *Server) GetStoragePoolVolumes(pool string) ([]api.StorageVolume, error) {
+	s.record("GetStoragePoolVolumes:" + pool)
+	if s.VolumesErr != nil {
+		return nil, s.VolumesErr
+	}
+
+	return append([]api.StorageVolume(nil), s.Volumes...), nil
+}
+
+// CreateStoragePoolVolume implements clusters.InstanceServer.
+func (s *Server) CreateStoragePoolVolume(pool string, volume api.StorageVolumesPost) error {
+	s.record("CreateStoragePoolVolume:" + pool + "/" + volume.Name)
+	s.mu.Lock()
+	s.createVolumes = append(s.createVolumes, VolumeArgs{Pool: pool, Volume: volume})
+	s.mu.Unlock()
+
+	return s.CreateVolumeErr
+}
+
+// DeleteStoragePoolVolume implements clusters.InstanceServer.
+func (s *Server) DeleteStoragePoolVolume(pool string, volType string, name string) error {
+	s.record("DeleteStoragePoolVolume:" + pool + "/" + volType + "/" + name)
+	s.mu.Lock()
+	s.deleteVolumes = append(s.deleteVolumes, VolumeArgs{Pool: pool, Type: volType, Name: name})
+	s.mu.Unlock()
+
+	return s.DeleteVolumeErr
 }
 
 // GetNetworkNames implements clusters.InstanceServer.
