@@ -126,6 +126,9 @@ func TestLaunchFromISO(t *testing.T) {
 	if post.Type != api.InstanceTypeVM || post.Source.Type != "none" || !post.Start {
 		t.Fatalf("post = %#v", post)
 	}
+	if post.Config["security.secureboot"] != "false" {
+		t.Fatalf("secure boot = %#v", post.Config)
+	}
 	iso := post.Devices["iso0"]
 	if iso["type"] != "disk" || iso["pool"] != "default" || iso["source"] != "debian-13" || iso["boot.priority"] != "1" {
 		t.Fatalf("iso device = %#v", iso)
