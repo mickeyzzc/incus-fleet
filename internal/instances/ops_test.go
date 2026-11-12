@@ -182,7 +182,10 @@ func TestCloneInstance(t *testing.T) {
 			InstancePut: api.InstancePut{
 				Description: "app server",
 				Profiles:    []string{"default"},
-				Config:      api.ConfigMap{"limits.cpu": "2"},
+				Config: api.ConfigMap{
+					"limits.cpu":           "2",
+					"volatile.eth0.hwaddr": "10:66:6a:ff:1f:39",
+				},
 				Devices: api.DevicesMap{
 					"root": {"type": "disk", "path": "/", "pool": "default"},
 				},
@@ -211,8 +214,14 @@ func TestCloneInstance(t *testing.T) {
 	if len(created) != 1 || created[0].Name != "web-clone" || created[0].Source.Type != "copy" || created[0].Source.Source != "web" {
 		t.Fatalf("clone args = %#v", created)
 	}
-	if created[0].Type != api.InstanceTypeContainer || created[0].Config["limits.cpu"] != "2" {
-		t.Fatalf("clone put = %#v", created[0])
+	if created[0].Config["limits.cpu"] != "2" {
+		t.Fatalf("clone config = %#v", created[0].Config)
+	}
+	if _, volatile := created[0].Config["volatile.eth0.hwaddr"]; volatile {
+		t.Fatalf("volatile keys must not travel with the clone: %#v", created[0].Config)
+	}
+	if created[0].Type != api.InstanceTypeContainer {
+		t.Fatalf("clone type = %#v", created[0].Type)
 	}
 	// Copies must not carry Start (the daemon rejects it); the clone is
 	// powered on through a separate state call.

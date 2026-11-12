@@ -227,14 +227,23 @@ func (s *Service) CloneInstance(ctx context.Context, clusterName, name string, r
 	}
 
 	// The daemon rejects copy requests that also request a start, so the
-	// copy runs first and the clone is powered on separately.
+	// copy runs first and the clone is powered on separately. Volatile keys
+	// (hardware addresses among them) must not travel with the copy or the
+	// clone fights its source over the LAN address.
+	config := copyConfig(instance.Config)
+	for key := range config {
+		if strings.HasPrefix(key, "volatile.") {
+			delete(config, key)
+		}
+	}
+
 	post := api.InstancesPost{
 		Name: target,
 		Type: api.InstanceType(instance.Type),
 		InstancePut: api.InstancePut{
 			Description: instance.Description,
 			Profiles:    append([]string{}, instance.Profiles...),
-			Config:      copyConfig(instance.Config),
+			Config:      config,
 			Devices:     copyDevices(instance.Devices),
 		},
 		Source: api.InstanceSource{Type: "copy", Source: name},
