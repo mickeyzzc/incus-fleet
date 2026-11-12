@@ -92,7 +92,7 @@ async function submit(): Promise<void> {
         <p class="field-hint">{{ t('iso.networkHint') }}</p>
       </el-form-item>
 
-      <el-form-item :label="t('form.rootDiskSize')">
+      <el-form-item :label="t('form.rootDisk')">
         <el-input v-model="form.rootDisk" placeholder="20GiB" />
       </el-form-item>
     </el-form>

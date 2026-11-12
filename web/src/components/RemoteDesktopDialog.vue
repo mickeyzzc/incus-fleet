@@ -45,6 +45,10 @@ watch(
 async function connect(): Promise<void> {
   connecting.value = true
   try {
+    // The dialog body mounts asynchronously; wait for the host element so
+    // the SPICE client can attach its canvas before opening the websocket.
+    await waitForHost()
+
     // The Incus VGA console websocket speaks the SPICE protocol directly;
     // the client renders it into the host element below.
     const { SpiceMainConn } = await import('spice-client')
@@ -65,6 +69,17 @@ async function connect(): Promise<void> {
   } finally {
     connecting.value = false
   }
+}
+
+/** Polls for the dialog-mounted host element (up to ~4s). */
+async function waitForHost(): Promise<void> {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (document.getElementById('remote-desktop-host')) {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error('desktop host element not ready')
 }
 
 function disconnect(): void {
