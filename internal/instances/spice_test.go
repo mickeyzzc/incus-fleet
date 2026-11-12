@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -111,8 +110,7 @@ func TestSPICEDial(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer listener.Close()                         //nolint:errcheck // test teardown
-	go http.Serve(listener, http.HandlerFunc(nil)) //nolint:errcheck // keep listener busy
+	defer listener.Close() //nolint:errcheck // test teardown
 	go func() {
 		for {
 			conn, acceptErr := listener.Accept()

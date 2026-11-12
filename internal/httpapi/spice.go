@@ -77,7 +77,11 @@ func (a *API) instanceSPICE(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	<-done
+	bridgeErr := <-done
+	if bridgeErr != nil {
+		_ = conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, bridgeErr.Error()))
+	}
 	_ = conn.Close()
 }
 
