@@ -9,7 +9,7 @@ const { SpiceMainConn, spiceStop } = vi.hoisted(() => {
   const stop = vi.fn()
   // The component instantiates with `new`, so the mock must be constructible;
   // arrow functions cannot be invoked with `new`.
-  const conn = vi.fn(function SpiceMainConnMock(this: unknown, ..._args: unknown[]) {
+  const conn = vi.fn(function SpiceMainConnMock(this: unknown) {
     return { stop }
   })
   return { SpiceMainConn: conn, spiceStop: stop }
