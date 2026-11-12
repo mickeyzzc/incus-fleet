@@ -6,6 +6,7 @@ import type {
   ClusterResources,
   CreateInstanceRequest,
   DeviceRequest,
+  FileEntry,
   InstanceAction,
   InstanceDetail,
   InstanceImage,
@@ -33,6 +34,7 @@ export const useInstancesStore = defineStore('instances', () => {
   const profileCache = ref<Record<string, Profile[]>>({})
   const snapshotCache = ref<Record<string, InstanceSnapshot[]>>({})
   const volumeCache = ref<Record<string, StorageVolume[]>>({})
+  const fileCache = ref<Record<string, FileEntry[]>>({})
   const loading = ref(false)
   const detailLoading = ref(false)
   const imagesLoading = ref(false)
@@ -40,6 +42,7 @@ export const useInstancesStore = defineStore('instances', () => {
   const profilesLoading = ref(false)
   const snapshotsLoading = ref(false)
   const volumesLoading = ref(false)
+  const filesLoading = ref(false)
   const saving = ref(false)
   const error = ref('')
   const filter = ref<InstanceType>('any')
@@ -62,6 +65,10 @@ export const useInstancesStore = defineStore('instances', () => {
 
   function volumeKey(cluster: string, pool: string): string {
     return `${cluster}/${pool}`
+  }
+
+  function fileKey(cluster: string, instance: string, dir: string): string {
+    return `${cluster}/${instance}/${dir}`
   }
 
   /** Fetches instances from all clusters, optionally filtered by type. */
@@ -586,6 +593,87 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
+  /** Lists one directory inside an instance, caching per path. */
+  async function fetchFiles(cluster: string, instance: string, dir: string): Promise<void> {
+    const key = fileKey(cluster, instance, dir)
+    if (fileCache.value[key]) {
+      return
+    }
+
+    filesLoading.value = true
+    error.value = ''
+
+    try {
+      fileCache.value[key] = await api.listInstanceFiles(cluster, instance, dir)
+    } catch (err) {
+      error.value = errorMessage(err)
+      delete fileCache.value[key]
+    } finally {
+      filesLoading.value = false
+    }
+  }
+
+  /** Uploads one file into dir and refreshes the directory listing. */
+  async function uploadFile(
+    cluster: string,
+    instance: string,
+    dir: string,
+    file: File,
+  ): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.uploadInstanceFile(cluster, instance, joinPath(dir, file.name), file)
+      delete fileCache.value[fileKey(cluster, instance, dir)]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Creates a directory inside dir and refreshes the listing. */
+  async function mkdirDir(cluster: string, instance: string, dir: string, name: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.mkdirInstanceDir(cluster, instance, joinPath(dir, name))
+      delete fileCache.value[fileKey(cluster, instance, dir)]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Deletes one file and refreshes the listing. */
+  async function deleteFile(cluster: string, instance: string, dir: string, name: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.deleteInstanceFile(cluster, instance, joinPath(dir, name))
+      delete fileCache.value[fileKey(cluster, instance, dir)]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  function joinPath(dir: string, name: string): string {
+    return dir === '/' ? `/${name}` : `${dir}/${name}`
+  }
+
+  function files(cluster: string, instance: string, dir: string): FileEntry[] {
+    return fileCache.value[fileKey(cluster, instance, dir)] ?? []
+  }
+
   /** Updates safe cluster member metadata. */
   async function updateMember(
     cluster: string,
@@ -648,6 +736,7 @@ export const useInstancesStore = defineStore('instances', () => {
     profilesLoading,
     snapshotsLoading,
     volumesLoading,
+    filesLoading,
     saving,
     error,
     filter,
@@ -684,12 +773,17 @@ export const useInstancesStore = defineStore('instances', () => {
     deleteVolume,
     attachDevice,
     detachDevice,
+    fetchFiles,
+    uploadFile,
+    mkdirDir,
+    deleteFile,
     detail,
     images,
     resources,
     profiles,
     snapshots,
     volumes,
+    files,
     byCluster,
   }
 })

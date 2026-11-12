@@ -6,6 +6,8 @@ import { useI18n } from 'vue-i18n'
 import InstanceActions from '@/components/InstanceActions.vue'
 import InstanceDevices from '@/components/InstanceDevices.vue'
 import InstanceSnapshots from '@/components/InstanceSnapshots.vue'
+import FileManagerDialog from '@/components/FileManagerDialog.vue'
+import TerminalDialog from '@/components/TerminalDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type { InstanceAction, InstanceDetail } from '@/api/types'
 import { useInstancesStore } from '@/stores/instances'
@@ -34,6 +36,8 @@ const { t } = useI18n()
 
 const actionLoading = ref(false)
 const activeTab = ref('overview')
+const terminalOpen = ref(false)
+const filesOpen = ref(false)
 
 const visible = computed({
   get: () => props.modelValue,
@@ -95,6 +99,14 @@ function onDevicesChanged(updated: InstanceDetail): void {
             @migrate="emit('migrate', detail)"
             @delete="emit('delete', detail)"
           />
+          <div class="access-row">
+            <el-button size="small" @click="terminalOpen = true">
+              {{ t('terminal.open') }}
+            </el-button>
+            <el-button size="small" @click="filesOpen = true">
+              {{ t('files.open') }}
+            </el-button>
+          </div>
         </div>
 
         <el-tabs v-model="activeTab" class="drawer-tabs">
@@ -226,5 +238,16 @@ function onDevicesChanged(updated: InstanceDetail): void {
 
       <el-empty v-else-if="!instances.detailLoading" :description="t('detail.unavailable')" />
     </div>
+
+    <TerminalDialog v-model="terminalOpen" :cluster="cluster" :instance="name" />
+    <FileManagerDialog v-model="filesOpen" :cluster="cluster" :instance="name" />
   </el-drawer>
 </template>
+
+<style scoped>
+.access-row {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+</style>

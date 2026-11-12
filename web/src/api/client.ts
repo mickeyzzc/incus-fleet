@@ -3,6 +3,7 @@ import type {
   ClusterSummary,
   CreateInstanceRequest,
   DeviceRequest,
+  FileEntry,
   HealthResponse,
   InstanceActionRequest,
   InstanceDetail,
@@ -436,5 +437,61 @@ export class ApiClient {
     }
 
     return new ApiError(response.status, code, message)
+  }
+
+  /** Lists one directory inside an instance. */
+  async listInstanceFiles(cluster: string, instance: string, dir: string): Promise<FileEntry[]> {
+    const query = new URLSearchParams({ action: 'list', path: dir })
+    const data = await this.request<{ files: FileEntry[] }>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/files?${query.toString()}`,
+    )
+    return data.files ?? []
+  }
+
+  /** Uploads one file into an instance. */
+  async uploadInstanceFile(
+    cluster: string,
+    instance: string,
+    path: string,
+    file: File,
+  ): Promise<void> {
+    const form = new FormData()
+    form.append('file', file)
+
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/files?path=${encodeURIComponent(path)}`,
+      form,
+    )
+  }
+
+  /** Creates a directory inside an instance. */
+  async mkdirInstanceDir(cluster: string, instance: string, path: string): Promise<void> {
+    const query = new URLSearchParams({ action: 'mkdir', path })
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/files?${query.toString()}`,
+    )
+  }
+
+  /** Deletes one file inside an instance. */
+  async deleteInstanceFile(cluster: string, instance: string, path: string): Promise<void> {
+    const query = new URLSearchParams({ path })
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/files?${query.toString()}`,
+    )
+  }
+
+  /** Builds the authenticated download URL for one instance file. */
+  downloadFileURL(cluster: string, instance: string, path: string): string {
+    return `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/files?path=${encodeURIComponent(path)}`
+  }
+
+  /** Builds the websocket URL for an instance console or exec session. */
+  terminalURL(cluster: string, instance: string, kind: 'console' | 'exec'): string {
+    const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    return `${scheme}://${window.location.host}/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/${kind}`
   }
 }

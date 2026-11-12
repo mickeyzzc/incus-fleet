@@ -292,6 +292,15 @@ export interface DeviceRequest {
   ipv6?: string
 }
 
+/** One file or directory inside an instance. */
+export interface FileEntry {
+  name: string
+  size: number
+  mode: number
+  is_dir: boolean
+  modtime: string
+}
+
 export interface Migration {
   id: string
   source_cluster: string
