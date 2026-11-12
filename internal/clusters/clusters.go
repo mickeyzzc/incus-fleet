@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"sort"
@@ -12,6 +13,9 @@ import (
 
 	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
+	"github.com/pkg/sftp"
+
+	"github.com/mickeyzzc/incus-fleet/internal/apitypes"
 
 	"github.com/mickeyzzc/incus-fleet/internal/config"
 	"github.com/mickeyzzc/incus-fleet/internal/version"
@@ -22,6 +26,9 @@ var ErrUnknownCluster = errors.New("clusters: unknown cluster")
 
 // ErrUnavailable is returned when a configured cluster has no healthy client.
 var ErrUnavailable = errors.New("clusters: cluster unavailable")
+
+// FileEntry describes one file or directory inside an instance.
+type FileEntry = apitypes.FileEntry
 
 // InstanceServer is the narrow slice of the Incus client used by fleet
 // services. Tests provide a fake implementation of this interface.
@@ -37,6 +44,13 @@ type InstanceServer interface {
 	UpdateInstance(name string, instance api.InstancePut, etag string) (incus.Operation, error)
 	CopyInstance(source incus.InstanceServer, instance api.Instance, args *incus.InstanceCopyArgs) (incus.RemoteOperation, error)
 	DeleteInstance(name string) (incus.Operation, error)
+	ConsoleInstance(instanceName string, console api.InstanceConsolePost, args *incus.InstanceConsoleArgs) (incus.Operation, error)
+	ExecInstance(instanceName string, exec api.InstanceExecPost, args *incus.InstanceExecArgs) (incus.Operation, error)
+	GetInstanceFile(instanceName string, path string) (io.ReadCloser, *incus.InstanceFileResponse, error)
+	CreateInstanceFile(instanceName string, path string, args incus.InstanceFileArgs) error
+	DeleteInstanceFile(instanceName string, path string) error
+	ListInstanceFiles(instanceName string, dir string) ([]apitypes.FileEntry, error)
+	MkdirInstanceDir(instanceName string, dir string) error
 	GetImages() ([]api.Image, error)
 	DeleteImage(fingerprint string) (incus.Operation, error)
 	GetInstanceSnapshots(instanceName string) ([]api.InstanceSnapshot, error)
@@ -136,7 +150,9 @@ func (c *Connection) reconnect(_ context.Context, srv InstanceServer) {
 		if c.cfg.Project != "" {
 			full = full.UseProject(c.cfg.Project)
 		}
-		client = full
+		// Keep the narrow surface (including the SFTP helpers) while
+		// preserving the configured project scope.
+		client = &augmentedClient{InstanceServer: full}
 	}
 
 	c.mu.Lock()
@@ -154,6 +170,10 @@ func (c *Connection) reconnect(_ context.Context, srv InstanceServer) {
 }
 
 func fullClient(srv InstanceServer) incus.InstanceServer {
+	if wrapped, ok := srv.(*augmentedClient); ok {
+		return wrapped.InstanceServer
+	}
+
 	if full, ok := srv.(incus.InstanceServer); ok {
 		return full
 	}
@@ -268,7 +288,80 @@ func DefaultDial(_ context.Context, cfg config.Cluster) (InstanceServer, error) 
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 
-	return srv, nil
+	return &augmentedClient{InstanceServer: srv}, nil
+}
+
+// augmentedClient layers SFTP-backed directory helpers onto a raw SDK client.
+type augmentedClient struct {
+	incus.InstanceServer
+
+	// sftpFor is injectable so tests can supply an in-process client.
+	sftpFor func(instanceName string) (*sftp.Client, error)
+}
+
+// sftpClient opens the SFTP channel for one instance.
+func (a *augmentedClient) sftpClient(instanceName string) (*sftp.Client, error) {
+	if a.sftpFor != nil {
+		return a.sftpFor(instanceName)
+	}
+
+	return a.GetInstanceFileSFTP(instanceName)
+}
+
+// ListInstanceFiles lists one directory inside an instance over SFTP.
+func (a *augmentedClient) ListInstanceFiles(instanceName string, dir string) ([]apitypes.FileEntry, error) {
+	client, err := a.sftpClient(instanceName)
+	if err != nil {
+		return nil, fmt.Errorf("open sftp %s: %w", instanceName, err)
+	}
+	defer client.Close() //nolint:errcheck // best-effort close
+
+	entries, err := client.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read dir %s: %w", dir, err)
+	}
+
+	return fileEntries(entries), nil
+}
+
+// fileEntries converts SFTP directory listings into fleet entries, with
+// directories first and names sorted within each group.
+func fileEntries(entries []os.FileInfo) []apitypes.FileEntry {
+	out := make([]apitypes.FileEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, FileEntry{
+			Name:    entry.Name(),
+			Size:    entry.Size(),
+			Mode:    uint32(entry.Mode().Perm()),
+			IsDir:   entry.IsDir(),
+			ModTime: entry.ModTime(),
+		})
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].IsDir != out[j].IsDir {
+			return out[i].IsDir
+		}
+
+		return out[i].Name < out[j].Name
+	})
+
+	return out
+}
+
+// MkdirInstanceDir creates a directory inside an instance over SFTP.
+func (a *augmentedClient) MkdirInstanceDir(instanceName string, dir string) error {
+	client, err := a.sftpClient(instanceName)
+	if err != nil {
+		return fmt.Errorf("open sftp %s: %w", instanceName, err)
+	}
+	defer client.Close() //nolint:errcheck // best-effort close
+
+	if err := client.MkdirAll(dir); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+
+	return nil
 }
 
 // List returns a fresh summary for every configured cluster, in config order.

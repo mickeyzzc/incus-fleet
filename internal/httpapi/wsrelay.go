@@ -1,0 +1,128 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+
+	"github.com/gorilla/websocket"
+	incus "github.com/lxc/incus/v7/client"
+)
+
+// terminalControl is the fleet-side control frame sent by the browser.
+type terminalControl struct {
+	Type   string `json:"type"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Signal string `json:"signal"`
+}
+
+// relayTerminal pipes a browser websocket to an Incus operation's data and
+// control channels until either side closes or the operation finishes.
+//
+// Binary frames carry raw terminal bytes in both directions. Text frames from
+// the browser are control messages; text frames from Incus carry base64
+// encoded output, which is decoded before it reaches the browser.
+func relayTerminal(ctx context.Context, browser *websocket.Conn, op incus.Operation) error {
+	data, err := op.GetWebsocket("0")
+	if err != nil {
+		_ = browser.Close()
+		return err
+	}
+
+	// The control channel is optional: consoles and interactive exec provide
+	// it, but defensive relaying keeps the session alive without it.
+	control, controlErr := op.GetWebsocket("control")
+	if controlErr != nil {
+		control = nil
+	}
+
+	done := make(chan error, 4)
+
+	go incusToBrowser(browser, data, done)
+	go browserToIncus(browser, data, control, done)
+	go func() {
+		_ = op.WaitContext(ctx)
+		done <- nil
+	}()
+
+	first := <-done
+
+	_ = browser.Close()
+	_ = data.Close()
+	if control != nil {
+		_ = control.Close()
+	}
+
+	return first
+}
+
+// incusToBrowser forwards terminal output to the browser.
+func incusToBrowser(browser, data *websocket.Conn, done chan<- error) {
+	for {
+		msgType, payload, err := data.ReadMessage()
+		if err != nil {
+			done <- nil
+			return
+		}
+
+		if msgType == websocket.TextMessage {
+			if decoded, decodeErr := base64.StdEncoding.DecodeString(string(payload)); decodeErr == nil {
+				payload = decoded
+			}
+			msgType = websocket.BinaryMessage
+		}
+
+		if err := browser.WriteMessage(msgType, payload); err != nil {
+			done <- err
+			return
+		}
+	}
+}
+
+// browserToIncus forwards raw input and translates control frames.
+func browserToIncus(browser, data, control *websocket.Conn, done chan<- error) {
+	for {
+		msgType, payload, err := browser.ReadMessage()
+		if err != nil {
+			done <- nil
+			return
+		}
+
+		if msgType == websocket.TextMessage {
+			if control == nil {
+				continue
+			}
+
+			var ctl terminalControl
+			if jsonErr := json.Unmarshal(payload, &ctl); jsonErr != nil {
+				continue
+			}
+
+			forwarded, marshalErr := controlFrame(ctl)
+			if marshalErr != nil {
+				continue
+			}
+			if err := control.WriteMessage(websocket.TextMessage, forwarded); err != nil {
+				done <- err
+				return
+			}
+
+			continue
+		}
+
+		if err := data.WriteMessage(websocket.BinaryMessage, payload); err != nil {
+			done <- err
+			return
+		}
+	}
+}
+
+// controlFrame renders an Incus control-channel message.
+func controlFrame(ctl terminalControl) ([]byte, error) {
+	if ctl.Type == "signal" && ctl.Signal != "" {
+		return json.Marshal(map[string]string{"signal": ctl.Signal})
+	}
+
+	return json.Marshal(map[string]int{"width": ctl.Width, "height": ctl.Height})
+}

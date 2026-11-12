@@ -194,3 +194,38 @@ func TestInstanceAdminEndpoints(t *testing.T) {
 		t.Fatalf("delete image args = %#v", images)
 	}
 }
+
+func TestAdminErrorBranches(t *testing.T) {
+	source := &incusfake.Server{}
+	target := &incusfake.Server{}
+	f := newAPIFixture(t, source, target)
+	cookie := f.login(t)
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+		status int
+	}{
+		{name: "create snapshot unknown cluster", method: http.MethodPost, path: "/api/v1/clusters/missing/instances/web/snapshots", body: map[string]any{"name": "s"}, status: http.StatusNotFound},
+		{name: "restore snapshot unknown cluster", method: http.MethodPost, path: "/api/v1/clusters/missing/instances/web/snapshots/s/restore", status: http.StatusNotFound},
+		{name: "delete snapshot unknown cluster", method: http.MethodDelete, path: "/api/v1/clusters/missing/instances/web/snapshots/s", status: http.StatusNotFound},
+		{name: "list volumes unknown cluster", method: http.MethodGet, path: "/api/v1/clusters/missing/storage-pools/default/volumes", status: http.StatusNotFound},
+		{name: "create volume unknown cluster", method: http.MethodPost, path: "/api/v1/clusters/missing/storage-pools/default/volumes", body: map[string]any{"name": "v"}, status: http.StatusNotFound},
+		{name: "delete volume unknown cluster", method: http.MethodDelete, path: "/api/v1/clusters/missing/storage-pools/default/volumes/v", status: http.StatusNotFound},
+		{name: "attach device unknown cluster", method: http.MethodPost, path: "/api/v1/clusters/missing/instances/web/devices", body: map[string]any{"name": "d", "type": "disk", "path": "/d"}, status: http.StatusNotFound},
+		{name: "detach device unknown cluster", method: http.MethodDelete, path: "/api/v1/clusters/missing/instances/web/devices/d", status: http.StatusNotFound},
+		{name: "delete image unknown cluster", method: http.MethodDelete, path: "/api/v1/clusters/missing/images/abc", status: http.StatusNotFound},
+		{name: "reconnect unknown cluster", method: http.MethodPost, path: "/api/v1/clusters/missing/reconnect", status: http.StatusNotFound},
+		{name: "delete file relative path", method: http.MethodDelete, path: "/api/v1/clusters/c1/instances/web/files?path=relative", status: http.StatusBadRequest},
+		{name: "upload without multipart", method: http.MethodPost, path: "/api/v1/clusters/c1/instances/web/files?path=/etc/motd", body: map[string]any{"x": 1}, status: http.StatusBadRequest},
+	}
+
+	for _, tc := range cases {
+		rec := f.request(t, tc.method, tc.path, tc.body, cookie, "")
+		if rec.Code != tc.status {
+			t.Fatalf("%s: status = %d body = %s, want %d", tc.name, rec.Code, rec.Body.String(), tc.status)
+		}
+	}
+}

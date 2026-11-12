@@ -2,15 +2,20 @@
 package incusfake
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
 	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
+
+	"github.com/mickeyzzc/incus-fleet/internal/apitypes"
 )
 
 // Server is a configurable fake Incus server implementing the narrow
@@ -34,6 +39,15 @@ type Server struct {
 	UpdateErr         error
 	CopyErr           error
 	DeleteErr         error
+	ConsoleErr        error
+	ExecErr           error
+	GetFileErr        error
+	CreateFileErr     error
+	DeleteFileErr     error
+	ListFilesErr      error
+	MkdirErr          error
+	Files             map[string][]byte
+	ListFiles         []apitypes.FileEntry
 	Images            []api.Image
 	ImagesErr         error
 	DeleteImageErr    error
@@ -102,6 +116,58 @@ type Server struct {
 	deleteImages    []string
 	createVolumes   []VolumeArgs
 	deleteVolumes   []VolumeArgs
+	consoleCalls    int
+	execArgs        []api.InstanceExecPost
+	createFiles     []FileArgs
+	deleteFiles     []string
+	mkdirs          []string
+}
+
+// FileArgs records one CreateInstanceFile call.
+type FileArgs struct {
+	Path    string
+	Content []byte
+	Mode    int64
+}
+
+// CreateFileArgs returns the arguments recorded by CreateInstanceFile.
+func (s *Server) CreateFileArgs() []FileArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]FileArgs(nil), s.createFiles...)
+}
+
+// DeleteFileArgs returns the paths recorded by DeleteInstanceFile.
+func (s *Server) DeleteFileArgs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.deleteFiles...)
+}
+
+// MkdirArgs returns the paths recorded by MkdirInstanceDir.
+func (s *Server) MkdirArgs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.mkdirs...)
+}
+
+// ExecArgs returns the requests recorded by ExecInstance.
+func (s *Server) ExecArgs() []api.InstanceExecPost {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]api.InstanceExecPost(nil), s.execArgs...)
+}
+
+// ConsoleCalls returns how many times ConsoleInstance was called.
+func (s *Server) ConsoleCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.consoleCalls
 }
 
 // SnapshotArgs records one instance snapshot call.
@@ -566,6 +632,105 @@ func (s *Server) GetImages() ([]api.Image, error) {
 	return s.Images, nil
 }
 
+// ConsoleInstance implements clusters.InstanceServer.
+func (s *Server) ConsoleInstance(instanceName string, _ api.InstanceConsolePost, _ *incus.InstanceConsoleArgs) (incus.Operation, error) {
+	s.record("ConsoleInstance:" + instanceName)
+	s.mu.Lock()
+	s.consoleCalls++
+	s.mu.Unlock()
+
+	if s.ConsoleErr != nil {
+		return nil, s.ConsoleErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// ExecInstance implements clusters.InstanceServer.
+func (s *Server) ExecInstance(instanceName string, exec api.InstanceExecPost, _ *incus.InstanceExecArgs) (incus.Operation, error) {
+	s.record("ExecInstance:" + instanceName)
+	s.mu.Lock()
+	s.execArgs = append(s.execArgs, exec)
+	s.mu.Unlock()
+
+	if s.ExecErr != nil {
+		return nil, s.ExecErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// GetInstanceFile implements clusters.InstanceServer.
+func (s *Server) GetInstanceFile(instanceName string, path string) (io.ReadCloser, *incus.InstanceFileResponse, error) {
+	s.record("GetInstanceFile:" + instanceName + ":" + path)
+	if s.GetFileErr != nil {
+		return nil, nil, s.GetFileErr
+	}
+	if content, ok := s.Files[path]; ok {
+		return io.NopCloser(bytes.NewReader(content)), &incus.InstanceFileResponse{
+			Type: "file",
+			Mode: 0o644,
+		}, nil
+	}
+
+	return nil, nil, api.StatusErrorf(http.StatusNotFound, "File %q not found", path)
+}
+
+// CreateInstanceFile implements clusters.InstanceServer.
+func (s *Server) CreateInstanceFile(instanceName string, path string, args incus.InstanceFileArgs) error {
+	s.record("CreateInstanceFile:" + instanceName + ":" + path)
+	if s.CreateFileErr != nil {
+		return s.CreateFileErr
+	}
+
+	content, err := io.ReadAll(args.Content)
+	if err != nil {
+		return fmt.Errorf("read upload: %w", err)
+	}
+
+	s.mu.Lock()
+	s.createFiles = append(s.createFiles, FileArgs{Path: path, Content: content, Mode: int64(args.Mode)})
+	s.mu.Unlock()
+
+	return nil
+}
+
+// DeleteInstanceFile implements clusters.InstanceServer.
+func (s *Server) DeleteInstanceFile(instanceName string, path string) error {
+	s.record("DeleteInstanceFile:" + instanceName + ":" + path)
+	s.mu.Lock()
+	s.deleteFiles = append(s.deleteFiles, path)
+	s.mu.Unlock()
+
+	return s.DeleteFileErr
+}
+
+// ListInstanceFiles implements clusters.InstanceServer.
+func (s *Server) ListInstanceFiles(instanceName string, dir string) ([]apitypes.FileEntry, error) {
+	s.record("ListInstanceFiles:" + instanceName + ":" + dir)
+	if s.ListFilesErr != nil {
+		return nil, s.ListFilesErr
+	}
+
+	return append([]apitypes.FileEntry(nil), s.ListFiles...), nil
+}
+
+// MkdirInstanceDir implements clusters.InstanceServer.
+func (s *Server) MkdirInstanceDir(instanceName string, dir string) error {
+	s.record("MkdirInstanceDir:" + instanceName + ":" + dir)
+	s.mu.Lock()
+	s.mkdirs = append(s.mkdirs, dir)
+	s.mu.Unlock()
+
+	return s.MkdirErr
+}
+
 // DeleteImage implements clusters.InstanceServer.
 func (s *Server) DeleteImage(fingerprint string) (incus.Operation, error) {
 	s.record("DeleteImage:" + fingerprint)
@@ -967,8 +1132,9 @@ func (o *RemoteOperation) Wait() error {
 
 // Operation is a fake incus.Operation.
 type Operation struct {
-	Err      error
-	WaitFunc func() error
+	Err              error
+	WaitFunc         func() error
+	GetWebsocketFunc func(string) (*websocket.Conn, error)
 }
 
 // AddHandler implements incus.Operation.
@@ -987,7 +1153,11 @@ func (o *Operation) Get() api.Operation {
 }
 
 // GetWebsocket implements incus.Operation.
-func (o *Operation) GetWebsocket(string) (*websocket.Conn, error) {
+func (o *Operation) GetWebsocket(fd string) (*websocket.Conn, error) {
+	if o.GetWebsocketFunc != nil {
+		return o.GetWebsocketFunc(fd)
+	}
+
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -1013,4 +1183,66 @@ func (o *Operation) Wait() error {
 // WaitContext implements incus.Operation.
 func (o *Operation) WaitContext(_ context.Context) error {
 	return o.Wait()
+}
+
+// WebsocketStub serves loopback websockets for relay tests. Every
+// GetWebsocket call on the returned operation dials the stub server and the
+// server-side connection arrives on Conns, tagged with the requested fd.
+type WebsocketStub struct {
+	server *httptest.Server
+	op     *Operation
+	Conns  chan StubConn
+	closed chan struct{}
+}
+
+// StubConn pairs one stub websocket with the fd that requested it.
+type StubConn struct {
+	FD   string
+	Conn *websocket.Conn
+}
+
+// NewWebsocketStub starts the loopback websocket server.
+func NewWebsocketStub() *WebsocketStub {
+	conns := make(chan StubConn, 8)
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		conns <- StubConn{FD: r.URL.Query().Get("fd"), Conn: conn}
+	}))
+
+	dialer := websocket.Dialer{}
+	closed := make(chan struct{})
+	op := &Operation{
+		GetWebsocketFunc: func(fd string) (*websocket.Conn, error) {
+			url := "ws" + strings.TrimPrefix(server.URL, "http") + "/?fd=" + fd
+			conn, _, err := dialer.Dial(url, nil)
+			if err != nil {
+				return nil, err
+			}
+
+			return conn, nil
+		},
+		// The relay tears down as soon as the operation finishes, so the
+		// stub operation waits until the test closes it.
+		WaitFunc: func() error {
+			<-closed
+			return nil
+		},
+	}
+
+	return &WebsocketStub{server: server, op: op, Conns: conns, closed: closed}
+}
+
+// Operation returns the wired fake operation.
+func (s *WebsocketStub) Operation() *Operation {
+	return s.op
+}
+
+// Close shuts the loopback server down and releases the operation wait.
+func (s *WebsocketStub) Close() {
+	close(s.closed)
+	s.server.Close()
 }
