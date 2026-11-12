@@ -24,7 +24,7 @@ const { t } = useI18n()
 const attachOpen = ref(false)
 const form = reactive({
   name: '',
-  type: 'disk' as 'disk' | 'nic',
+  type: 'disk' as 'disk' | 'nic' | 'proxy',
   pool: '',
   source: '',
   path: '',
@@ -32,6 +32,8 @@ const form = reactive({
   network: '',
   ipv4: '',
   ipv6: '',
+  listen: '',
+  connect: '',
 })
 
 // Rows are populated after mount so el-table renders them once its columns
@@ -69,10 +71,18 @@ watch(attachOpen, (open) => {
   form.network = networks.value[0]?.name ?? ''
   form.ipv4 = ''
   form.ipv6 = ''
+  form.listen = ''
+  form.connect = ''
 })
 
 function deviceLabel(type: string): string {
-  return type === 'nic' ? t('devices.nic') : type === 'disk' ? t('devices.disk') : type
+  return type === 'nic'
+    ? t('devices.nic')
+    : type === 'disk'
+      ? t('devices.disk')
+      : type === 'proxy'
+        ? t('devices.proxy')
+        : type
 }
 
 async function openAttach(): Promise<void> {
@@ -88,6 +98,9 @@ function request(): DeviceRequest {
     if (form.source.trim()) payload.source = form.source.trim()
     if (form.path.trim()) payload.path = form.path.trim()
     if (form.size.trim()) payload.size = form.size.trim()
+  } else if (form.type === 'proxy') {
+    if (form.listen.trim()) payload.listen = form.listen.trim()
+    if (form.connect.trim()) payload.connect = form.connect.trim()
   } else {
     if (form.network) payload.network = form.network
     if (form.ipv4.trim()) payload.ipv4 = form.ipv4.trim()
@@ -182,6 +195,7 @@ async function detach(name: string): Promise<void> {
           <el-radio-group v-model="form.type">
             <el-radio-button value="disk">{{ t('devices.disk') }}</el-radio-button>
             <el-radio-button value="nic">{{ t('devices.nic') }}</el-radio-button>
+            <el-radio-button value="proxy">{{ t('devices.proxy') }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
 
@@ -204,6 +218,17 @@ async function detach(name: string): Promise<void> {
           </el-form-item>
           <el-form-item :label="t('devices.size')">
             <el-input v-model="form.size" :placeholder="t('form.rootDiskPlaceholder')" />
+          </el-form-item>
+        </template>
+
+        <template v-else-if="form.type === 'proxy'">
+          <el-form-item :label="t('devices.listen')">
+            <el-input v-model="form.listen" placeholder="tcp:0.0.0.0:8080" />
+            <p class="field-hint">{{ t('devices.listenHint') }}</p>
+          </el-form-item>
+          <el-form-item :label="t('devices.connect')">
+            <el-input v-model="form.connect" placeholder="tcp:127.0.0.1:80" />
+            <p class="field-hint">{{ t('devices.connectHint') }}</p>
           </el-form-item>
         </template>
 
@@ -247,5 +272,11 @@ async function detach(name: string): Promise<void> {
   text-overflow: ellipsis;
   white-space: nowrap;
   display: block;
+}
+.field-hint {
+  margin-top: 4px;
+  color: var(--fleet-ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
 }
 </style>

@@ -282,7 +282,7 @@ func (s *Server) DeleteVolumeArgs() []VolumeArgs {
 	return append([]VolumeArgs(nil), s.deleteVolumes...)
 }
 
-// ISOArgs returns the calls recorded by CreateStoragePoolVolumeFromISO.
+// CreateISOArgs returns the calls recorded by CreateStoragePoolVolumeFromISO.
 func (s *Server) CreateISOArgs() []ISOArgs {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -10,6 +10,8 @@ import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import ImageDistributeDialog from '@/components/ImageDistributeDialog.vue'
 import ImageImportDialog from '@/components/ImageImportDialog.vue'
+import IsoImportDialog from '@/components/IsoImportDialog.vue'
+import IsoLaunchDialog from '@/components/IsoLaunchDialog.vue'
 import MemberDialog from '@/components/MemberDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
 import NetworkDialog from '@/components/NetworkDialog.vue'
@@ -65,6 +67,11 @@ const summary = computed(() => clusters.byName(props.cluster))
 const resources = computed(() => instances.resources(props.cluster))
 const profiles = computed(() => instances.profiles(props.cluster))
 const clusterImages = computed(() => instances.images(props.cluster))
+const clusterISOs = computed(() => instances.isoCache[props.cluster] ?? [])
+const poolNames = computed(() => (resources.value?.storage_pools ?? []).map((pool) => pool.name))
+const isoImportOpen = ref(false)
+const isoLaunchOpen = ref(false)
+const isoTarget = ref({ name: '', pool: '' })
 const cachedImageCount = computed(() => clusterImages.value.filter((image) => image.cached).length)
 const filtered = computed(() =>
   instances.items.filter(
@@ -88,6 +95,7 @@ async function load(force = false): Promise<void> {
     instances.fetchResources(props.cluster, force),
     instances.fetchProfiles(props.cluster, force),
     instances.fetchImages(props.cluster, force),
+    instances.fetchISOs(props.cluster, force),
   ])
 }
 
@@ -241,6 +249,41 @@ function openVolumesDialog(pool: StoragePoolResource): void {
 function openDistribute(fingerprint: string): void {
   distributeFingerprint.value = fingerprint
   distributeOpen.value = true
+}
+
+async function refreshImage(fingerprint: string): Promise<void> {
+  try {
+    await instances.refreshImage(props.cluster, fingerprint)
+    ElMessage.success(t('images.refreshed'))
+    await instances.fetchImages(props.cluster, true)
+  } catch (err) {
+    ElMessage.error(t('images.failed', { error: errorMessage(err) }))
+  }
+}
+
+function openIsoLaunch(iso: { name: string; pool: string }): void {
+  isoTarget.value = { name: iso.name, pool: iso.pool }
+  isoLaunchOpen.value = true
+}
+
+async function deleteISO(iso: { name: string; pool: string }): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      t('iso.deleteConfirm', { name: iso.name }),
+      t('common.delete'),
+      { type: 'warning', confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await instances.deleteISO(props.cluster, iso.pool, iso.name)
+    ElMessage.success(t('iso.deleted'))
+    await instances.fetchISOs(props.cluster, true)
+  } catch (err) {
+    ElMessage.error(t('iso.failed', { error: errorMessage(err) }))
+  }
 }
 
 async function deleteImage(fingerprint: string): Promise<void> {
@@ -594,6 +637,9 @@ function instanceTypeLabel(type: string): string {
               <el-button link type="primary" @click="openDistribute(row.fingerprint)">
                 {{ t('images.distribute') }}
               </el-button>
+              <el-button v-if="row.cached" link type="primary" @click="refreshImage(row.fingerprint)">
+                {{ t('images.refresh') }}
+              </el-button>
               <el-button link type="danger" @click="deleteImage(row.fingerprint)">
                 {{ t('common.delete') }}
               </el-button>
@@ -601,6 +647,49 @@ function instanceTypeLabel(type: string): string {
           </el-table-column>
           <template #empty>
             <el-empty :description="t('images.empty')" />
+          </template>
+        </el-table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-body">
+        <div class="section-heading page-header">
+          <div>
+            <h3 class="section-title">{{ t('iso.title') }}</h3>
+            <p class="subtitle">{{ t('iso.hint') }}</p>
+          </div>
+          <div class="page-actions">
+            <el-button :icon="Plus" type="primary" @click="isoImportOpen = true">
+              {{ t('iso.import') }}
+            </el-button>
+          </div>
+        </div>
+
+        <el-table v-loading="instances.saving" :data="clusterISOs" size="small" stripe>
+          <el-table-column :label="t('iso.name')" min-width="180">
+            <template #default="{ row }">
+              <strong>{{ row.name }}</strong>
+              <span v-if="row.description" class="mini-label">{{ row.description }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('iso.pool')" width="140">
+            <template #default="{ row }">
+              <span class="mono">{{ row.pool }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" width="200">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openIsoLaunch(row)">
+                {{ t('iso.launch') }}
+              </el-button>
+              <el-button link type="danger" @click="deleteISO(row)">
+                {{ t('common.delete') }}
+              </el-button>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty :description="t('iso.empty')" />
           </template>
         </el-table>
       </div>
@@ -783,6 +872,20 @@ function instanceTypeLabel(type: string): string {
       :fingerprint="distributeFingerprint"
       :clusters="clusters.items"
       @distributed="instances.fetchImages(cluster, true)"
+    />
+    <IsoImportDialog
+      v-model="isoImportOpen"
+      :cluster="cluster"
+      :pools="poolNames"
+      @imported="instances.fetchISOs(cluster, true)"
+    />
+    <IsoLaunchDialog
+      v-model="isoLaunchOpen"
+      :cluster="cluster"
+      :iso-name="isoTarget.name"
+      :iso-pool="isoTarget.pool"
+      :networks="(resources?.networks ?? []).map((network) => network.name)"
+      @launched="instances.fetchCluster(cluster, typeFilter)"
     />
   </div>
 </template>

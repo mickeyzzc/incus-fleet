@@ -4,6 +4,7 @@ import ElementPlus, { ElMessage } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
+import CloneInstanceDialog from '@/components/CloneInstanceDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
@@ -127,6 +128,36 @@ describe('InstancesView', () => {
     await buttonByText(wrapper, 'Edit').trigger('click')
     await flushPromises()
     expect(wrapper.findComponent(InstanceFormDialog).props('mode')).toBe('edit')
+  })
+
+  it('opens the clone dialog from the row action', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const cloneButton = wrapper.findAll('button').find((b) => b.text().includes('Clone'))
+    await cloneButton?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(CloneInstanceDialog)
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.props('cluster')).toBe('c1')
+    expect(dialog.props('instance')).toBe('web')
+    dialog.vm.$emit('cloned', 'web-clone')
+    await flushPromises()
+    expect(api.listInstances).toHaveBeenCalled()
+  })
+
+  it('paginates and re-fetches on size change', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const pagination = wrapper.findComponent({ name: 'ElPagination' })
+    expect(pagination.exists()).toBe(true)
+    pagination.vm.$emit('update:current-page', 1)
+    pagination.vm.$emit('update:page-size', 50)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('web')
   })
 
   it('deletes an instance after confirmation', async () => {

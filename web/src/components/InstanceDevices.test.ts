@@ -95,6 +95,34 @@ describe('InstanceDevices', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('Device eth1 attached.')
   })
 
+  it('attaches a proxy port forward', async () => {
+    const wrapper = mountPanel()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('Attach device'))?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent({ name: 'ElDialog' })
+    const group = dialog.findComponent({ name: 'ElRadioGroup' })
+    group.vm.$emit('update:modelValue', 'proxy')
+    await flushPromises()
+
+    const inputs = dialog.findAll('input[type="text"]')
+    await inputs[0]?.setValue('web80')
+    await inputs[1]?.setValue('tcp:0.0.0.0:8080')
+    await inputs[2]?.setValue('tcp:127.0.0.1:80')
+
+    await dialog.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.attachDevice).toHaveBeenCalledWith('c1', 'web', {
+      name: 'web80',
+      type: 'proxy',
+      listen: 'tcp:0.0.0.0:8080',
+      connect: 'tcp:127.0.0.1:80',
+    })
+    expect(ElMessage.success).toHaveBeenCalledWith('Device web80 attached.')
+  })
+
   it('labels unknown device types verbatim', async () => {
     const wrapper = mountPanel({
       devices: {

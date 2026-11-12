@@ -41,6 +41,26 @@ describe('InstanceDetailDrawer', () => {
     expect(wrapper.text()).toContain('snap0')
   })
 
+  it('opens the remote desktop and maintenance dialogs', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+    const wrapper = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'web' },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    const buttons = wrapper.findAll('button')
+    await buttons.find((button) => button.text().includes('Remote desktop'))?.trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'RemoteDesktopDialog' }).exists()).toBe(true)
+
+    await buttons
+      .find((button) => button.text().includes('Maintenance'))
+      ?.trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'InstanceOpsDialog' }).exists()).toBe(true)
+  })
+
   it('does not fetch while closed and fetches when opened', async () => {
     vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
     const wrapper = mount(InstanceDetailDrawer, {
@@ -102,6 +122,38 @@ describe('InstanceDetailDrawer', () => {
     expect(wrapper.emitted('edit')?.[0]?.[0]).toMatchObject({ name: 'web', cluster: 'c1' })
     expect(wrapper.emitted('migrate')).toHaveLength(1)
     expect(wrapper.emitted('delete')).toHaveLength(1)
+  })
+
+  it('updates the cached detail when devices change', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+    const wrapper = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'web' },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    const devices = wrapper.findComponent({ name: 'InstanceDevices' })
+    expect(devices.exists()).toBe(true)
+    devices.vm.$emit('changed', { ...instanceDetail(), memory: 42 })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('42')
+  })
+
+  it('reports failed lifecycle actions', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+    vi.mocked(api.instanceAction).mockRejectedValue(new Error('daemon busy'))
+    const wrapper = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'web' },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    const actions = wrapper.findComponent({ name: 'InstanceActions' })
+    actions.vm.$emit('action', 'start')
+    await flushPromises()
+
+    expect(ElMessage.error).toHaveBeenCalledWith('Action failed: daemon busy')
   })
 
   it('hides migration when it is not available', async () => {

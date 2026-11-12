@@ -8,15 +8,21 @@ import type {
   DeviceRequest,
   FileEntry,
   ImportImageRequest,
+  CloneRequest,
   CopyImageRequest,
+  ImportISORequest,
   InstanceAction,
   InstanceDetail,
   InstanceImage,
   InstanceSnapshot,
   InstanceSummary,
   InstanceType,
+  ISOSummary,
+  LaunchISORequest,
   MemberUpdateRequest,
   NetworkRequest,
+  OpsRequest,
+  OpsResult,
   Profile,
   ProfileRequest,
   SnapshotRequest,
@@ -32,6 +38,7 @@ export const useInstancesStore = defineStore('instances', () => {
   const items = ref<InstanceSummary[]>([])
   const details = ref<Record<string, InstanceDetail>>({})
   const imageCache = ref<Record<string, InstanceImage[]>>({})
+  const isoCache = ref<Record<string, ISOSummary[]>>({})
   const resourceCache = ref<Record<string, ClusterResources>>({})
   const profileCache = ref<Record<string, Profile[]>>({})
   const snapshotCache = ref<Record<string, InstanceSnapshot[]>>({})
@@ -463,6 +470,144 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
+  /** Lists installer ISO volumes, reusing the cache unless forced. */
+  async function fetchISOs(cluster: string, force = false): Promise<void> {
+    if (!force && isoCache.value[cluster]) {
+      return
+    }
+    try {
+      isoCache.value[cluster] = await api.listISOs(cluster)
+    } catch (err) {
+      error.value = errorMessage(err)
+      delete isoCache.value[cluster]
+      throw err
+    }
+  }
+
+  /** Uploads an ISO installer image and refreshes the ISO list. */
+  async function importISO(cluster: string, request: ImportISORequest): Promise<string> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const created = await api.importISO(cluster, request)
+      delete isoCache.value[cluster]
+      return created.name
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Deletes an ISO volume and invalidates the cached ISO list. */
+  async function deleteISO(cluster: string, pool: string, name: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.deleteISO(cluster, pool, name)
+      delete isoCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Launches an installer VM from an ISO volume and refreshes instances. */
+  async function launchFromISO(
+    cluster: string,
+    pool: string,
+    name: string,
+    request: LaunchISORequest,
+  ): Promise<InstanceSummary | null> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const detail = await api.launchFromISO(cluster, pool, name, request)
+      delete imageCache.value[cluster]
+      if (detail) {
+        items.value = [detail, ...items.value.filter((it) => !(it.cluster === cluster && it.name === detail.name))]
+      }
+      return detail
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Runs a guest-side maintenance action inside an instance. */
+  async function runOps(cluster: string, instance: string, request: OpsRequest): Promise<OpsResult> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      return await api.runOps(cluster, instance, request)
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Rebuilds a stopped instance from another image and refreshes details. */
+  async function rebuildInstance(cluster: string, instance: string, image: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.rebuildInstance(cluster, instance, image)
+      delete details.value[detailKey(cluster, instance)]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Refreshes a cached image from its origin. */
+  async function refreshImage(cluster: string, fingerprint: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.refreshImage(cluster, fingerprint)
+      delete imageCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Clones an instance within its cluster and refreshes the list. */
+  async function cloneInstance(cluster: string, instance: string, request: CloneRequest): Promise<InstanceSummary | null> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const detail = await api.cloneInstance(cluster, instance, request)
+      if (detail) {
+        items.value = [detail, ...items.value.filter((it) => !(it.cluster === cluster && it.name === detail.name))]
+      }
+      return detail
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
   /** Lists instance snapshots, reusing the cache unless forced. */
   async function fetchSnapshots(
     cluster: string,
@@ -808,6 +953,15 @@ export const useInstancesStore = defineStore('instances', () => {
     deleteImage,
     importImage,
     copyImage,
+    refreshImage,
+    isoCache,
+    fetchISOs,
+    importISO,
+    deleteISO,
+    launchFromISO,
+    runOps,
+    rebuildInstance,
+    cloneInstance,
     createSnapshot,
     restoreSnapshot,
     deleteSnapshot,

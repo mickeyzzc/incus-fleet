@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
+import CloneInstanceDialog from '@/components/CloneInstanceDialog.vue'
 import InstanceActions from '@/components/InstanceActions.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
@@ -82,6 +83,14 @@ watch(typeFilter, async (type) => {
 })
 
 const { act, confirmDelete, isBusy } = useInstanceActions(load)
+
+const cloneOpen = ref(false)
+const cloneTarget = ref({ cluster: '', name: '' })
+
+function openClone(instance: { cluster: string; name: string }): void {
+  cloneTarget.value = { cluster: instance.cluster, name: instance.name }
+  cloneOpen.value = true
+}
 
 watch(
   () => instances.items,
@@ -257,6 +266,9 @@ async function onSaved(): Promise<void> {
                 @migrate="openMigrate(row)"
                 @delete="confirmDelete(row)"
               />
+              <el-button link type="primary" @click="openClone(row)">
+                {{ t('clone.action') }}
+              </el-button>
             </template>
           </el-table-column>
           <template #empty>
@@ -290,6 +302,12 @@ async function onSaved(): Promise<void> {
       :cluster="formCluster"
       :instance="formInstance"
       @saved="onSaved"
+    />
+    <CloneInstanceDialog
+      v-model="cloneOpen"
+      :cluster="cloneTarget.cluster"
+      :instance="cloneTarget.name"
+      @cloned="load()"
     />
     <MigrateDialog
       v-model="migrateOpen"

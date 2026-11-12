@@ -1,11 +1,13 @@
 import type {
   ClusterResources,
   ClusterSummary,
+  CloneRequest,
   CreateInstanceRequest,
   DeviceRequest,
   FileEntry,
   HealthResponse,
   ImportImageRequest,
+  ImportISORequest,
   CopyImageRequest,
   InstanceActionRequest,
   InstanceDetail,
@@ -13,10 +15,14 @@ import type {
   InstanceSnapshot,
   InstanceSummary,
   InstanceType,
+  ISOSummary,
+  LaunchISORequest,
   MemberUpdateRequest,
   Migration,
   MigrationRequest,
   NetworkRequest,
+  OpsRequest,
+  OpsResult,
   Profile,
   ProfileRequest,
   SessionResponse,
@@ -179,6 +185,81 @@ export class ApiClient {
       `/api/v1/clusters/${encodeURIComponent(cluster)}/images/${encodeURIComponent(fingerprint)}/copy`,
       request,
     )
+  }
+
+  async refreshImage(cluster: string, fingerprint: string): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/images/${encodeURIComponent(fingerprint)}/refresh`,
+    )
+  }
+
+  async listISOs(cluster: string): Promise<ISOSummary[]> {
+    const data = await this.request<{ isos: ISOSummary[] }>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/iso`,
+    )
+    return data.isos ?? []
+  }
+
+  async importISO(cluster: string, request: ImportISORequest): Promise<{ name: string; pool: string }> {
+    const query = new URLSearchParams()
+    if (request.pool) {
+      query.set('pool', request.pool)
+    }
+
+    const form = new FormData()
+    form.append('image', request.file, request.file.name)
+
+    return this.request<{ name: string; pool: string }>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/iso?${query.toString()}`,
+      form,
+    )
+  }
+
+  async deleteISO(cluster: string, pool: string, name: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/iso/${encodeURIComponent(pool)}/${encodeURIComponent(name)}`,
+    )
+  }
+
+  async launchFromISO(cluster: string, pool: string, name: string, request: LaunchISORequest): Promise<InstanceSummary> {
+    return this.request<InstanceSummary>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/iso/${encodeURIComponent(pool)}/${encodeURIComponent(name)}/launch`,
+      request,
+    )
+  }
+
+  async runOps(cluster: string, instance: string, request: OpsRequest): Promise<OpsResult> {
+    return this.request<OpsResult>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/ops`,
+      request,
+    )
+  }
+
+  async rebuildInstance(cluster: string, instance: string, image: string): Promise<InstanceDetail> {
+    return this.request<InstanceDetail>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/rebuild`,
+      { image },
+    )
+  }
+
+  async cloneInstance(cluster: string, instance: string, request: CloneRequest): Promise<InstanceSummary> {
+    return this.request<InstanceSummary>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/clone`,
+      request,
+    )
+  }
+
+  vgaURL(cluster: string, instance: string): string {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    return `${proto}://${window.location.host}/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/vga`
   }
 
   async deleteImage(cluster: string, fingerprint: string): Promise<void> {

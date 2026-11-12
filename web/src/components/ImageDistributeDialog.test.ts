@@ -60,4 +60,13 @@ describe('ImageDistributeDialog', () => {
     expect(ElMessage.error).toHaveBeenCalledWith('Image action failed: transfer refused')
     expect(wrapper.emitted('distributed')).toBeUndefined()
   })
+  it('closes via the visible setter', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    wrapper.findComponent({ name: 'ElDialog' }).vm.$emit('update:modelValue', false)
+    await flushPromises()
+
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([false])
+  })
 })

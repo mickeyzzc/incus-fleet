@@ -251,6 +251,45 @@ export interface CopyImageRequest {
   alias?: string
 }
 
+export interface ISOSummary {
+  name: string
+  pool: string
+  description?: string
+  size?: string
+}
+
+export interface ImportISORequest {
+  file: File
+  pool?: string
+}
+
+export interface LaunchISORequest {
+  name: string
+  storage_pool?: string
+  network?: string
+  root_disk?: string
+  start?: boolean
+}
+
+export interface OpsRequest {
+  action: 'run-script' | 'set-password' | 'inject-key'
+  script?: string
+  user?: string
+  password?: string
+  key?: string
+}
+
+export interface OpsResult {
+  exit_code: number
+  stdout: string
+  stderr: string
+}
+
+export interface CloneRequest {
+  target: string
+  start?: boolean
+}
+
 export type InstanceAction = 'start' | 'stop' | 'restart'
 
 export interface InstanceActionRequest {
@@ -294,7 +333,7 @@ export interface VolumeRequest {
 /** Request used to attach one disk or NIC device to an instance. */
 export interface DeviceRequest {
   name: string
-  type: 'disk' | 'nic'
+  type: 'disk' | 'nic' | 'proxy'
   pool?: string
   source?: string
   path?: string
@@ -302,6 +341,9 @@ export interface DeviceRequest {
   network?: string
   ipv4?: string
   ipv6?: string
+  listen?: string
+  connect?: string
+  boot?: string
 }
 
 /** One file or directory inside an instance. */

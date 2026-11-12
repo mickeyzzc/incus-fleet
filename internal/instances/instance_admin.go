@@ -483,7 +483,7 @@ func buildDevice(
 // validateProxyEndpoint checks a tcp:/udp: proxy endpoint shape.
 func validateProxyEndpoint(field, value string) error {
 	if !strings.HasPrefix(value, "tcp:") && !strings.HasPrefix(value, "udp:") {
-		return fmt.Errorf("%w: proxy %s must start with tcp: or udp:", ErrInvalidRequest, field)
+		return fmt.Errorf("%w: proxy %s must use a tcp or udp scheme", ErrInvalidRequest, field)
 	}
 
 	addr := value[strings.Index(value, ":")+1:]

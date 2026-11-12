@@ -13,8 +13,8 @@ import (
 
 func TestRunOpsRunScript(t *testing.T) {
 	source := &incusfake.Server{
-		ExecOutput:    "hello",
-		Operation:     &incusfake.Operation{Metadata: map[string]any{"return": float64(0)}},
+		ExecOutput: "hello",
+		Operation:  &incusfake.Operation{Metadata: map[string]any{"return": float64(0)}},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": source})
 

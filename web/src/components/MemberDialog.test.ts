@@ -99,4 +99,14 @@ describe('MemberDialog', () => {
 
     expect(api.updateMember).not.toHaveBeenCalled()
   })
+
+  it('closes via the visible setter', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    wrapper.findComponent({ name: 'ElDialog' }).vm.$emit('update:modelValue', false)
+    await flushPromises()
+
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([false])
+  })
 })

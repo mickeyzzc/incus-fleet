@@ -7,6 +7,8 @@ import InstanceActions from '@/components/InstanceActions.vue'
 import InstanceDevices from '@/components/InstanceDevices.vue'
 import InstanceSnapshots from '@/components/InstanceSnapshots.vue'
 import FileManagerDialog from '@/components/FileManagerDialog.vue'
+import RemoteDesktopDialog from '@/components/RemoteDesktopDialog.vue'
+import InstanceOpsDialog from '@/components/InstanceOpsDialog.vue'
 import TerminalDialog from '@/components/TerminalDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type { InstanceAction, InstanceDetail } from '@/api/types'
@@ -38,6 +40,8 @@ const actionLoading = ref(false)
 const activeTab = ref('overview')
 const terminalOpen = ref(false)
 const filesOpen = ref(false)
+const desktopOpen = ref(false)
+const opsOpen = ref(false)
 
 const visible = computed({
   get: () => props.modelValue,
@@ -105,6 +109,14 @@ function onDevicesChanged(updated: InstanceDetail): void {
             </el-button>
             <el-button size="small" @click="filesOpen = true">
               {{ t('files.open') }}
+            </el-button>
+          </div>
+          <div class="access-row">
+            <el-button size="small" type="primary" plain @click="desktopOpen = true">
+              {{ t('desktop.open') }}
+            </el-button>
+            <el-button size="small" type="warning" plain @click="opsOpen = true">
+              {{ t('ops.open') }}
             </el-button>
           </div>
         </div>
@@ -241,6 +253,8 @@ function onDevicesChanged(updated: InstanceDetail): void {
 
     <TerminalDialog v-model="terminalOpen" :cluster="cluster" :instance="name" />
     <FileManagerDialog v-model="filesOpen" :cluster="cluster" :instance="name" />
+    <RemoteDesktopDialog v-model="desktopOpen" :cluster="cluster" :instance="name" />
+    <InstanceOpsDialog v-model="opsOpen" :cluster="cluster" :instance="name" @done="instances.fetchDetail(cluster, name)" />
   </el-drawer>
 </template>
 

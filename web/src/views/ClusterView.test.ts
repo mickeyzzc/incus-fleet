@@ -15,6 +15,8 @@ import ProfileDialog from '@/components/ProfileDialog.vue'
 import StoragePoolDialog from '@/components/StoragePoolDialog.vue'
 import ImageDistributeDialog from '@/components/ImageDistributeDialog.vue'
 import ImageImportDialog from '@/components/ImageImportDialog.vue'
+import IsoImportDialog from '@/components/IsoImportDialog.vue'
+import IsoLaunchDialog from '@/components/IsoLaunchDialog.vue'
 import StorageVolumesDialog from '@/components/StorageVolumesDialog.vue'
 import {
   clusterResources,
@@ -56,6 +58,9 @@ function mockFleet() {
     instanceImage({ fingerprint: 'fedcba098765', aliases: ['ubuntu'], os: 'Ubuntu', cached: false }),
   ])
   vi.mocked(api.deleteImage).mockResolvedValue(undefined)
+  vi.mocked(api.listISOs).mockResolvedValue([{ name: 'alpine', pool: 'default', description: 'installer' }])
+  vi.mocked(api.deleteISO).mockResolvedValue(undefined)
+  vi.mocked(api.refreshImage).mockResolvedValue(undefined)
   vi.mocked(api.listVolumes).mockResolvedValue([])
   vi.mocked(api.listProfiles).mockResolvedValue([
     profileSummary({ name: 'default', description: 'base profile' }),
@@ -409,6 +414,51 @@ describe('ClusterView', () => {
     expect(dialog.props('modelValue')).toBe(true)
     expect(dialog.props('pool')).toMatchObject({ name: 'default' })
     expect(api.listVolumes).toHaveBeenCalledWith('c1', 'default')
+  })
+
+  it('renders ISO volumes and deletes one after confirmation', async () => {
+    const { wrapper } = await mountCluster()
+
+    expect(wrapper.text()).toContain('alpine')
+
+    const isoRow = wrapper.findAll('.el-table__row').find((row) => row.text().includes('alpine'))
+    await isoRow?.findAll('button').find((b) => b.text().includes('Delete'))?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteISO).toHaveBeenCalledWith('c1', 'default', 'alpine')
+    expect(ElMessage.success).toHaveBeenCalledWith('ISO removed.')
+  })
+
+  it('refreshes a cached image from the row action', async () => {
+    const { wrapper } = await mountCluster()
+
+    const imageRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('053059ea4e28'))
+    await imageRow?.findAll('button').find((b) => b.text().includes('Refresh'))?.trigger('click')
+
+    await flushPromises()
+
+    expect(api.refreshImage).toHaveBeenCalledWith('c1', '053059ea4e28')
+    expect(ElMessage.success).toHaveBeenCalledWith('Image refresh requested; the daemon re-downloads it in the background.')
+  })
+
+  it('opens the ISO import and launch dialogs', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Upload ISO').trigger('click')
+    await flushPromises()
+    const importDialog = wrapper.findComponent(IsoImportDialog)
+    expect(importDialog.props('modelValue')).toBe(true)
+    expect(importDialog.props('pools')).toEqual(['default'])
+    importDialog.vm.$emit('imported', 'alpine')
+    await flushPromises()
+    expect(api.listISOs).toHaveBeenCalledWith('c1')
+
+    const isoRow = wrapper.findAll('.el-table__row').find((row) => row.text().includes('alpine'))
+    await isoRow?.findAll('button').find((b) => b.text().includes('Create VM'))?.trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent(IsoLaunchDialog).props('isoName')).toBe('alpine')
   })
 
   it('opens the image import and distribute dialogs', async () => {

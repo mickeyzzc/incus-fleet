@@ -90,6 +90,29 @@ describe('InstanceSnapshots', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('Snapshot snap0 deleted.')
   })
 
+  it('cancels deletion without calling the API', async () => {
+    const { ElMessageBox } = await import('element-plus')
+    vi.mocked(ElMessageBox.confirm).mockRejectedValueOnce('cancel')
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const row = wrapper.findAll('.el-table__row').at(0)
+    await row?.findAll('button').find((b) => b.text().includes('Delete'))?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('refreshes the snapshot list from the toolbar', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('Refresh'))?.trigger('click')
+    await flushPromises()
+
+    expect(api.listSnapshots).toHaveBeenCalledTimes(2)
+  })
+
   it('reports failures', async () => {
     vi.mocked(api.restoreSnapshot).mockRejectedValue(new Error('restore failed'))
     const wrapper = mountPanel()

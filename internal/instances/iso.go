@@ -22,12 +22,12 @@ type ISOSummary struct {
 
 // LaunchISORequest creates an empty virtual machine that boots from an ISO.
 type LaunchISORequest struct {
-	Name        string  `json:"name"`
-	ISOName     string  `json:"iso_name"`
-	StoragePool string  `json:"storage_pool,omitempty"`
-	Network     string  `json:"network,omitempty"`
-	RootDisk    string  `json:"root_disk,omitempty"`
-	Start       *bool   `json:"start,omitempty"`
+	Name        string `json:"name"`
+	ISOName     string `json:"iso_name"`
+	StoragePool string `json:"storage_pool,omitempty"`
+	Network     string `json:"network,omitempty"`
+	RootDisk    string `json:"root_disk,omitempty"`
+	Start       *bool  `json:"start,omitempty"`
 }
 
 // ImportISO uploads an ISO image into a cluster as a custom storage volume.
@@ -167,9 +167,9 @@ func (s *Service) LaunchFromISO(ctx context.Context, clusterName string, req Lau
 	devices := api.DevicesMap{
 		"root": root,
 		"iso0": {
-			"type":         "disk",
-			"pool":         req.StoragePool,
-			"source":       req.ISOName,
+			"type":          "disk",
+			"pool":          req.StoragePool,
+			"source":        req.ISOName,
 			"boot.priority": "1",
 		},
 	}

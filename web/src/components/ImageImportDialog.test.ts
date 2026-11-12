@@ -87,6 +87,40 @@ describe('ImageImportDialog', () => {
     })
   })
 
+  it('ignores empty file selections', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [] })
+    await input.trigger('change')
+    await flushPromises()
+
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.importImage).not.toHaveBeenCalled()
+    expect(ElMessage.error).toHaveBeenCalledWith('Choose an image file first.')
+  })
+
+  it('opens the file picker from the upload zone', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const zone = wrapper.find('.upload-zone')
+    await zone.trigger('click')
+    await zone.trigger('keyup.enter')
+
+    const input = wrapper.find('input[type="file"]')
+    const file = new File(['tarball'], 'debian13.tar')
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('debian13.tar')
+    expect(wrapper.text()).toContain('MB')
+  })
+
   it('reports upload failures', async () => {
     vi.mocked(api.importImage).mockRejectedValue(new Error('upload failed'))
     const wrapper = mountDialog()

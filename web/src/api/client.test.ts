@@ -396,4 +396,72 @@ describe('ApiClient', () => {
       'https://fleet.local/api/v1/clusters/c1/images/abc123/copy',
     )
   })
+
+  it('refreshes images from their origin', async () => {
+    const { client, fetchImpl } = clientWith()
+
+    await client.refreshImage('c1', 'abc123def456')
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/clusters/c1/images/abc123def456/refresh',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('lists, uploads, and removes ISO volumes', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ isos: [{ name: 'alpine', pool: 'default' }] }))
+
+    const isos = await client.listISOs('c1')
+    expect(isos).toEqual([{ name: 'alpine', pool: 'default' }])
+
+    const file = new File(['iso'], 'alpine.iso')
+    await client.importISO('c1', { file, pool: 'fast' })
+    const init = fetchImpl.mock.calls[1]?.[1] as RequestInit
+    expect(fetchImpl.mock.calls[1]?.[0]).toBe('https://fleet.local/api/v1/clusters/c1/iso?pool=fast')
+    expect(init.body).toBeInstanceOf(FormData)
+    expect((init.body as FormData).get('image')).toEqual(file)
+
+    await client.deleteISO('c1', 'default', 'alpine')
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/clusters/c1/iso/default/alpine',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('launches installer VMs, runs ops, rebuilds, and clones', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ name: 'installer-01' }))
+
+    await client.launchFromISO('c1', 'default', 'alpine', { name: 'installer-01' })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/clusters/c1/iso/default/alpine/launch',
+      expect.objectContaining({ method: 'POST' }),
+    )
+
+    const result = await client.runOps('c1', 'web', { action: 'run-script', script: 'echo hi' })
+    expect(result).toEqual({ name: 'installer-01' })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/clusters/c1/instances/web/ops',
+      expect.objectContaining({ method: 'POST' }),
+    )
+
+    await client.rebuildInstance('c1', 'web', 'debian/13')
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/clusters/c1/instances/web/rebuild',
+      expect.objectContaining({ method: 'POST' }),
+    )
+
+    await client.cloneInstance('c1', 'web', { target: 'web-clone' })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/clusters/c1/instances/web/clone',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('builds same-origin VGA websocket URLs', async () => {
+    const { client } = clientWith()
+
+    const url = client.vgaURL('c1', 'vm-01')
+
+    expect(url).toBe('ws://localhost:3000/api/v1/clusters/c1/instances/vm-01/vga')
+  })
 })

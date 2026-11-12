@@ -576,4 +576,61 @@ describe('instances store', () => {
       store.importImage('c1', { file: new File(['x'], 'x.tar'), type: 'container' }),
     ).rejects.toThrow('quota')
   })
+
+  it('manages ISO volumes, ops, rebuild, refresh, and clones', async () => {
+    vi.mocked(api.listISOs).mockResolvedValue([
+      { name: 'alpine', pool: 'default', description: 'installer' },
+    ])
+    vi.mocked(api.importISO).mockResolvedValue({ name: 'debian', pool: 'default' })
+    vi.mocked(api.deleteISO).mockResolvedValue(undefined)
+    vi.mocked(api.launchFromISO).mockResolvedValue({
+      name: 'installer-01',
+      cluster: 'c1',
+      type: 'virtual-machine',
+      status: 'Running',
+    } as never)
+    vi.mocked(api.runOps).mockResolvedValue({ exit_code: 0, stdout: 'ok', stderr: '' })
+    vi.mocked(api.rebuildInstance).mockResolvedValue({ name: 'web' } as never)
+    vi.mocked(api.getInstance).mockResolvedValue({ name: 'web' } as never)
+    vi.mocked(api.refreshImage).mockResolvedValue(undefined)
+    vi.mocked(api.cloneInstance).mockResolvedValue({
+      name: 'web-clone',
+      cluster: 'c1',
+      type: 'container',
+      status: 'Stopped',
+    } as never)
+    const store = useInstancesStore()
+
+    await store.fetchISOs('c1')
+    expect(store.isoCache.c1).toHaveLength(1)
+
+    const name = await store.importISO('c1', { file: new File(['x'], 'debian.iso'), pool: 'default' })
+    expect(name).toBe('debian')
+    expect(store.isoCache.c1).toBeUndefined()
+
+    await store.fetchISOs('c1')
+    await store.deleteISO('c1', 'default', 'alpine')
+    expect(store.isoCache.c1).toBeUndefined()
+
+    const launched = await store.launchFromISO('c1', 'default', 'debian', { name: 'installer-01' })
+    expect(launched?.name).toBe('installer-01')
+
+    const result = await store.runOps('c1', 'web', { action: 'run-script', script: 'echo' })
+    expect(result.stdout).toBe('ok')
+
+    await store.fetchDetail('c1', 'web').catch(() => {})
+    await store.rebuildInstance('c1', 'web', 'debian/13')
+    expect(api.rebuildInstance).toHaveBeenCalledWith('c1', 'web', 'debian/13')
+
+    await store.refreshImage('c1', 'abc123')
+    expect(api.refreshImage).toHaveBeenCalledWith('c1', 'abc123')
+
+    const cloned = await store.cloneInstance('c1', 'web', { target: 'web-clone' })
+    expect(cloned?.name).toBe('web-clone')
+
+    vi.mocked(api.runOps).mockRejectedValue(new Error('agent down'))
+    await expect(store.runOps('c1', 'web', { action: 'run-script', script: 'x' })).rejects.toThrow(
+      'agent down',
+    )
+  })
 })
