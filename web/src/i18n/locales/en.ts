@@ -420,7 +420,7 @@ export default {
     open: 'Remote desktop',
     title: 'Remote desktop',
     connecting: 'Connecting to the graphical console…',
-    connected: 'Connected. The SPICE session is live.',
+    connected: 'SPICE main channel connected. Note: Incus currently exposes a single-channel VGA websocket, so the desktop frame may stay blank (experimental).',
     waiting: 'Preparing the session…',
     failed: 'Remote desktop failed: {error}',
     onlyVM: 'Remote desktop is available on running virtual machines.',

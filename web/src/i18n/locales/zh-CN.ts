@@ -414,7 +414,7 @@ export default {
     open: '远程桌面',
     title: '远程桌面',
     connecting: '正在连接图形控制台…',
-    connected: '已连接,SPICE 会话进行中。',
+    connected: 'SPICE 主通道已连接。注:Incus 目前仅提供单通道 VGA websocket,画面可能暂不可见(实验性)。',
     waiting: '正在准备会话…',
     failed: '远程桌面失败:{error}',
     onlyVM: '远程桌面仅对运行中的虚拟机可用。',
