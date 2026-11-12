@@ -112,6 +112,45 @@ describe('FileManagerDialog', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('app.log deleted.')
   })
 
+  it('navigates via breadcrumbs', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    // Enter the directory first so a deeper crumb exists.
+    const row = wrapper.findAll('.el-table__row').find((item) => item.text().includes('logs'))
+    await row?.findAll('button').find((b) => b.text().includes('logs'))?.trigger('click')
+    await flushPromises()
+
+    // The dialog only mounts after entering, so assert the deeper call then
+    // navigate home through the store path the crumbs drive.
+    expect(api.listInstanceFiles).toHaveBeenLastCalledWith('c1', 'web', '/logs')
+
+    const home = wrapper.findAll('.el-breadcrumb__item .el-link')
+    expect(home.length).toBeGreaterThanOrEqual(2)
+    await home[0]?.trigger('click')
+    await flushPromises()
+
+    // The root listing is cached from the initial load, so no extra fetch
+    // happens; the cached entries render again.
+    expect(api.listInstanceFiles).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('logs')
+  })
+
+  it('opens the hidden upload input on demand', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    // The hidden input exists without inline styles in jsdom; clicking the
+    // toolbar button must not throw and keeps the input mounted.
+    expect(wrapper.find('input[type="file"]').exists()).toBe(true)
+
+    const upload = wrapper.findAll('button').find((b) => b.text().includes('Upload file'))
+    await upload?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('input[type="file"]').exists()).toBe(true)
+  })
+
   it('uploads files into the current directory', async () => {
     const wrapper = mountDialog()
     await flushPromises()

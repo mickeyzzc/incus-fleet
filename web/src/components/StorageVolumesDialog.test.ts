@@ -78,6 +78,21 @@ describe('StorageVolumesDialog', () => {
     expect(ElMessage.error).toHaveBeenCalledWith('Enter a name.')
   })
 
+  it('renders volume sizes and refreshes on demand', async () => {
+    vi.mocked(api.listVolumes).mockResolvedValue([
+      storageVolume({ config: { size: '10GiB' } }),
+    ])
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('10.0 GiB')
+
+    await wrapper.findAll('button').find((b) => b.text().includes('Refresh'))?.trigger('click')
+    await flushPromises()
+
+    expect(api.listVolumes).toHaveBeenCalledTimes(2)
+  })
+
   it('deletes a volume after confirmation', async () => {
     const wrapper = mountDialog()
     await flushPromises()

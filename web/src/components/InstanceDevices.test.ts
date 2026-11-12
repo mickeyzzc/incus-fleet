@@ -7,16 +7,17 @@ import { api } from '@/api'
 import { clusterResources, instanceDetail } from '@/test/fixtures'
 import InstanceDevices from './InstanceDevices.vue'
 
-function mountPanel() {
+function mountPanel(options: { devices?: Record<string, Record<string, string>> } = {}) {
   return mount(InstanceDevices, {
     props: {
       cluster: 'c1',
       instance: 'web',
       detail: instanceDetail({
-        devices: {
-          root: { type: 'disk', pool: 'default', path: '/' },
-          eth0: { type: 'nic', network: 'incusbr0' },
-        },
+        devices:
+          options.devices ?? {
+            root: { type: 'disk', pool: 'default', path: '/' },
+            eth0: { type: 'nic', network: 'incusbr0' },
+          },
       }),
     },
     global: { plugins: [ElementPlus] },
@@ -65,6 +66,47 @@ describe('InstanceDevices', () => {
     })
     expect(ElMessage.success).toHaveBeenCalledWith('Device data attached.')
     expect(wrapper.emitted('changed')).toHaveLength(1)
+  })
+
+  it('attaches a NIC device through the nic branch', async () => {
+    const wrapper = mountPanel()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('Attach device'))?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent({ name: 'ElDialog' })
+    const group = dialog.findComponent({ name: 'ElRadioGroup' })
+    group.vm.$emit('update:modelValue', 'nic')
+    await flushPromises()
+
+    const inputs = dialog.findAll('input[type="text"]')
+    await inputs[0]?.setValue('eth1')
+    await inputs[1]?.setValue('10.0.0.0.9')
+
+    await dialog.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.attachDevice).toHaveBeenCalledWith('c1', 'web', {
+      name: 'eth1',
+      type: 'nic',
+      network: 'incusbr0',
+      ipv4: '10.0.0.0.9',
+    })
+    expect(ElMessage.success).toHaveBeenCalledWith('Device eth1 attached.')
+  })
+
+  it('labels unknown device types verbatim', async () => {
+    const wrapper = mountPanel({
+      devices: {
+        root: { type: 'disk', pool: 'default', path: '/' },
+        weird: { type: 'unix-block', path: '/dev/foo' },
+      },
+    })
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('unix-block')
+    expect(text).toContain('path=/dev/foo')
   })
 
   it('rejects an empty device name', async () => {

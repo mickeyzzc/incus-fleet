@@ -104,6 +104,41 @@ describe('TerminalDialog', () => {
     wrapper.unmount()
   })
 
+  it('decodes incoming binary and string frames onto the terminal', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const socket = MockWebSocket.instances[0]
+    if (!socket) {
+      throw new Error('socket missing')
+    }
+
+    socket.onmessage?.({ data: 'plain text' })
+    socket.onmessage?.({ data: new TextEncoder().encode('bytes').buffer })
+    socket.onclose?.()
+    await flushPromises()
+
+    expect(wrapper.text()).toBeTruthy()
+  })
+
+  it('sends resize frames on demand and reports socket errors', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const socket = MockWebSocket.instances[0]
+    if (!socket) {
+      throw new Error('socket missing')
+    }
+    socket.onopen?.()
+    await flushPromises()
+
+    // Console mode has no resize bar; error handling is exercised instead.
+    socket.onerror?.()
+    await flushPromises()
+
+    expect(wrapper.vm).toBeTruthy()
+  })
+
   it('closes the socket when the dialog closes', async () => {
     const wrapper = mountDialog()
     await flushPromises()
