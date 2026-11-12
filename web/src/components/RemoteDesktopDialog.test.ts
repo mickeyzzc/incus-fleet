@@ -7,8 +7,9 @@ import RemoteDesktopDialog from './RemoteDesktopDialog.vue'
 
 const { SpiceMainConn, spiceStop } = vi.hoisted(() => {
   const stop = vi.fn()
-  // The component instantiates with `new`, so the mock must be constructible.
-  const conn = vi.fn(function SpiceMainConnMock() {
+  // The component instantiates with `new`, so the mock must be constructible;
+  // arrow functions cannot be invoked with `new`.
+  const conn = vi.fn(function SpiceMainConnMock(this: unknown, ..._args: unknown[]) {
     return { stop }
   })
   return { SpiceMainConn: conn, spiceStop: stop }
@@ -64,7 +65,7 @@ describe('RemoteDesktopDialog', () => {
     const wrapper = mountDialog(true)
     await flushPromises()
 
-    const options = SpiceMainConn.mock.calls[0]?.[0] as { onsuccess: () => void }
+    const options = (SpiceMainConn.mock?.calls[0]?.[0] ?? {}) as unknown as { onsuccess: () => void }
     options.onsuccess()
     await flushPromises()
 
@@ -75,7 +76,7 @@ describe('RemoteDesktopDialog', () => {
     const wrapper = mountDialog(true)
     await flushPromises()
 
-    const options = SpiceMainConn.mock.calls[0]?.[0] as { onerror: (err: unknown) => void }
+    const options = (SpiceMainConn.mock?.calls[0]?.[0] ?? {}) as unknown as { onerror: (err: unknown) => void }
     options.onerror(new Error('tunnel down'))
     await flushPromises()
 
