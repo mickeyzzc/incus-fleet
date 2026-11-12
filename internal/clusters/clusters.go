@@ -40,9 +40,24 @@ type InstanceServer interface {
 	GetImages() ([]api.Image, error)
 	GetStoragePoolNames() ([]string, error)
 	GetStoragePools() ([]api.StoragePool, error)
+	GetStoragePool(name string) (*api.StoragePool, string, error)
+	CreateStoragePool(pool api.StoragePoolsPost) error
+	UpdateStoragePool(name string, pool api.StoragePoolPut, etag string) error
+	DeleteStoragePool(name string) error
 	GetNetworkNames() ([]string, error)
 	GetNetworks() ([]api.Network, error)
+	GetNetwork(name string) (*api.Network, string, error)
+	CreateNetwork(network api.NetworksPost) error
+	UpdateNetwork(name string, network api.NetworkPut, etag string) error
+	DeleteNetwork(name string) error
 	GetStoragePoolResources(name string) (*api.ResourcesStoragePool, error)
+	GetProfiles() ([]api.Profile, error)
+	GetProfile(name string) (*api.Profile, string, error)
+	CreateProfile(profile api.ProfilesPost) error
+	UpdateProfile(name string, profile api.ProfilePut, etag string) error
+	DeleteProfile(name string) error
+	GetClusterMember(name string) (*api.ClusterMember, string, error)
+	UpdateClusterMember(name string, member api.ClusterMemberPut, etag string) error
 	IsClustered() bool
 }
 
@@ -357,13 +372,16 @@ type Summary struct {
 
 // Member is one Incus cluster member.
 type Member struct {
-	Name         string   `json:"name"`
-	URL          string   `json:"url,omitempty"`
-	Status       string   `json:"status"`
-	Message      string   `json:"message,omitempty"`
-	Database     bool     `json:"database"`
-	Roles        []string `json:"roles"`
-	Architecture string   `json:"architecture,omitempty"`
+	Name          string   `json:"name"`
+	URL           string   `json:"url,omitempty"`
+	Status        string   `json:"status"`
+	Message       string   `json:"message,omitempty"`
+	Database      bool     `json:"database"`
+	Roles         []string `json:"roles"`
+	Architecture  string   `json:"architecture,omitempty"`
+	Description   string   `json:"description,omitempty"`
+	FailureDomain string   `json:"failure_domain,omitempty"`
+	Groups        []string `json:"groups"`
 }
 
 // Counts summarizes instances by type and state.
@@ -412,13 +430,16 @@ func (c *Connection) Summary() Summary {
 	if members, err := client.GetClusterMembers(); err == nil {
 		for _, member := range members {
 			summary.Members = append(summary.Members, Member{
-				Name:         member.ServerName,
-				URL:          member.URL,
-				Status:       member.Status,
-				Message:      member.Message,
-				Database:     member.Database,
-				Roles:        append([]string(nil), member.Roles...),
-				Architecture: member.Architecture,
+				Name:          member.ServerName,
+				URL:           member.URL,
+				Status:        member.Status,
+				Message:       member.Message,
+				Database:      member.Database,
+				Roles:         append([]string(nil), member.Roles...),
+				Architecture:  member.Architecture,
+				Description:   member.Description,
+				FailureDomain: member.FailureDomain,
+				Groups:        append([]string{}, member.Groups...),
 			})
 		}
 	}

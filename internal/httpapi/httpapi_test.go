@@ -514,6 +514,220 @@ func TestInstanceManagementErrors(t *testing.T) {
 	}
 }
 
+func TestClusterAdminEndpoints(t *testing.T) {
+	source := &incusfake.Server{
+		Pools: []api.StoragePool{{
+			Name:        "default",
+			Driver:      "dir",
+			Description: "primary",
+			Config:      api.ConfigMap{"source": "/srv/incus"},
+		}},
+		Networks: []api.Network{{
+			Name:    "incusbr0",
+			Type:    "bridge",
+			Managed: true,
+			Config:  api.ConfigMap{"ipv4.address": "10.0.0.0.1/24"},
+		}},
+		Profiles: []api.Profile{{
+			Name:    "web",
+			Config:  api.ConfigMap{"limits.cpu": "2"},
+			Devices: api.DevicesMap{"root": {"type": "disk", "pool": "default", "path": "/"}},
+			UsedBy:  []string{"/1.0/instances/web"},
+		}},
+	}
+	target := &incusfake.Server{}
+	f := newAPIFixture(t, source, target)
+	cookie := f.login(t)
+
+	rec := f.request(t, http.MethodPost, "/api/v1/clusters/c1/storage-pools", map[string]any{
+		"name":        "fast",
+		"driver":      "zfs",
+		"description": "fast pool",
+		"config":      map[string]string{"source": "tank"},
+	}, cookie, "")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create pool status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	pools := source.CreatePoolArgs()
+	if len(pools) != 1 || pools[0].Name != "fast" || pools[0].Driver != "zfs" || pools[0].Config["source"] != "tank" {
+		t.Fatalf("create pool args = %#v", pools)
+	}
+
+	rec = f.request(t, http.MethodPatch, "/api/v1/clusters/c1/storage-pools/default", map[string]any{
+		"description": "updated",
+		"config":      map[string]string{"volume.size": "20GiB"},
+	}, cookie, "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("update pool status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	poolUpdates := source.UpdatePoolArgs()
+	if len(poolUpdates) != 1 || poolUpdates[0].Pool.Description != "updated" || poolUpdates[0].Pool.Config["source"] != "/srv/incus" {
+		t.Fatalf("update pool args = %#v", poolUpdates)
+	}
+
+	rec = f.request(t, http.MethodDelete, "/api/v1/clusters/c1/storage-pools/fast", nil, cookie, "")
+	if rec.Code != http.StatusNoContent || len(source.DeletePoolArgs()) != 1 {
+		t.Fatalf("delete pool status = %d args = %#v", rec.Code, source.DeletePoolArgs())
+	}
+
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/networks", map[string]any{
+		"name":        "br-test",
+		"type":        "bridge",
+		"description": "test bridge",
+		"config":      map[string]string{"ipv4.address": "10.99.0.1/24", "ipv6.address": "none"},
+	}, cookie, "")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create network status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	networks := source.CreateNetworkArgs()
+	if len(networks) != 1 || networks[0].Name != "br-test" || networks[0].Type != "bridge" || networks[0].Config["ipv4.address"] != "10.99.0.1/24" {
+		t.Fatalf("create network args = %#v", networks)
+	}
+
+	rec = f.request(t, http.MethodPatch, "/api/v1/clusters/c1/networks/incusbr0", map[string]any{
+		"config": map[string]string{"ipv4.nat": "false"},
+	}, cookie, "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("update network status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	networkUpdates := source.UpdateNetworkArgs()
+	if len(networkUpdates) != 1 || networkUpdates[0].Network.Config["ipv4.address"] != "10.0.0.0.1/24" || networkUpdates[0].Network.Config["ipv4.nat"] != "false" {
+		t.Fatalf("update network args = %#v", networkUpdates)
+	}
+
+	rec = f.request(t, http.MethodDelete, "/api/v1/clusters/c1/networks/br-test", nil, cookie, "")
+	if rec.Code != http.StatusNoContent || len(source.DeleteNetworkArgs()) != 1 {
+		t.Fatalf("delete network status = %d args = %#v", rec.Code, source.DeleteNetworkArgs())
+	}
+
+	rec = f.request(t, http.MethodGet, "/api/v1/clusters/c1/profiles", nil, cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("profiles status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var profileEnvelope struct {
+		Profiles []instances.Profile `json:"profiles"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &profileEnvelope); err != nil || len(profileEnvelope.Profiles) != 1 || profileEnvelope.Profiles[0].Name != "web" {
+		t.Fatalf("profiles = %#v error = %v", profileEnvelope.Profiles, err)
+	}
+	if profileEnvelope.Profiles[0].Devices["root"]["pool"] != "default" || len(profileEnvelope.Profiles[0].UsedBy) != 1 {
+		t.Fatalf("profile = %#v", profileEnvelope.Profiles[0])
+	}
+
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/profiles", map[string]any{
+		"name":        "tier",
+		"description": "tier profile",
+		"config":      map[string]string{"limits.memory": "2GiB"},
+		"devices": map[string]any{
+			"eth0": map[string]string{"type": "nic", "network": "incusbr0"},
+		},
+	}, cookie, "")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create profile status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	profiles := source.CreateProfileArgs()
+	if len(profiles) != 1 || profiles[0].Name != "tier" || profiles[0].Config["limits.memory"] != "2GiB" || profiles[0].Devices["eth0"]["network"] != "incusbr0" {
+		t.Fatalf("create profile args = %#v", profiles)
+	}
+
+	rec = f.request(t, http.MethodPatch, "/api/v1/clusters/c1/profiles/web", map[string]any{
+		"config": map[string]string{"limits.cpu": "4"},
+	}, cookie, "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("update profile status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	profileUpdates := source.UpdateProfileArgs()
+	if len(profileUpdates) != 1 || profileUpdates[0].Profile.Config["limits.cpu"] != "4" {
+		t.Fatalf("update profile args = %#v", profileUpdates)
+	}
+
+	rec = f.request(t, http.MethodDelete, "/api/v1/clusters/c1/profiles/web", nil, cookie, "")
+	if rec.Code != http.StatusNoContent || len(source.DeleteProfileArgs()) != 1 {
+		t.Fatalf("delete profile status = %d args = %#v", rec.Code, source.DeleteProfileArgs())
+	}
+
+	rec = f.request(t, http.MethodPatch, "/api/v1/clusters/c1/members/test-node", map[string]any{
+		"description": "primary node",
+		"groups":      []string{"site-a"},
+	}, cookie, "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("update member status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	memberUpdates := source.UpdateMemberArgs()
+	if len(memberUpdates) != 1 || memberUpdates[0].Member.Description != "primary node" || memberUpdates[0].Member.Groups[0] != "site-a" {
+		t.Fatalf("update member args = %#v", memberUpdates)
+	}
+}
+
+func TestClusterAdminErrors(t *testing.T) {
+	source := &incusfake.Server{
+		Networks: []api.Network{{
+			Name:    "physical",
+			Type:    "physical",
+			Managed: false,
+		}},
+	}
+	target := &incusfake.Server{}
+	f := newAPIFixture(t, source, target)
+	cookie := f.login(t)
+
+	rec := f.request(t, http.MethodPost, "/api/v1/clusters/c1/storage-pools", `{"name":`, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed pool status = %d", rec.Code)
+	}
+
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/storage-pools", map[string]any{"name": "fast"}, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid pool status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/networks", map[string]any{
+		"name": "br-test",
+		"type": "bridge",
+		"config": map[string]string{
+			"ipv4.address": "not-a-cidr",
+		},
+	}, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid network status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = f.request(t, http.MethodPatch, "/api/v1/clusters/c1/networks/physical", map[string]any{
+		"description": "nope",
+	}, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unmanaged network status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/profiles", map[string]any{"name": "tier", "devices": map[string]any{"root": map[string]string{"pool": "default"}}}, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid profile status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = f.request(t, http.MethodPatch, "/api/v1/clusters/c99/members/test-node", map[string]any{"description": "x"}, cookie, "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown cluster status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	source.CreatePoolErr = errors.New("pool boom")
+	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/storage-pools", map[string]any{"name": "fast", "driver": "zfs"}, cookie, "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("pool error status = %d", rec.Code)
+	}
+
+	source.ProfilesErr = errors.New("profiles boom")
+	rec = f.request(t, http.MethodGet, "/api/v1/clusters/c1/profiles", nil, cookie, "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("profiles error status = %d", rec.Code)
+	}
+
+	source.MemberErr = errors.New("member boom")
+	rec = f.request(t, http.MethodPatch, "/api/v1/clusters/c1/members/test-node", map[string]any{"description": "x"}, cookie, "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("member error status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestMigrationEndpoints(t *testing.T) {
 	source := &incusfake.Server{Instance: testContainer("web")}
 	target := &incusfake.Server{}

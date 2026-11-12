@@ -10,6 +10,11 @@ import type {
   InstanceImage,
   InstanceSummary,
   InstanceType,
+  MemberUpdateRequest,
+  NetworkRequest,
+  Profile,
+  ProfileRequest,
+  StoragePoolRequest,
   UpdateInstanceRequest,
 } from '@/api/types'
 import { errorMessage } from '@/utils/errors'
@@ -20,10 +25,12 @@ export const useInstancesStore = defineStore('instances', () => {
   const details = ref<Record<string, InstanceDetail>>({})
   const imageCache = ref<Record<string, InstanceImage[]>>({})
   const resourceCache = ref<Record<string, ClusterResources>>({})
+  const profileCache = ref<Record<string, Profile[]>>({})
   const loading = ref(false)
   const detailLoading = ref(false)
   const imagesLoading = ref(false)
   const resourcesLoading = ref(false)
+  const profilesLoading = ref(false)
   const saving = ref(false)
   const error = ref('')
   const filter = ref<InstanceType>('any')
@@ -126,6 +133,25 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
+  /** Lists instance profiles for a cluster, reusing the cache unless forced. */
+  async function fetchProfiles(cluster: string, force = false): Promise<void> {
+    if (!force && profileCache.value[cluster]) {
+      return
+    }
+
+    profilesLoading.value = true
+    error.value = ''
+
+    try {
+      profileCache.value[cluster] = await api.listProfiles(cluster)
+    } catch (err) {
+      error.value = errorMessage(err)
+      delete profileCache.value[cluster]
+    } finally {
+      profilesLoading.value = false
+    }
+  }
+
   /** Creates an instance and caches the returned detail. */
   async function createInstance(
     cluster: string,
@@ -201,6 +227,181 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
+  /** Creates a storage pool and invalidates cached cluster resources. */
+  async function createStoragePool(cluster: string, request: StoragePoolRequest): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.createStoragePool(cluster, request)
+      delete resourceCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Updates a storage pool and invalidates cached cluster resources. */
+  async function updateStoragePool(
+    cluster: string,
+    name: string,
+    request: StoragePoolRequest,
+  ): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.updateStoragePool(cluster, name, request)
+      delete resourceCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Deletes a storage pool and invalidates cached cluster resources. */
+  async function deleteStoragePool(cluster: string, name: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.deleteStoragePool(cluster, name)
+      delete resourceCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Creates a managed network and invalidates cached cluster resources. */
+  async function createNetwork(cluster: string, request: NetworkRequest): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.createNetwork(cluster, request)
+      delete resourceCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Updates a managed network and invalidates cached cluster resources. */
+  async function updateNetwork(
+    cluster: string,
+    name: string,
+    request: NetworkRequest,
+  ): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.updateNetwork(cluster, name, request)
+      delete resourceCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Deletes a managed network and invalidates cached cluster resources. */
+  async function deleteNetwork(cluster: string, name: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.deleteNetwork(cluster, name)
+      delete resourceCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Creates a profile and invalidates the cached profile list. */
+  async function createProfile(cluster: string, request: ProfileRequest): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.createProfile(cluster, request)
+      delete profileCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Updates a profile and invalidates the cached profile list. */
+  async function updateProfile(
+    cluster: string,
+    name: string,
+    request: ProfileRequest,
+  ): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.updateProfile(cluster, name, request)
+      delete profileCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Deletes a profile and invalidates the cached profile list. */
+  async function deleteProfile(cluster: string, name: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.deleteProfile(cluster, name)
+      delete profileCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Updates safe cluster member metadata. */
+  async function updateMember(
+    cluster: string,
+    name: string,
+    request: MemberUpdateRequest,
+  ): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.updateMember(cluster, name, request)
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
   function detail(cluster: string, name: string): InstanceDetail | undefined {
     return details.value[detailKey(cluster, name)]
   }
@@ -213,6 +414,10 @@ export const useInstancesStore = defineStore('instances', () => {
     return resourceCache.value[cluster]
   }
 
+  function profiles(cluster: string): Profile[] {
+    return profileCache.value[cluster] ?? []
+  }
+
   function byCluster(cluster: string): InstanceSummary[] {
     return items.value.filter((instance) => instance.cluster === cluster)
   }
@@ -222,10 +427,12 @@ export const useInstancesStore = defineStore('instances', () => {
     details,
     imageCache,
     resourceCache,
+    profileCache,
     loading,
     detailLoading,
     imagesLoading,
     resourcesLoading,
+    profilesLoading,
     saving,
     error,
     filter,
@@ -237,13 +444,25 @@ export const useInstancesStore = defineStore('instances', () => {
     fetchDetail,
     fetchImages,
     fetchResources,
+    fetchProfiles,
     createInstance,
     updateInstance,
     instanceAction,
     deleteInstance,
+    createStoragePool,
+    updateStoragePool,
+    deleteStoragePool,
+    createNetwork,
+    updateNetwork,
+    deleteNetwork,
+    createProfile,
+    updateProfile,
+    deleteProfile,
+    updateMember,
     detail,
     images,
     resources,
+    profiles,
     byCluster,
   }
 })

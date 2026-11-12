@@ -94,6 +94,17 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}", a.requireAuth(http.HandlerFunc(a.deleteInstance)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/images", a.requireAuth(http.HandlerFunc(a.listImages)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/resources", a.requireAuth(http.HandlerFunc(a.getResources)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/storage-pools", a.requireAuth(http.HandlerFunc(a.createStoragePool)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/storage-pools/{pool}", a.requireAuth(http.HandlerFunc(a.updateStoragePool)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/storage-pools/{pool}", a.requireAuth(http.HandlerFunc(a.deleteStoragePool)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/networks", a.requireAuth(http.HandlerFunc(a.createNetwork)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/networks/{network}", a.requireAuth(http.HandlerFunc(a.updateNetwork)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/networks/{network}", a.requireAuth(http.HandlerFunc(a.deleteNetwork)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/profiles", a.requireAuth(http.HandlerFunc(a.listProfiles)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/profiles", a.requireAuth(http.HandlerFunc(a.createProfile)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/profiles/{profile}", a.requireAuth(http.HandlerFunc(a.updateProfile)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/profiles/{profile}", a.requireAuth(http.HandlerFunc(a.deleteProfile)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/members/{member}", a.requireAuth(http.HandlerFunc(a.updateMember)))
 	mux.Handle("GET /api/v1/instances", a.requireAuth(http.HandlerFunc(a.listInstances)))
 	mux.Handle("GET /api/v1/migrations", a.requireAuth(http.HandlerFunc(a.listMigrations)))
 	mux.Handle("POST /api/v1/migrations", a.requireAuth(http.HandlerFunc(a.submitMigration)))
@@ -352,6 +363,148 @@ func (a *API) getResources(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resources)
+}
+
+func (a *API) createStoragePool(w http.ResponseWriter, r *http.Request) {
+	var req instances.StoragePoolRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.CreateStoragePool(r.PathValue("cluster"), req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (a *API) updateStoragePool(w http.ResponseWriter, r *http.Request) {
+	var req instances.StoragePoolRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.UpdateStoragePool(r.PathValue("cluster"), r.PathValue("pool"), req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) deleteStoragePool(w http.ResponseWriter, r *http.Request) {
+	if err := a.instances.DeleteStoragePool(r.PathValue("cluster"), r.PathValue("pool")); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) createNetwork(w http.ResponseWriter, r *http.Request) {
+	var req instances.NetworkRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.CreateNetwork(r.PathValue("cluster"), req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (a *API) updateNetwork(w http.ResponseWriter, r *http.Request) {
+	var req instances.NetworkRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.UpdateNetwork(r.PathValue("cluster"), r.PathValue("network"), req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) deleteNetwork(w http.ResponseWriter, r *http.Request) {
+	if err := a.instances.DeleteNetwork(r.PathValue("cluster"), r.PathValue("network")); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) listProfiles(w http.ResponseWriter, r *http.Request) {
+	profiles, err := a.instances.Profiles(r.PathValue("cluster"))
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"profiles": profiles})
+}
+
+func (a *API) createProfile(w http.ResponseWriter, r *http.Request) {
+	var req instances.ProfileRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.CreateProfile(r.PathValue("cluster"), req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
+	var req instances.ProfileRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.UpdateProfile(r.PathValue("cluster"), r.PathValue("profile"), req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) deleteProfile(w http.ResponseWriter, r *http.Request) {
+	if err := a.instances.DeleteProfile(r.PathValue("cluster"), r.PathValue("profile")); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) updateMember(w http.ResponseWriter, r *http.Request) {
+	var req instances.MemberUpdateRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.UpdateMember(r.PathValue("cluster"), r.PathValue("member"), req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) listMigrations(w http.ResponseWriter, r *http.Request) {

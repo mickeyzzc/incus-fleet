@@ -22,6 +22,9 @@ export interface ClusterMember {
   database: boolean
   roles: string[]
   architecture?: string
+  description?: string
+  failure_domain?: string
+  groups?: string[]
 }
 
 export interface InstanceCounts {
@@ -163,6 +166,46 @@ export interface NetworkResource {
 export interface ClusterResources {
   storage_pools: StoragePoolResource[]
   networks: NetworkResource[]
+}
+
+/** Request used to create or update a storage pool. */
+export interface StoragePoolRequest {
+  name?: string
+  driver?: string
+  description?: string
+  config?: Record<string, string>
+}
+
+/** Request used to create or update a managed network. */
+export interface NetworkRequest {
+  name?: string
+  type?: string
+  description?: string
+  config?: Record<string, string>
+}
+
+/** One instance profile. */
+export interface Profile {
+  name: string
+  description?: string
+  config: Record<string, string>
+  devices: Record<string, Record<string, string>>
+  used_by: string[]
+}
+
+/** Request used to create or update a profile. */
+export interface ProfileRequest {
+  name?: string
+  description?: string
+  config?: Record<string, string>
+  devices?: Record<string, Record<string, string>>
+}
+
+/** Non-destructive cluster member metadata changes. */
+export interface MemberUpdateRequest {
+  description?: string
+  failure_domain?: string
+  groups?: string[]
 }
 
 /** Request used to create an instance from a local image. */

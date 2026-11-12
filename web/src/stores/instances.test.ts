@@ -2,7 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
-import type { ClusterResources, InstanceImage } from '@/api/types'
+import type { ClusterResources, InstanceImage, Profile } from '@/api/types'
 import { instanceDetail, instanceSummary } from '@/test/fixtures'
 import { useInstancesStore } from './instances'
 
@@ -279,5 +279,168 @@ describe('instances store', () => {
     await expect(store.deleteInstance('c1', 'web')).rejects.toThrow('delete failed')
 
     expect(store.error).toBe('delete failed')
+  })
+
+  it('caches profiles until a forced refresh', async () => {
+    const profile: Profile = {
+      name: 'web',
+      description: 'web tier',
+      config: { 'limits.cpu': '2' },
+      devices: { eth0: { type: 'nic', network: 'incusbr0' } },
+      used_by: ['/1.0/instances/web'],
+    }
+    vi.mocked(api.listProfiles).mockResolvedValue([profile])
+    const store = useInstancesStore()
+
+    await store.fetchProfiles('c1')
+    await store.fetchProfiles('c1')
+    expect(api.listProfiles).toHaveBeenCalledTimes(1)
+    expect(store.profiles('c1')).toHaveLength(1)
+    expect(store.profiles('c2')).toEqual([])
+    expect(store.profilesLoading).toBe(false)
+
+    await store.fetchProfiles('c1', true)
+    expect(api.listProfiles).toHaveBeenCalledTimes(2)
+  })
+
+  it('records profile load errors', async () => {
+    vi.mocked(api.listProfiles).mockRejectedValue(new Error('profiles offline'))
+    const store = useInstancesStore()
+
+    await store.fetchProfiles('c1')
+
+    expect(store.error).toBe('profiles offline')
+    expect(store.profiles('c1')).toEqual([])
+    expect(store.profilesLoading).toBe(false)
+  })
+
+  it('mutates storage pools and invalidates cached resources', async () => {
+    const store = useInstancesStore()
+    store.resourceCache = { c1: sampleResources() }
+
+    await store.createStoragePool('c1', { name: 'fast', driver: 'zfs' })
+    expect(api.createStoragePool).toHaveBeenCalledWith('c1', { name: 'fast', driver: 'zfs' })
+    expect(store.resources('c1')).toBeUndefined()
+
+    store.resourceCache = { c1: sampleResources() }
+    await store.updateStoragePool('c1', 'default', { description: 'updated' })
+    expect(api.updateStoragePool).toHaveBeenCalledWith('c1', 'default', {
+      description: 'updated',
+    })
+    expect(store.resources('c1')).toBeUndefined()
+
+    store.resourceCache = { c1: sampleResources() }
+    await store.deleteStoragePool('c1', 'fast')
+    expect(api.deleteStoragePool).toHaveBeenCalledWith('c1', 'fast')
+    expect(store.resources('c1')).toBeUndefined()
+    expect(store.saving).toBe(false)
+  })
+
+  it('records storage pool mutation errors', async () => {
+    vi.mocked(api.createStoragePool).mockRejectedValue(new Error('pool failed'))
+    vi.mocked(api.updateStoragePool).mockRejectedValue(new Error('update failed'))
+    vi.mocked(api.deleteStoragePool).mockRejectedValue(new Error('delete failed'))
+    const store = useInstancesStore()
+
+    await expect(store.createStoragePool('c1', { name: 'fast' })).rejects.toThrow('pool failed')
+    expect(store.error).toBe('pool failed')
+    await expect(store.updateStoragePool('c1', 'default', {})).rejects.toThrow('update failed')
+    expect(store.error).toBe('update failed')
+    await expect(store.deleteStoragePool('c1', 'fast')).rejects.toThrow('delete failed')
+    expect(store.error).toBe('delete failed')
+    expect(store.saving).toBe(false)
+  })
+
+  it('mutates networks and invalidates cached resources', async () => {
+    const store = useInstancesStore()
+    store.resourceCache = { c1: sampleResources() }
+
+    await store.createNetwork('c1', { name: 'br-test', type: 'bridge' })
+    expect(api.createNetwork).toHaveBeenCalledWith('c1', { name: 'br-test', type: 'bridge' })
+    expect(store.resources('c1')).toBeUndefined()
+
+    store.resourceCache = { c1: sampleResources() }
+    await store.updateNetwork('c1', 'incusbr0', { description: 'updated' })
+    expect(api.updateNetwork).toHaveBeenCalledWith('c1', 'incusbr0', { description: 'updated' })
+    expect(store.resources('c1')).toBeUndefined()
+
+    store.resourceCache = { c1: sampleResources() }
+    await store.deleteNetwork('c1', 'br-test')
+    expect(api.deleteNetwork).toHaveBeenCalledWith('c1', 'br-test')
+    expect(store.resources('c1')).toBeUndefined()
+  })
+
+  it('records network mutation errors', async () => {
+    vi.mocked(api.createNetwork).mockRejectedValue(new Error('network failed'))
+    vi.mocked(api.updateNetwork).mockRejectedValue(new Error('update failed'))
+    vi.mocked(api.deleteNetwork).mockRejectedValue(new Error('delete failed'))
+    const store = useInstancesStore()
+
+    await expect(store.createNetwork('c1', { name: 'br-test' })).rejects.toThrow('network failed')
+    expect(store.error).toBe('network failed')
+    await expect(store.updateNetwork('c1', 'incusbr0', {})).rejects.toThrow('update failed')
+    expect(store.error).toBe('update failed')
+    await expect(store.deleteNetwork('c1', 'br-test')).rejects.toThrow('delete failed')
+    expect(store.error).toBe('delete failed')
+  })
+
+  it('mutates profiles and invalidates the profile cache', async () => {
+    const store = useInstancesStore()
+    store.profileCache = { c1: [] }
+
+    await store.createProfile('c1', { name: 'web' })
+    expect(api.createProfile).toHaveBeenCalledWith('c1', { name: 'web' })
+    expect(api.listProfiles).not.toHaveBeenCalled()
+    expect(store.profileCache.c1).toBeUndefined()
+
+    store.profileCache = { c1: [] }
+    await store.updateProfile('c1', 'web', { description: 'updated' })
+    expect(api.updateProfile).toHaveBeenCalledWith('c1', 'web', { description: 'updated' })
+    expect(store.profileCache.c1).toBeUndefined()
+
+    store.profileCache = { c1: [] }
+    await store.deleteProfile('c1', 'web')
+    expect(api.deleteProfile).toHaveBeenCalledWith('c1', 'web')
+    expect(store.profileCache.c1).toBeUndefined()
+  })
+
+  it('records profile mutation errors', async () => {
+    vi.mocked(api.createProfile).mockRejectedValue(new Error('profile failed'))
+    vi.mocked(api.updateProfile).mockRejectedValue(new Error('update failed'))
+    vi.mocked(api.deleteProfile).mockRejectedValue(new Error('delete failed'))
+    const store = useInstancesStore()
+
+    await expect(store.createProfile('c1', { name: 'web' })).rejects.toThrow('profile failed')
+    expect(store.error).toBe('profile failed')
+    await expect(store.updateProfile('c1', 'web', {})).rejects.toThrow('update failed')
+    expect(store.error).toBe('update failed')
+    await expect(store.deleteProfile('c1', 'web')).rejects.toThrow('delete failed')
+    expect(store.error).toBe('delete failed')
+  })
+
+  it('updates member metadata', async () => {
+    vi.mocked(api.updateMember).mockResolvedValue(undefined)
+    const store = useInstancesStore()
+
+    await store.updateMember('c1', 'node-a', {
+      description: 'primary',
+      groups: ['site-a'],
+    })
+
+    expect(api.updateMember).toHaveBeenCalledWith('c1', 'node-a', {
+      description: 'primary',
+      groups: ['site-a'],
+    })
+    expect(store.saving).toBe(false)
+  })
+
+  it('records member update errors', async () => {
+    vi.mocked(api.updateMember).mockRejectedValue(new Error('member failed'))
+    const store = useInstancesStore()
+
+    await expect(store.updateMember('c1', 'node-a', {})).rejects.toThrow('member failed')
+
+    expect(store.error).toBe('member failed')
+    expect(store.saving).toBe(false)
   })
 })

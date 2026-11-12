@@ -8,9 +8,14 @@ import type {
   InstanceImage,
   InstanceSummary,
   InstanceType,
+  MemberUpdateRequest,
   Migration,
   MigrationRequest,
+  NetworkRequest,
+  Profile,
+  ProfileRequest,
   SessionResponse,
+  StoragePoolRequest,
   UpdateInstanceRequest,
   VersionResponse,
 } from './types'
@@ -183,6 +188,95 @@ export class ApiClient {
     await this.request<void>(
       'DELETE',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(name)}${query}`,
+    )
+  }
+
+  async createStoragePool(cluster: string, request: StoragePoolRequest): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/storage-pools`,
+      request,
+    )
+  }
+
+  async updateStoragePool(
+    cluster: string,
+    name: string,
+    request: StoragePoolRequest,
+  ): Promise<void> {
+    await this.request<void>(
+      'PATCH',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/storage-pools/${encodeURIComponent(name)}`,
+      request,
+    )
+  }
+
+  async deleteStoragePool(cluster: string, name: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/storage-pools/${encodeURIComponent(name)}`,
+    )
+  }
+
+  async createNetwork(cluster: string, request: NetworkRequest): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/networks`,
+      request,
+    )
+  }
+
+  async updateNetwork(cluster: string, name: string, request: NetworkRequest): Promise<void> {
+    await this.request<void>(
+      'PATCH',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/networks/${encodeURIComponent(name)}`,
+      request,
+    )
+  }
+
+  async deleteNetwork(cluster: string, name: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/networks/${encodeURIComponent(name)}`,
+    )
+  }
+
+  async listProfiles(cluster: string): Promise<Profile[]> {
+    const data = await this.request<{ profiles: Profile[] }>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/profiles`,
+    )
+    return data.profiles ?? []
+  }
+
+  async createProfile(cluster: string, request: ProfileRequest): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/profiles`,
+      request,
+    )
+  }
+
+  async updateProfile(cluster: string, name: string, request: ProfileRequest): Promise<void> {
+    await this.request<void>(
+      'PATCH',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/profiles/${encodeURIComponent(name)}`,
+      request,
+    )
+  }
+
+  async deleteProfile(cluster: string, name: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/profiles/${encodeURIComponent(name)}`,
+    )
+  }
+
+  async updateMember(cluster: string, name: string, request: MemberUpdateRequest): Promise<void> {
+    await this.request<void>(
+      'PATCH',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/members/${encodeURIComponent(name)}`,
+      request,
     )
   }
 

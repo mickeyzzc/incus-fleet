@@ -38,8 +38,28 @@ type Server struct {
 	ImagesErr        error
 	Pools            []api.StoragePool
 	PoolsErr         error
+	Pool             *api.StoragePool
+	PoolErr          error
+	CreatePoolErr    error
+	UpdatePoolErr    error
+	DeletePoolErr    error
 	Networks         []api.Network
 	NetworksErr      error
+	Network          *api.Network
+	NetworkErr       error
+	CreateNetworkErr error
+	UpdateNetworkErr error
+	DeleteNetworkErr error
+	Profiles         []api.Profile
+	ProfilesErr      error
+	Profile          *api.Profile
+	ProfileErr       error
+	CreateProfileErr error
+	UpdateProfileErr error
+	DeleteProfileErr error
+	Member           *api.ClusterMember
+	MemberErr        error
+	UpdateMemberErr  error
 	PoolNames        []string
 	PoolNamesErr     error
 	NetworkNames     []string
@@ -58,6 +78,44 @@ type Server struct {
 	updateArgs      []UpdateInstanceArgs
 	updateStateArgs []api.InstanceStatePut
 	copySource      incus.InstanceServer
+	createPools     []api.StoragePoolsPost
+	updatePools     []UpdateStoragePoolArgs
+	deletePools     []string
+	createNetworks  []api.NetworksPost
+	updateNetworks  []UpdateNetworkArgs
+	deleteNetworks  []string
+	createProfiles  []api.ProfilesPost
+	updateProfiles  []UpdateProfileArgs
+	deleteProfiles  []string
+	updateMembers   []UpdateMemberArgs
+}
+
+// UpdateStoragePoolArgs records one UpdateStoragePool call.
+type UpdateStoragePoolArgs struct {
+	Name string
+	Pool api.StoragePoolPut
+	ETag string
+}
+
+// UpdateNetworkArgs records one UpdateNetwork call.
+type UpdateNetworkArgs struct {
+	Name    string
+	Network api.NetworkPut
+	ETag    string
+}
+
+// UpdateProfileArgs records one UpdateProfile call.
+type UpdateProfileArgs struct {
+	Name    string
+	Profile api.ProfilePut
+	ETag    string
+}
+
+// UpdateMemberArgs records one UpdateClusterMember call.
+type UpdateMemberArgs struct {
+	Name   string
+	Member api.ClusterMemberPut
+	ETag   string
 }
 
 // UpdateInstanceArgs records one UpdateInstance call.
@@ -142,6 +200,86 @@ func (s *Server) UpdateArgs() []UpdateInstanceArgs {
 	defer s.mu.Unlock()
 
 	return append([]UpdateInstanceArgs(nil), s.updateArgs...)
+}
+
+// CreatePoolArgs returns the arguments recorded by CreateStoragePool.
+func (s *Server) CreatePoolArgs() []api.StoragePoolsPost {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]api.StoragePoolsPost(nil), s.createPools...)
+}
+
+// UpdatePoolArgs returns the arguments recorded by UpdateStoragePool.
+func (s *Server) UpdatePoolArgs() []UpdateStoragePoolArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]UpdateStoragePoolArgs(nil), s.updatePools...)
+}
+
+// DeletePoolArgs returns the names recorded by DeleteStoragePool.
+func (s *Server) DeletePoolArgs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.deletePools...)
+}
+
+// CreateNetworkArgs returns the arguments recorded by CreateNetwork.
+func (s *Server) CreateNetworkArgs() []api.NetworksPost {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]api.NetworksPost(nil), s.createNetworks...)
+}
+
+// UpdateNetworkArgs returns the arguments recorded by UpdateNetwork.
+func (s *Server) UpdateNetworkArgs() []UpdateNetworkArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]UpdateNetworkArgs(nil), s.updateNetworks...)
+}
+
+// DeleteNetworkArgs returns the names recorded by DeleteNetwork.
+func (s *Server) DeleteNetworkArgs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.deleteNetworks...)
+}
+
+// CreateProfileArgs returns the arguments recorded by CreateProfile.
+func (s *Server) CreateProfileArgs() []api.ProfilesPost {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]api.ProfilesPost(nil), s.createProfiles...)
+}
+
+// UpdateProfileArgs returns the arguments recorded by UpdateProfile.
+func (s *Server) UpdateProfileArgs() []UpdateProfileArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]UpdateProfileArgs(nil), s.updateProfiles...)
+}
+
+// DeleteProfileArgs returns the names recorded by DeleteProfile.
+func (s *Server) DeleteProfileArgs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.deleteProfiles...)
+}
+
+// UpdateMemberArgs returns the arguments recorded by UpdateClusterMember.
+func (s *Server) UpdateMemberArgs() []UpdateMemberArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]UpdateMemberArgs(nil), s.updateMembers...)
 }
 
 func (s *Server) record(call string) {
@@ -396,6 +534,203 @@ func (s *Server) GetStoragePoolResources(name string) (*api.ResourcesStoragePool
 	}
 
 	return &api.ResourcesStoragePool{Space: api.ResourcesStoragePoolSpace{Total: 1_000_000_000_000, Used: 100_000_000_000}}, nil
+}
+
+// GetStoragePool implements clusters.InstanceServer.
+func (s *Server) GetStoragePool(name string) (*api.StoragePool, string, error) {
+	s.record("GetStoragePool:" + name)
+	if s.PoolErr != nil {
+		return nil, "", s.PoolErr
+	}
+	if s.Pool != nil && (s.Pool.Name == name || s.Pool.Name == "") {
+		return s.Pool, "pool-etag", nil
+	}
+	for i := range s.Pools {
+		if s.Pools[i].Name == name {
+			return &s.Pools[i], "pool-etag", nil
+		}
+	}
+	if s.Pools == nil && name == "default" {
+		return &api.StoragePool{Name: "default", Driver: "dir", Config: api.ConfigMap{"source": "/srv/incus"}}, "pool-etag", nil
+	}
+
+	return nil, "", api.StatusErrorf(http.StatusNotFound, "Storage pool %q not found", name)
+}
+
+// CreateStoragePool implements clusters.InstanceServer.
+func (s *Server) CreateStoragePool(pool api.StoragePoolsPost) error {
+	s.record("CreateStoragePool:" + pool.Name)
+	s.mu.Lock()
+	s.createPools = append(s.createPools, pool)
+	s.mu.Unlock()
+
+	return s.CreatePoolErr
+}
+
+// UpdateStoragePool implements clusters.InstanceServer.
+func (s *Server) UpdateStoragePool(name string, pool api.StoragePoolPut, etag string) error {
+	s.record("UpdateStoragePool:" + name)
+	s.mu.Lock()
+	s.updatePools = append(s.updatePools, UpdateStoragePoolArgs{Name: name, Pool: pool, ETag: etag})
+	s.mu.Unlock()
+
+	return s.UpdatePoolErr
+}
+
+// DeleteStoragePool implements clusters.InstanceServer.
+func (s *Server) DeleteStoragePool(name string) error {
+	s.record("DeleteStoragePool:" + name)
+	s.mu.Lock()
+	s.deletePools = append(s.deletePools, name)
+	s.mu.Unlock()
+
+	return s.DeletePoolErr
+}
+
+// GetNetwork implements clusters.InstanceServer.
+func (s *Server) GetNetwork(name string) (*api.Network, string, error) {
+	s.record("GetNetwork:" + name)
+	if s.NetworkErr != nil {
+		return nil, "", s.NetworkErr
+	}
+	if s.Network != nil && (s.Network.Name == name || s.Network.Name == "") {
+		return s.Network, "network-etag", nil
+	}
+	for i := range s.Networks {
+		if s.Networks[i].Name == name {
+			return &s.Networks[i], "network-etag", nil
+		}
+	}
+	if s.Networks == nil && name == "incusbr0" {
+		return &api.Network{Name: "incusbr0", Type: "bridge", Managed: true, Config: api.ConfigMap{"ipv4.address": "10.0.0.0.1/24", "ipv6.address": "none"}}, "network-etag", nil
+	}
+
+	return nil, "", api.StatusErrorf(http.StatusNotFound, "Network %q not found", name)
+}
+
+// CreateNetwork implements clusters.InstanceServer.
+func (s *Server) CreateNetwork(network api.NetworksPost) error {
+	s.record("CreateNetwork:" + network.Name)
+	s.mu.Lock()
+	s.createNetworks = append(s.createNetworks, network)
+	s.mu.Unlock()
+
+	return s.CreateNetworkErr
+}
+
+// UpdateNetwork implements clusters.InstanceServer.
+func (s *Server) UpdateNetwork(name string, network api.NetworkPut, etag string) error {
+	s.record("UpdateNetwork:" + name)
+	s.mu.Lock()
+	s.updateNetworks = append(s.updateNetworks, UpdateNetworkArgs{Name: name, Network: network, ETag: etag})
+	s.mu.Unlock()
+
+	return s.UpdateNetworkErr
+}
+
+// DeleteNetwork implements clusters.InstanceServer.
+func (s *Server) DeleteNetwork(name string) error {
+	s.record("DeleteNetwork:" + name)
+	s.mu.Lock()
+	s.deleteNetworks = append(s.deleteNetworks, name)
+	s.mu.Unlock()
+
+	return s.DeleteNetworkErr
+}
+
+// GetProfiles implements clusters.InstanceServer.
+func (s *Server) GetProfiles() ([]api.Profile, error) {
+	s.record("GetProfiles")
+	if s.ProfilesErr != nil {
+		return nil, s.ProfilesErr
+	}
+	if s.Profiles != nil {
+		return append([]api.Profile(nil), s.Profiles...), nil
+	}
+
+	return []api.Profile{{Name: "default", Config: api.ConfigMap{}, Devices: api.DevicesMap{}}}, nil
+}
+
+// GetProfile implements clusters.InstanceServer.
+func (s *Server) GetProfile(name string) (*api.Profile, string, error) {
+	s.record("GetProfile:" + name)
+	if s.ProfileErr != nil {
+		return nil, "", s.ProfileErr
+	}
+	if s.Profile != nil && (s.Profile.Name == name || s.Profile.Name == "") {
+		return s.Profile, "profile-etag", nil
+	}
+	for i := range s.Profiles {
+		if s.Profiles[i].Name == name {
+			return &s.Profiles[i], "profile-etag", nil
+		}
+	}
+	if s.Profiles == nil && name == "default" {
+		return &api.Profile{Name: "default", Config: api.ConfigMap{}, Devices: api.DevicesMap{}}, "profile-etag", nil
+	}
+
+	return nil, "", api.StatusErrorf(http.StatusNotFound, "Profile %q not found", name)
+}
+
+// CreateProfile implements clusters.InstanceServer.
+func (s *Server) CreateProfile(profile api.ProfilesPost) error {
+	s.record("CreateProfile:" + profile.Name)
+	s.mu.Lock()
+	s.createProfiles = append(s.createProfiles, profile)
+	s.mu.Unlock()
+
+	return s.CreateProfileErr
+}
+
+// UpdateProfile implements clusters.InstanceServer.
+func (s *Server) UpdateProfile(name string, profile api.ProfilePut, etag string) error {
+	s.record("UpdateProfile:" + name)
+	s.mu.Lock()
+	s.updateProfiles = append(s.updateProfiles, UpdateProfileArgs{Name: name, Profile: profile, ETag: etag})
+	s.mu.Unlock()
+
+	return s.UpdateProfileErr
+}
+
+// DeleteProfile implements clusters.InstanceServer.
+func (s *Server) DeleteProfile(name string) error {
+	s.record("DeleteProfile:" + name)
+	s.mu.Lock()
+	s.deleteProfiles = append(s.deleteProfiles, name)
+	s.mu.Unlock()
+
+	return s.DeleteProfileErr
+}
+
+// GetClusterMember implements clusters.InstanceServer.
+func (s *Server) GetClusterMember(name string) (*api.ClusterMember, string, error) {
+	s.record("GetClusterMember:" + name)
+	if s.MemberErr != nil {
+		return nil, "", s.MemberErr
+	}
+	if s.Member != nil && (s.Member.ServerName == name || s.Member.ServerName == "") {
+		return s.Member, "member-etag", nil
+	}
+	for i := range s.Members {
+		if s.Members[i].ServerName == name {
+			return &s.Members[i], "member-etag", nil
+		}
+	}
+	if s.Members == nil && name == "test-node" {
+		return &api.ClusterMember{ServerName: "test-node", Status: "Online"}, "member-etag", nil
+	}
+
+	return nil, "", api.StatusErrorf(http.StatusNotFound, "Cluster member %q not found", name)
+}
+
+// UpdateClusterMember implements clusters.InstanceServer.
+func (s *Server) UpdateClusterMember(name string, member api.ClusterMemberPut, etag string) error {
+	s.record("UpdateClusterMember:" + name)
+	s.mu.Lock()
+	s.updateMembers = append(s.updateMembers, UpdateMemberArgs{Name: name, Member: member, ETag: etag})
+	s.mu.Unlock()
+
+	return s.UpdateMemberErr
 }
 
 // IsClustered implements clusters.InstanceServer.
