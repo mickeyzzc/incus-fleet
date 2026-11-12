@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api, ApiError } from '@/api'
+import { setLocale } from '@/i18n'
 import { useAuthStore } from './auth'
 
 describe('auth store', () => {
@@ -60,7 +61,7 @@ describe('auth store', () => {
     expect(store.error).toBe('')
   })
 
-  it('reports invalid tokens distinctly', async () => {
+  it('reports invalid tokens in the active language', async () => {
     vi.mocked(api.login).mockRejectedValue(new ApiError(401, 'invalid_token', 'invalid admin token'))
     const store = useAuthStore()
 
@@ -68,6 +69,10 @@ describe('auth store', () => {
 
     expect(store.authenticated).toBe(false)
     expect(store.error).toBe('Invalid admin token.')
+
+    setLocale('zh-CN')
+    await expect(store.login('wrong')).resolves.toBe(false)
+    expect(store.error).toBe('管理员 Token 无效。')
   })
 
   it('reports generic login failures', async () => {

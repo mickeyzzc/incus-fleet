@@ -56,10 +56,7 @@ export const useAuthStore = defineStore('auth', () => {
       return true
     } catch (err) {
       authenticated.value = false
-      error.value =
-        err instanceof ApiError && err.status === 401
-          ? 'Invalid admin token.'
-          : errorMessage(err)
+      error.value = errorMessage(err)
       return false
     } finally {
       loading.value = false

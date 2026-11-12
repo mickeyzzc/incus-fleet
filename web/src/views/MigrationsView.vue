@@ -75,6 +75,16 @@ function statusLabel(status: string): string {
   const key = `migrationStatus.${status}`
   return te(key) ? t(key) : status
 }
+
+/** Renders an instance type enum value in the active language. */
+function instanceTypeLabel(type: string): string {
+  return t(type === 'virtual-machine' ? 'common.virtualMachine' : 'common.container')
+}
+
+/** Renders a migration mode enum value as a short localized label. */
+function modeLabel(mode: string): string {
+  return t(mode === 'copy' ? 'migrate.modeCopy' : 'migrate.modeMove')
+}
 </script>
 
 <template>
@@ -153,7 +163,7 @@ function statusLabel(status: string): string {
           <el-table-column :label="t('common.instance')" min-width="150">
             <template #default="{ row }">
               <strong>{{ row.instance }}</strong>
-              <span class="mini-label">{{ row.instance_type }}</span>
+              <span class="mini-label">{{ instanceTypeLabel(row.instance_type) }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('common.route')" min-width="160">
@@ -165,7 +175,7 @@ function statusLabel(status: string): string {
           </el-table-column>
           <el-table-column :label="t('common.mode')" width="100">
             <template #default="{ row }">
-              {{ row.mode }}
+              {{ modeLabel(row.mode) }}
               <el-tag v-if="row.live" size="small" type="success" effect="light">
                 {{ t('common.live') }}
               </el-tag>
@@ -216,7 +226,7 @@ function statusLabel(status: string): string {
             </div>
             <div class="detail-item">
               <div class="label">{{ t('common.instance') }}</div>
-              <div class="value">{{ selected.instance }} ({{ selected.instance_type }})</div>
+              <div class="value">{{ selected.instance }} ({{ instanceTypeLabel(selected.instance_type) }})</div>
             </div>
             <div class="detail-item">
               <div class="label">{{ t('common.route') }}</div>
@@ -225,7 +235,7 @@ function statusLabel(status: string): string {
             <div class="detail-item">
               <div class="label">{{ t('common.mode') }}</div>
               <div class="value">
-                {{ selected.mode }}{{ selected.live ? ` · ${t('common.live')}` : '' }}
+                {{ modeLabel(selected.mode) }}{{ selected.live ? ` · ${t('common.live')}` : '' }}
               </div>
             </div>
             <div class="detail-item">

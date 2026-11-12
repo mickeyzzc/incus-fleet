@@ -57,9 +57,11 @@ describe('MigrationsView', () => {
 
     expect(api.listMigrations).toHaveBeenCalledWith(50)
     expect(wrapper.text()).toContain('Migrations')
-    expect(wrapper.text()).toContain('3 shown')
+    expect(wrapper.text()).toContain('Showing 3')
     expect(wrapper.text()).toContain('web')
     expect(wrapper.text()).toContain('vm1')
+    expect(wrapper.text()).toContain('Virtual machine')
+    expect(wrapper.text()).toContain('Move')
     expect(wrapper.text()).toContain('copying disks')
     expect(wrapper.text()).toContain('abcdef01…')
 
@@ -73,10 +75,10 @@ describe('MigrationsView', () => {
     await flushPromises()
 
     await wrapper.find('input').setValue('vm1')
-    expect(wrapper.text()).toContain('1 shown')
+    expect(wrapper.text()).toContain('Showing 1')
 
     await wrapper.find('input').setValue('c1')
-    expect(wrapper.text()).toContain('3 shown')
+    expect(wrapper.text()).toContain('Showing 3')
 
     await wrapper.find('input').setValue('')
 
@@ -84,12 +86,12 @@ describe('MigrationsView', () => {
     select.vm.$emit('update:modelValue', 'failed')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('1 shown')
+    expect(wrapper.text()).toContain('Showing 1')
     expect(wrapper.text()).toContain('db')
 
     select.vm.$emit('update:modelValue', '')
     await flushPromises()
-    expect(wrapper.text()).toContain('3 shown')
+    expect(wrapper.text()).toContain('Showing 3')
 
     wrapper.unmount()
   })
@@ -106,7 +108,7 @@ describe('MigrationsView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Migration detail')
-    expect(wrapper.text()).toContain('db (container)')
+    expect(wrapper.text()).toContain('db (Container)')
     expect(wrapper.text()).toContain('source cluster offline')
     expect(wrapper.text()).toContain('c1 → c2')
     expect(wrapper.text()).toContain('No progress details reported.')

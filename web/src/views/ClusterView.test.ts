@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
+import { setLocale } from '@/i18n'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
@@ -75,10 +76,17 @@ describe('ClusterView', () => {
 
     expect(wrapper.text()).toContain('Cluster 62')
     expect(wrapper.text()).toContain('https://192.0.2.10:8443')
-    expect(wrapper.text()).toContain('node-a')
+    expect(wrapper.text()).toContain('node-1')
     expect(wrapper.text()).toContain('web')
     expect(wrapper.text()).toContain('vm1')
-    expect(wrapper.text()).toContain('2 shown')
+    expect(wrapper.text()).toContain('Showing 2')
+  })
+
+  it('translates member status into the active language', async () => {
+    setLocale('zh-CN')
+    const { wrapper } = await mountCluster()
+
+    expect(wrapper.text()).toContain('node-1 · 在线')
   })
 
   it('filters by instance type', async () => {

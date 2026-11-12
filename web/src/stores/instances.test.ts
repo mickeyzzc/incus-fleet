@@ -422,12 +422,12 @@ describe('instances store', () => {
     vi.mocked(api.updateMember).mockResolvedValue(undefined)
     const store = useInstancesStore()
 
-    await store.updateMember('c1', 'node-a', {
+    await store.updateMember('c1', 'node-1', {
       description: 'primary',
       groups: ['site-a'],
     })
 
-    expect(api.updateMember).toHaveBeenCalledWith('c1', 'node-a', {
+    expect(api.updateMember).toHaveBeenCalledWith('c1', 'node-1', {
       description: 'primary',
       groups: ['site-a'],
     })
@@ -438,7 +438,7 @@ describe('instances store', () => {
     vi.mocked(api.updateMember).mockRejectedValue(new Error('member failed'))
     const store = useInstancesStore()
 
-    await expect(store.updateMember('c1', 'node-a', {})).rejects.toThrow('member failed')
+    await expect(store.updateMember('c1', 'node-1', {})).rejects.toThrow('member failed')
 
     expect(store.error).toBe('member failed')
     expect(store.saving).toBe(false)

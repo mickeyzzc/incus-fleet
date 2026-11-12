@@ -1,5 +1,7 @@
 /** Human-readable formatting helpers used across the UI. */
 
+import { currentLocale } from '@/i18n'
+
 const UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'] as const
 
 /** Formats a byte count with binary units. */
@@ -40,7 +42,7 @@ export function formatDateTime(value?: string | null): string {
     return '—'
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(currentLocale(), {
     year: 'numeric',
     month: 'short',
     day: '2-digit',

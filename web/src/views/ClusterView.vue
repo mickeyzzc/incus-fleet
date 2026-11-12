@@ -26,7 +26,7 @@ const props = defineProps<{ cluster: string }>()
 const router = useRouter()
 const clusters = useClustersStore()
 const instances = useInstancesStore()
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const typeFilter = ref<InstanceType>('any')
 const detailOpen = ref(false)
@@ -47,6 +47,12 @@ const filtered = computed(() =>
 const onlineTargets = computed(() =>
   clusters.items.filter((cluster) => cluster.online && cluster.name !== props.cluster),
 )
+
+/** Renders a cluster member status enum value in the active language. */
+function memberStatusLabel(status: string): string {
+  const key = `cluster.memberStatus.${status.toLowerCase()}`
+  return te(key) ? t(key) : status
+}
 
 async function load(force = false): Promise<void> {
   await Promise.all([
@@ -261,7 +267,7 @@ function instanceTypeLabel(type: string): string {
 
         <div class="cluster-tags">
           <el-tag v-for="member in summary.members" :key="member.name" size="small" effect="plain">
-            {{ member.name }} · {{ member.status }}
+            {{ member.name }} · {{ memberStatusLabel(member.status) }}
           </el-tag>
           <el-tag v-for="network in summary.networks" :key="network" size="small" effect="plain">
             {{ network }}

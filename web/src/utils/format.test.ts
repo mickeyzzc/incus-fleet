@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { setLocale } from '@/i18n'
+
 import {
   formatBytes,
   formatDateTime,
@@ -58,6 +60,14 @@ describe('formatDateTime', () => {
 
     expect(formatted).not.toBe('—')
     expect(formatted).toMatch(/2026/)
+  })
+
+  it('follows the active app locale', () => {
+    setLocale('zh-CN')
+    const formatted = formatDateTime('2026-11-11T10:30:00Z')
+
+    expect(formatted).toMatch(/2026/)
+    expect(formatted).toMatch(/11.*11|11日/)
   })
 })
 

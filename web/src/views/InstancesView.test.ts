@@ -63,7 +63,7 @@ describe('InstancesView', () => {
     expect(wrapper.text()).toContain('web')
     expect(wrapper.text()).toContain('vm1')
     expect(wrapper.text()).toContain('db')
-    expect(wrapper.text()).toContain('3 shown')
+    expect(wrapper.text()).toContain('Showing 3')
   })
 
   it('filters by search, cluster, and type', async () => {
@@ -71,14 +71,14 @@ describe('InstancesView', () => {
     await flushPromises()
 
     await wrapper.find('input').setValue('vm1')
-    expect(wrapper.text()).toContain('1 shown')
+    expect(wrapper.text()).toContain('Showing 1')
 
     await wrapper.find('input').setValue('')
     const selects = wrapper.findAllComponents({ name: 'ElSelect' })
     expect(selects).toHaveLength(2)
     selects[1]?.vm.$emit('update:modelValue', 'c1')
     await flushPromises()
-    expect(wrapper.text()).toContain('2 shown')
+    expect(wrapper.text()).toContain('Showing 2')
 
     selects[0]?.vm.$emit('update:modelValue', 'virtual-machine')
     await flushPromises()
