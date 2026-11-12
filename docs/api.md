@@ -72,7 +72,41 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | GET | `/clusters/{cluster}` | yes | One cluster summary |
 | POST | `/clusters/{cluster}/reconnect` | yes | Re-dial a cluster and return its summary |
 | GET | `/clusters/{cluster}/instances?type=` | yes | Instances on one cluster |
+| POST | `/clusters/{cluster}/instances` | yes | Create an instance from a local image |
 | GET | `/clusters/{cluster}/instances/{instance}` | yes | Instance detail |
+| PATCH | `/clusters/{cluster}/instances/{instance}` | yes | Update limits, root disk, NIC, description |
+| POST | `/clusters/{cluster}/instances/{instance}/state` | yes | Start, stop, or restart an instance |
+| DELETE | `/clusters/{cluster}/instances/{instance}?force=` | yes | Delete an instance |
+| GET | `/clusters/{cluster}/instances/{instance}/snapshots` | yes | List instance snapshots |
+| POST | `/clusters/{cluster}/instances/{instance}/snapshots` | yes | Create a snapshot |
+| POST | `/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore` | yes | Restore a snapshot |
+| DELETE | `/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}` | yes | Delete a snapshot |
+| POST | `/clusters/{cluster}/instances/{instance}/devices` | yes | Attach a disk or NIC device |
+| DELETE | `/clusters/{cluster}/instances/{instance}/devices/{device}` | yes | Detach a device |
+| GET | `/clusters/{cluster}/instances/{instance}/console` | yes | Interactive console (WebSocket) |
+| GET | `/clusters/{cluster}/instances/{instance}/exec` | yes | Interactive exec session (WebSocket) |
+| GET | `/clusters/{cluster}/instances/{instance}/files?action=list&path=` | yes | List a directory inside the instance |
+| GET | `/clusters/{cluster}/instances/{instance}/files?path=` | yes | Download one file |
+| POST | `/clusters/{cluster}/instances/{instance}/files?path=` | yes | Upload a file (multipart `file` field) |
+| POST | `/clusters/{cluster}/instances/{instance}/files?action=mkdir&path=` | yes | Create a directory |
+| DELETE | `/clusters/{cluster}/instances/{instance}/files?path=` | yes | Delete one file |
+| GET | `/clusters/{cluster}/images` | yes | Local images on a cluster |
+| DELETE | `/clusters/{cluster}/images/{fingerprint}` | yes | Delete an image |
+| GET | `/clusters/{cluster}/resources` | yes | Storage pools and networks with usage |
+| POST | `/clusters/{cluster}/storage-pools` | yes | Create a storage pool |
+| PATCH | `/clusters/{cluster}/storage-pools/{pool}` | yes | Update pool description/config |
+| DELETE | `/clusters/{cluster}/storage-pools/{pool}` | yes | Delete a storage pool |
+| GET | `/clusters/{cluster}/storage-pools/{pool}/volumes` | yes | List custom volumes on a pool |
+| POST | `/clusters/{cluster}/storage-pools/{pool}/volumes` | yes | Create a custom volume |
+| DELETE | `/clusters/{cluster}/storage-pools/{pool}/volumes/{volume}` | yes | Delete a custom volume |
+| POST | `/clusters/{cluster}/networks` | yes | Create a managed network |
+| PATCH | `/clusters/{cluster}/networks/{network}` | yes | Update a managed network |
+| DELETE | `/clusters/{cluster}/networks/{network}` | yes | Delete a managed network |
+| GET | `/clusters/{cluster}/profiles` | yes | List instance profiles |
+| POST | `/clusters/{cluster}/profiles` | yes | Create a profile |
+| PATCH | `/clusters/{cluster}/profiles/{profile}` | yes | Update a profile |
+| DELETE | `/clusters/{cluster}/profiles/{profile}` | yes | Delete a profile |
+| PATCH | `/clusters/{cluster}/members/{member}` | yes | Update member description, failure domain, groups |
 | GET | `/instances?type=` | yes | Instances across all clusters |
 | GET | `/migrations?limit=` | yes | Recent migration tasks (default 50) |
 | POST | `/migrations` | yes | Submit a migration (`202 Accepted`) |
@@ -176,6 +210,84 @@ Instance detail adds:
 
 `live_migratable` is true only for a VM with `migration.stateful=true`. It does not guarantee the
 VM is currently running; the migration preflight checks that separately.
+
+### Instance management
+
+Create (`POST /clusters/{cluster}/instances`) takes `name` (required, `[A-Za-z0-9][A-Za-z0-9_.-]*`,
+max 63 chars), `type` (`container` default, or `virtual-machine`), `image` (required, fingerprint of
+a local image), `description`, `profiles`, `cpu` (count, range, or list), `memory` (e.g. `512MiB`),
+`root_disk_size`, `storage_pool` (default `default`), `network`, `ipv4`, `ipv6` (static addresses
+require `network`), and `start` (default `true`). Wait: up to 15 minutes.
+
+`PATCH .../instances/{instance}` accepts nullable fields; empty strings clear values. NIC changes
+target `device` (default `eth0`).
+
+`POST .../state` body: `{"action": "start|stop|restart", "force": false}`.
+
+### Snapshots
+
+```json
+// GET .../instances/web/snapshots
+{
+  "snapshots": [
+    { "name": "snap0", "created_at": "2026-11-10T08:00:00Z", "size": 1024, "stateful": true }
+  ]
+}
+```
+
+Create body: `{"name": "backup", "stateful": false}`. Stateful snapshots require a stateful VM.
+Restore rolls the instance back (`InstancePut.Restore`). Snapshot and restore waits: up to 15
+minutes.
+
+### Devices
+
+Attach body (disk):
+
+```json
+{ "name": "data", "type": "disk", "pool": "default", "source": "data", "path": "/mnt/data", "size": "10GiB" }
+```
+
+Attach body (NIC): `{ "name": "eth1", "type": "nic", "network": "incusbr0", "ipv4": "10.0.0.0.9" }`.
+Disk requires `path`; NIC requires an existing `network`. Device names must not collide with
+existing devices. Both return the updated instance detail.
+
+### Terminal sessions
+
+`GET .../console` and `GET .../exec` upgrade to WebSockets (session cookie or bearer). The exec
+first frame is JSON: `{"command": ["bash"], "cwd": "/root", "width": 100, "height": 30}`.
+
+- Binary frames carry raw terminal bytes both ways;
+- text frames from the server are base64-encoded output and are decoded before delivery;
+- text frames from the client are control messages: `{"type":"resize","width":W,"height":H}` or
+  `{"type":"signal","signal":"SIGINT"}`.
+
+The session ends when either side closes or the Incus operation finishes.
+
+### Files
+
+All paths must be absolute. `GET .../files?action=list&path=/var/log` returns
+`{"files": [{"name", "size", "mode", "is_dir", "modtime"}]}` (directories first). Download streams
+the file as an attachment. Upload is `multipart/form-data` with a `file` field (32 MiB body cap,
+mode 0644). `action=mkdir` creates a directory. Delete removes one file.
+
+### Cluster resources and administration
+
+`GET .../resources` returns storage pools (with `config`, usage, `used_by`) and networks (with
+`config`, managed flag, addresses). Pool create takes `name` + `driver` + optional
+`description`/`config`; updates merge config and delete keys set to the empty string. Networks
+follow the same merge rules; only managed networks can be updated or deleted.
+
+Profiles support full CRUD; updates replace the device map wholesale when `devices` is provided.
+
+`PATCH .../members/{member}` accepts `description`, `failure_domain`, and `groups` (nil keeps the
+current groups).
+
+### Volumes and images
+
+`GET .../storage-pools/{pool}/volumes` lists custom volumes only. Create takes `name`,
+`description`, `size` (validated byte string), and extra `config`. `DELETE` removes one custom
+volume. `DELETE .../images/{fingerprint}` removes a local image; the UI's cleanup action deletes
+every image with `cached=true`.
 
 ## Migrations
 

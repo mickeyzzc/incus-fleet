@@ -229,6 +229,10 @@ marked `Secure` in that case.
 If you round-robin without stickiness, browser logins will intermittently fail because the
 session cookie is only valid on the instance that created it.
 
+Caddy proxies WebSockets transparently: the terminal and file endpoints
+(`/api/v1/.../console|exec|files`) ride the same sticky cookie as the UI, so no extra
+configuration is needed.
+
 ## 6. Deploy upgrades
 
 1. Build and copy the new binary to `/home/incus/bin/incus-fleet`.
@@ -279,6 +283,7 @@ incus info --show-log <instance>
 - [ ] Admin token generated with at least 32 random bytes
 - [ ] Env file and private keys owned by the service account, mode `0600`
 - [ ] No tokens, keys, or local-only docs in git
+- [ ] Terminal websockets stay sticky (a reconnect must hit the same app instance)
 - [ ] Caddy presents TLS and uses sticky sessions
 - [ ] App API port 8080 is reachable only from the Caddy host (firewall)
 - [ ] Incus API 8443 is reachable only from the app hosts (firewall)
