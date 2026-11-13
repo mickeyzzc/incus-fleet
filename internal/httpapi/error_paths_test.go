@@ -50,12 +50,12 @@ func TestAssetErrorPaths(t *testing.T) {
 // storage pool, network, and profile admin handlers.
 func TestResourceAdminErrorPaths(t *testing.T) {
 	source := &incusfake.Server{
-		UpdatePoolErr:     errors.New("pool busy"),
-		DeletePoolErr:     errors.New("pool in use"),
-		UpdateNetworkErr:  errors.New("network locked"),
-		DeleteNetworkErr:  errors.New("network in use"),
-		UpdateProfileErr:  errors.New("profile busy"),
-		DeleteProfileErr:  errors.New("profile in use"),
+		UpdatePoolErr:    errors.New("pool busy"),
+		DeletePoolErr:    errors.New("pool in use"),
+		UpdateNetworkErr: errors.New("network locked"),
+		DeleteNetworkErr: errors.New("network in use"),
+		UpdateProfileErr: errors.New("profile busy"),
+		DeleteProfileErr: errors.New("profile in use"),
 	}
 	f := newAPIFixture(t, source, &incusfake.Server{})
 	cookie := f.login(t)

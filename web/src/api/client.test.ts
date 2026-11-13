@@ -464,4 +464,72 @@ describe('ApiClient', () => {
 
     expect(url).toBe('ws://localhost:3000/api/v1/clusters/c1/instances/vm-01/vga')
   })
+
+  it('hits the documented endpoint for every admin and asset call', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ metrics: { name: 'web' } }))
+
+    const calls: Array<[() => Promise<unknown>, string, string]> = [
+      [() => client.health(), 'GET', '/api/v1/healthz'],
+      [() => client.version(), 'GET', '/api/v1/version'],
+      [() => client.listClusters(), 'GET', '/api/v1/clusters'],
+      [() => client.getCluster('c1'), 'GET', '/api/v1/clusters/c1'],
+      [() => client.reconnectCluster('c1'), 'POST', '/api/v1/clusters/c1/reconnect'],
+      [() => client.listClusterInstances('c1', 'container'), 'GET', '/api/v1/clusters/c1/instances?type=container'],
+      [() => client.listInstances('virtual-machine'), 'GET', '/api/v1/instances?type=virtual-machine'],
+      [() => client.getInstance('c1', 'web'), 'GET', '/api/v1/clusters/c1/instances/web'],
+      [() => client.listImages('c1'), 'GET', '/api/v1/clusters/c1/images'],
+      [() => client.deleteImage('c1', 'abc123'), 'DELETE', '/api/v1/clusters/c1/images/abc123'],
+      [() => client.refreshImage('c1', 'abc123'), 'POST', '/api/v1/clusters/c1/images/abc123/refresh'],
+      [() => client.copyImage('c1', 'abc123', { target_cluster: 'c2' }), 'POST', '/api/v1/clusters/c1/images/abc123/copy'],
+      [() => client.listISOs('c1'), 'GET', '/api/v1/clusters/c1/iso'],
+      [() => client.deleteISO('c1', 'default', 'alpine'), 'DELETE', '/api/v1/clusters/c1/iso/default/alpine'],
+      [() => client.listSnapshots('c1', 'web'), 'GET', '/api/v1/clusters/c1/instances/web/snapshots'],
+      [() => client.createSnapshot('c1', 'web', { name: 'snap0' }), 'POST', '/api/v1/clusters/c1/instances/web/snapshots'],
+      [() => client.restoreSnapshot('c1', 'web', 'snap0'), 'POST', '/api/v1/clusters/c1/instances/web/snapshots/snap0/restore'],
+      [() => client.deleteSnapshot('c1', 'web', 'snap0'), 'DELETE', '/api/v1/clusters/c1/instances/web/snapshots/snap0'],
+      [() => client.attachDevice('c1', 'web', { name: 'data', type: 'disk' }), 'POST', '/api/v1/clusters/c1/instances/web/devices'],
+      [() => client.detachDevice('c1', 'web', 'data'), 'DELETE', '/api/v1/clusters/c1/instances/web/devices/data'],
+      [() => client.instanceMetrics('c1', 'web'), 'GET', '/api/v1/clusters/c1/instances/web/metrics'],
+      [() => client.deleteInstance('c1', 'web', true), 'DELETE', '/api/v1/clusters/c1/instances/web?force=true'],
+      [() => client.listVolumes('c1', 'default'), 'GET', '/api/v1/clusters/c1/storage-pools/default/volumes'],
+      [() => client.createVolume('c1', 'default', { name: 'data', size: '10GiB' }), 'POST', '/api/v1/clusters/c1/storage-pools/default/volumes'],
+      [() => client.deleteVolume('c1', 'default', 'data'), 'DELETE', '/api/v1/clusters/c1/storage-pools/default/volumes/data'],
+      [() => client.createStoragePool('c1', { name: 'slow', driver: 'dir' }), 'POST', '/api/v1/clusters/c1/storage-pools'],
+      [() => client.updateStoragePool('c1', 'slow', { description: 'cold' }), 'PATCH', '/api/v1/clusters/c1/storage-pools/slow'],
+      [() => client.deleteStoragePool('c1', 'slow'), 'DELETE', '/api/v1/clusters/c1/storage-pools/slow'],
+      [() => client.createNetwork('c1', { name: 'dmz' }), 'POST', '/api/v1/clusters/c1/networks'],
+      [() => client.updateNetwork('c1', 'dmz', { description: 'edge' }), 'PATCH', '/api/v1/clusters/c1/networks/dmz'],
+      [() => client.deleteNetwork('c1', 'dmz'), 'DELETE', '/api/v1/clusters/c1/networks/dmz'],
+      [() => client.listProfiles('c1'), 'GET', '/api/v1/clusters/c1/profiles'],
+      [() => client.createProfile('c1', { name: 'tiny' }), 'POST', '/api/v1/clusters/c1/profiles'],
+      [() => client.updateProfile('c1', 'tiny', { description: 'small' }), 'PATCH', '/api/v1/clusters/c1/profiles/tiny'],
+      [() => client.deleteProfile('c1', 'tiny'), 'DELETE', '/api/v1/clusters/c1/profiles/tiny'],
+      [() => client.updateMember('c1', 'member-a', { description: 'rack1' }), 'PATCH', '/api/v1/clusters/c1/members/member-a'],
+      [() => client.listKeys(), 'GET', '/api/v1/keys'],
+      [() => client.createKey({ name: 'ci', public_key: 'ssh-ed25519 AAA' }), 'POST', '/api/v1/keys'],
+      [() => client.updateKey('key-1', { name: 'ci', public_key: 'ssh-ed25519 AAA' }), 'PATCH', '/api/v1/keys/key-1'],
+      [() => client.deleteKey('key-1'), 'DELETE', '/api/v1/keys/key-1'],
+      [() => client.listScripts(), 'GET', '/api/v1/scripts'],
+      [() => client.createScript({ name: 'init', body: 'echo' }), 'POST', '/api/v1/scripts'],
+      [() => client.updateScript('script-1', { name: 'init', body: 'echo' }), 'PATCH', '/api/v1/scripts/script-1'],
+      [() => client.deleteScript('script-1'), 'DELETE', '/api/v1/scripts/script-1'],
+      [() => client.batchKeys({ targets: [], key_ids: [] }), 'POST', '/api/v1/batch/keys'],
+      [() => client.batchScripts({ targets: [], script_id: 's' }), 'POST', '/api/v1/batch/scripts'],
+      [() => client.batchPower({ targets: [], action: 'stop' }), 'POST', '/api/v1/batch/power'],
+      [() => client.listInstanceFiles('c1', 'web', '/tmp'), 'GET', '/api/v1/clusters/c1/instances/web/files?action=list&path=%2Ftmp'],
+      [() => client.mkdirInstanceDir('c1', 'web', '/tmp/x'), 'POST', '/api/v1/clusters/c1/instances/web/files?action=mkdir&path=%2Ftmp%2Fx'],
+      [() => client.deleteInstanceFile('c1', 'web', '/tmp/x'), 'DELETE', '/api/v1/clusters/c1/instances/web/files?path=%2Ftmp%2Fx'],
+      [() => client.listMigrations(10), 'GET', '/api/v1/migrations?limit=10'],
+      [() => client.getMigration('m1'), 'GET', '/api/v1/migrations/m1'],
+    ]
+
+    for (const [call, method, suffix] of calls) {
+      fetchImpl.mockClear()
+      await call()
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+      expect(url, `${method} ${suffix}`).toBe(`https://fleet.local${suffix}`)
+      expect(init.method, suffix).toBe(method)
+    }
+  })
 })

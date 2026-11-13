@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import ElementPlus, { ElMessage } from 'element-plus'
+import ElementPlus, { ElMessage, ElMessageBox } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
@@ -193,5 +193,61 @@ describe('InstancesView', () => {
     await wrapper.find('input').setValue('nothing-here')
 
     expect(wrapper.text()).toContain('No instances match the filters')
+  })
+
+  it('runs batch power on selected instances after confirmation', async () => {
+    vi.mocked(api.batchPower).mockResolvedValue([
+      { cluster: 'c1', instance: 'web', ok: true },
+      { cluster: 'c2', instance: 'db', ok: true },
+    ])
+    vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as never)
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    // Select two instances through the table's selection-change event.
+    const table = wrapper.findComponent({ name: 'ElTable' })
+    table.vm.$emit('selection-change', [
+      { cluster: 'c1', name: 'web' },
+      { cluster: 'c2', name: 'db' },
+    ])
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Start').trigger('click')
+    await flushPromises()
+
+    expect(api.batchPower).toHaveBeenCalledWith({
+      targets: [
+        { cluster: 'c1', instance: 'web' },
+        { cluster: 'c2', instance: 'db' },
+      ],
+      action: 'start',
+      force: false,
+    })
+    expect(ElMessage.success).toHaveBeenCalledWith('Batch finished: 2 succeeded.')
+  })
+
+  it('opens the batch keys dialog for the current selection', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const table = wrapper.findComponent({ name: 'ElTable' })
+    table.vm.$emit('selection-change', [{ cluster: 'c1', name: 'web' }])
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Inject keys').trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent({ name: 'BatchOpsDialog' })
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.props('mode')).toBe('keys')
+    expect(dialog.props('targets')).toEqual([{ cluster: 'c1', instance: 'web' }])
+  })
+
+  it('does not open batch tools without a selection', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    // The toolbar is hidden while nothing is selected.
+    expect(wrapper.find('.batch-bar').exists()).toBe(false)
   })
 })

@@ -124,6 +124,23 @@ describe('InstanceDetailDrawer', () => {
     expect(wrapper.emitted('delete')).toHaveLength(1)
   })
 
+  it('opens the terminal and file manager dialogs', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+    const wrapper = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'web' },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((item) => item.text().includes('Terminal'))?.trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'TerminalDialog' }).props('modelValue')).toBe(true)
+
+    await wrapper.findAll('button').find((item) => item.text().includes('Files'))?.trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'FileManagerDialog' }).props('modelValue')).toBe(true)
+  })
+
   it('updates the cached detail when devices change', async () => {
     vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
     const wrapper = mount(InstanceDetailDrawer, {
