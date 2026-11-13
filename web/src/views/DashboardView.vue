@@ -5,11 +5,12 @@ import { Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 import StorageBar from '@/components/StorageBar.vue'
+import type { ClusterSummary } from '@/api/types'
 import { useClustersStore } from '@/stores/clusters'
 import { useInstancesStore } from '@/stores/instances'
 import { useMigrationsStore } from '@/stores/migrations'
 import { errorMessage } from '@/utils/errors'
-import { formatDateTime } from '@/utils/format'
+import { formatBytes, formatDateTime } from '@/utils/format'
 
 const clusters = useClustersStore()
 const instances = useInstancesStore()
@@ -53,6 +54,16 @@ async function reconnect(name: string): Promise<void> {
 
 function initials(name: string): string {
   return name.slice(0, 2).toUpperCase()
+}
+
+/** Compact memory share string for the cluster card, e.g. "3.2/16 GiB". */
+function memoryShare(cluster: ClusterSummary): string {
+  const memory = cluster.memory
+  if (!memory || memory.total <= 0) {
+    return '—'
+  }
+
+  return `${formatBytes(memory.used)} / ${formatBytes(memory.total)}`
 }
 </script>
 
@@ -143,6 +154,14 @@ function initials(name: string): string {
           <div class="metric">
             <span>{{ t('cluster.members') }}</span>
             <strong>{{ cluster.members.length }}</strong>
+          </div>
+          <div v-if="cluster.cpu" class="metric">
+            <span>{{ t('cluster.cpuCores') }}</span>
+            <strong>{{ cluster.cpu.total }}</strong>
+          </div>
+          <div v-if="cluster.memory && cluster.memory.total > 0" class="metric">
+            <span>{{ t('cluster.memUsage') }}</span>
+            <strong>{{ memoryShare(cluster) }}</strong>
           </div>
         </div>
 
