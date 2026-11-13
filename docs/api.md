@@ -76,6 +76,7 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | GET | `/clusters/{cluster}/instances/{instance}` | yes | Instance detail |
 | PATCH | `/clusters/{cluster}/instances/{instance}` | yes | Update limits, root disk, NIC, description |
 | POST | `/clusters/{cluster}/instances/{instance}/state` | yes | Start, stop, or restart an instance |
+| GET | `/clusters/{cluster}/instances/{instance}/metrics` | yes | Live resource snapshot (CPU, memory, disk, network) |
 | DELETE | `/clusters/{cluster}/instances/{instance}?force=` | yes | Delete an instance |
 | GET | `/clusters/{cluster}/instances/{instance}/snapshots` | yes | List instance snapshots |
 | POST | `/clusters/{cluster}/instances/{instance}/snapshots` | yes | Create a snapshot |
@@ -254,7 +255,10 @@ existing devices. Both return the updated instance detail.
 ### Terminal sessions
 
 `GET .../console` and `GET .../exec` upgrade to WebSockets (session cookie or bearer). The exec
-first frame is JSON: `{"command": ["bash"], "cwd": "/root", "width": 100, "height": 30}`.
+first frame is JSON: `{"command": ["bash"], "cwd": "/root", "width": 100, "height": 30}`. The UI
+starts a persistent interactive shell (`command: ["bash"]`) and forwards each submitted line on
+stdin, so environment and working directory survive across commands; when the session ends the UI
+reopens it and replays the pending line.
 
 - Binary frames carry raw terminal bytes both ways;
 - text frames from the server are base64-encoded output and are decoded before delivery;
@@ -262,6 +266,14 @@ first frame is JSON: `{"command": ["bash"], "cwd": "/root", "width": 100, "heigh
   `{"type":"signal","signal":"SIGINT"}`.
 
 The session ends when either side closes or the Incus operation finishes.
+
+### Instance metrics
+
+`GET .../metrics` returns `{"metrics": {...}}` with the live state of one instance: `status`,
+`pid`, `processes`, `cpu.usage` (cumulative nanoseconds), `memory` (usage/peak/total/swap in
+bytes), `disk` (per-mountpoint usage/total), and `network` (per-interface cumulative counters,
+loopback excluded). Counters are cumulative since instance start; clients derive rates by
+differencing consecutive samples.
 
 ### Files
 

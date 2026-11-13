@@ -16,6 +16,7 @@ import type {
   InstanceActionRequest,
   InstanceDetail,
   InstanceImage,
+  InstanceMetrics,
   InstanceSnapshot,
   InstanceSummary,
   InstanceType,
@@ -450,6 +451,16 @@ export class ApiClient {
       `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(name)}/state`,
       request,
     )
+  }
+
+  /** Reads a live resource snapshot of one instance. */
+  async instanceMetrics(cluster: string, name: string): Promise<InstanceMetrics> {
+    const data = await this.request<{ metrics: InstanceMetrics }>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(name)}/metrics`,
+    )
+
+    return data.metrics
   }
 
   async deleteInstance(cluster: string, name: string, force = false): Promise<void> {

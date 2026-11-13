@@ -94,6 +94,7 @@ vi.mock('@/api', async (importOriginal) => {
       cloneInstance: vi.fn(),
       vgaURL: vi.fn(() => 'ws://fleet.local/api/v1/clusters/c1/instances/web/vga'),
       prepareSPICE: vi.fn(),
+      instanceMetrics: vi.fn(),
       listKeys: vi.fn(),
       createKey: vi.fn(),
       updateKey: vi.fn(),

@@ -98,6 +98,7 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances", a.requireAuth(http.HandlerFunc(a.createInstance)))
 	mux.Handle("PATCH /api/v1/clusters/{cluster}/instances/{instance}", a.requireAuth(http.HandlerFunc(a.updateInstance)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/state", a.requireAuth(http.HandlerFunc(a.instanceAction)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/metrics", a.requireAuth(http.HandlerFunc(a.instanceMetrics)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}", a.requireAuth(http.HandlerFunc(a.deleteInstance)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/images", a.requireAuth(http.HandlerFunc(a.listImages)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/images/import", a.requireAuth(http.HandlerFunc(a.importImage)))

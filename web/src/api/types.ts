@@ -54,6 +54,20 @@ export interface ClusterSummary {
   instances: InstanceCounts
   storage: StorageUsage
   networks: string[]
+  cpu?: ClusterCPU
+  memory?: ClusterMemory
+}
+
+/** Processor capacity reported for the cluster member. */
+export interface ClusterCPU {
+  total: number
+  architecture?: string
+}
+
+/** Memory usage on the cluster member, in bytes. */
+export interface ClusterMemory {
+  used: number
+  total: number
 }
 
 export interface InstanceSummary {
@@ -350,6 +364,56 @@ export type InstanceAction = 'start' | 'stop' | 'restart'
 export interface InstanceActionRequest {
   action: InstanceAction
   force?: boolean
+}
+
+/** Cumulative CPU time of an instance, in nanoseconds. */
+export interface MetricsCPU {
+  usage: number
+  allocated_time: number
+}
+
+/** Memory usage of an instance, in bytes. */
+export interface MetricsMemory {
+  usage: number
+  usage_peak: number
+  total: number
+  swap_usage: number
+  swap_usage_peak: number
+}
+
+/** One mounted filesystem inside an instance. */
+export interface MetricsDisk {
+  mountpoint: string
+  usage: number
+  total: number
+}
+
+/** One network interface with cumulative traffic counters. */
+export interface MetricsNet {
+  interface: string
+  state: string
+  type: string
+  rx_bytes: number
+  rx_packets: number
+  rx_errors: number
+  rx_dropped: number
+  tx_bytes: number
+  tx_packets: number
+  tx_errors: number
+  tx_dropped: number
+}
+
+/** Point-in-time resource snapshot of one instance. */
+export interface InstanceMetrics {
+  name: string
+  status: string
+  pid: number
+  processes: number
+  cpu: MetricsCPU
+  memory: MetricsMemory
+  disk: MetricsDisk[]
+  network: MetricsNet[]
+  at: string
 }
 
 /** One instance snapshot. */

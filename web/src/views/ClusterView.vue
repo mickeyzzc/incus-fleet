@@ -420,6 +420,21 @@ function instanceTypeLabel(type: string): string {
             <div class="label">{{ t('cluster.architectures') }}</div>
             <div class="value">{{ summary.architectures?.join(', ') || t('common.none') }}</div>
           </div>
+          <div class="detail-item">
+            <div class="label">{{ t('cluster.cpuCores') }}</div>
+            <div class="value">
+              {{ summary.cpu?.total ?? '—' }}{{ summary.cpu?.architecture ? ` · ${summary.cpu.architecture}` : '' }}
+            </div>
+          </div>
+          <div class="detail-item">
+            <div class="label">{{ t('cluster.memUsage') }}</div>
+            <div class="value">
+              <template v-if="summary.memory">
+                {{ formatBytes(summary.memory.used) }} / {{ formatBytes(summary.memory.total) }}
+              </template>
+              <template v-else>{{ t('common.none') }}</template>
+            </div>
+          </div>
         </div>
 
         <StorageBar
@@ -427,6 +442,14 @@ function instanceTypeLabel(type: string): string {
           :total="summary.storage.total"
           :pool="summary.storage.pool"
         />
+
+        <div v-if="summary.memory && summary.memory.total > 0" class="mem-bar">
+          <el-progress
+            :percentage="Math.min(100, (summary.memory.used / summary.memory.total) * 100)"
+            :stroke-width="10"
+            :format="(p: number) => `${p.toFixed(1)}%`"
+          />
+        </div>
 
         <div class="cluster-tags">
           <el-tag
@@ -901,6 +924,10 @@ function instanceTypeLabel(type: string): string {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.mem-bar {
+  margin-top: -6px;
 }
 
 .section-heading {

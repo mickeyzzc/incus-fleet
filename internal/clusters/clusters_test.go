@@ -73,6 +73,10 @@ func TestSummaryAndList(t *testing.T) {
 		},
 		PoolResources: &api.ResourcesStoragePool{Space: api.ResourcesStoragePoolSpace{Used: 50, Total: 100}},
 		NetworkNames:  []string{"incusbr0", "eth0"},
+		ServerResources: &api.Resources{
+			CPU:    api.ResourcesCPU{Architecture: "x86_64", Total: 8},
+			Memory: api.ResourcesMemory{Used: 4_000_000_000, Total: 16_000_000_000},
+		},
 	}
 
 	dial := fakeDialer(map[string]InstanceServer{"c1": srv}, nil)
@@ -112,6 +116,12 @@ func TestSummaryAndList(t *testing.T) {
 	}
 	if len(s.Networks) != 2 || s.Networks[0] != "eth0" {
 		t.Fatalf("Networks = %#v", s.Networks)
+	}
+	if s.CPU.Total != 8 || s.CPU.Architecture != "x86_64" {
+		t.Fatalf("CPU = %#v", s.CPU)
+	}
+	if s.Memory.Used != 4_000_000_000 || s.Memory.Total != 16_000_000_000 {
+		t.Fatalf("Memory = %#v", s.Memory)
 	}
 
 	got, err := m.Get("c1")

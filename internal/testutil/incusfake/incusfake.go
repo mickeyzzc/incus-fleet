@@ -103,6 +103,8 @@ type Server struct {
 	NetworkNamesErr   error
 	PoolResources     *api.ResourcesStoragePool
 	PoolResourcesErr  error
+	ServerResources   *api.Resources
+	ServerResErr      error
 	Clustered         bool
 	RemoteOperation   *RemoteOperation
 	Operation         *Operation
@@ -1104,6 +1106,22 @@ func (s *Server) GetStoragePoolResources(name string) (*api.ResourcesStoragePool
 	}
 
 	return &api.ResourcesStoragePool{Space: api.ResourcesStoragePoolSpace{Total: 1_000_000_000_000, Used: 100_000_000_000}}, nil
+}
+
+// GetServerResources implements clusters.InstanceServer.
+func (s *Server) GetServerResources() (*api.Resources, error) {
+	s.record("GetServerResources")
+	if s.ServerResErr != nil {
+		return nil, s.ServerResErr
+	}
+	if s.ServerResources != nil {
+		return s.ServerResources, nil
+	}
+
+	return &api.Resources{
+		CPU:    api.ResourcesCPU{Architecture: "x86_64", Total: 4},
+		Memory: api.ResourcesMemory{Used: 2_000_000_000, Total: 8_000_000_000},
+	}, nil
 }
 
 // GetStoragePool implements clusters.InstanceServer.

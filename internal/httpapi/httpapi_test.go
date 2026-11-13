@@ -33,6 +33,7 @@ type apiFixture struct {
 	source     *incusfake.Server
 	target     *incusfake.Server
 	migrations *migrations.Service
+	store      *store.SQLStore
 }
 
 func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
@@ -87,7 +88,16 @@ func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 		_ = st.Close()
 	})
 
-	return &apiFixture{handler: handler, token: "secret", source: source, target: target, migrations: migrationService}
+	return &apiFixture{handler: handler, token: "secret", source: source, target: target, migrations: migrationService, store: st}
+}
+
+// closeStore breaks the asset store so listing handlers hit the error branch.
+func (f *apiFixture) closeStore(t *testing.T) {
+	t.Helper()
+
+	if err := f.store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 }
 
 func (f *apiFixture) request(t *testing.T, method, path string, body any, cookie *http.Cookie, bearer string) *httptest.ResponseRecorder {

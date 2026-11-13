@@ -78,6 +78,7 @@ type InstanceServer interface {
 	UpdateNetwork(name string, network api.NetworkPut, etag string) error
 	DeleteNetwork(name string) error
 	GetStoragePoolResources(name string) (*api.ResourcesStoragePool, error)
+	GetServerResources() (*api.Resources, error)
 	GetProfiles() ([]api.Profile, error)
 	GetProfile(name string) (*api.Profile, string, error)
 	CreateProfile(profile api.ProfilesPost) error
@@ -484,6 +485,20 @@ type Summary struct {
 	Instances     Counts       `json:"instances"`
 	Storage       StorageUsage `json:"storage"`
 	Networks      []string     `json:"networks"`
+	CPU           ResourcesCPU `json:"cpu"`
+	Memory        ResourceMem  `json:"memory"`
+}
+
+// ResourcesCPU summarizes the processor capacity of the cluster member.
+type ResourcesCPU struct {
+	Total        uint64 `json:"total"`
+	Architecture string `json:"architecture,omitempty"`
+}
+
+// ResourceMem summarizes memory usage on the cluster member in bytes.
+type ResourceMem struct {
+	Used  uint64 `json:"used"`
+	Total uint64 `json:"total"`
 }
 
 // Member is one Incus cluster member.
@@ -587,6 +602,17 @@ func (c *Connection) Summary() Summary {
 	if networks, err := client.GetNetworkNames(); err == nil {
 		sort.Strings(networks)
 		summary.Networks = networks
+	}
+
+	if resources, err := client.GetServerResources(); err == nil {
+		summary.CPU = ResourcesCPU{
+			Total:        resources.CPU.Total,
+			Architecture: resources.CPU.Architecture,
+		}
+		summary.Memory = ResourceMem{
+			Used:  resources.Memory.Used,
+			Total: resources.Memory.Total,
+		}
 	}
 
 	return summary

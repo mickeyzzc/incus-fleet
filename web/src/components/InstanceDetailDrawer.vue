@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 
 import InstanceActions from '@/components/InstanceActions.vue'
 import InstanceDevices from '@/components/InstanceDevices.vue'
+import InstanceMetricsPanel from '@/components/InstanceMetricsPanel.vue'
 import InstanceSnapshots from '@/components/InstanceSnapshots.vue'
 import FileManagerDialog from '@/components/FileManagerDialog.vue'
 import RemoteDesktopDialog from '@/components/RemoteDesktopDialog.vue'
@@ -122,6 +123,10 @@ function onDevicesChanged(updated: InstanceDetail): void {
         </div>
 
         <el-tabs v-model="activeTab" class="drawer-tabs">
+          <el-tab-pane :label="t('detail.tabMetrics')" name="metrics" lazy>
+            <InstanceMetricsPanel :cluster="cluster" :instance="name" />
+          </el-tab-pane>
+
           <el-tab-pane :label="t('detail.tabOverview')" name="overview">
             <div class="drawer-section">
               <h4>{{ t('detail.instance') }}</h4>
