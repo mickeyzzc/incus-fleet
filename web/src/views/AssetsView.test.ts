@@ -14,7 +14,6 @@ const keyFixture: Keystone = {
   public_key: 'ssh-ed25519 AAA comment',
   comment: 'laptop',
   created_at: '2026-11-13T00:00:00Z',
-  updated_at: '2026-11-13T00:00:00Z',
 }
 
 const scriptFixture: StoredScript = {
