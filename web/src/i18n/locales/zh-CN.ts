@@ -552,6 +552,7 @@ export default {
     memory: '内存',
     peak: '峰值',
     swap: 'Swap',
+diskUnknown: '用量未知',
     disk: '磁盘',
     network: '网络',
     interface: '接口',

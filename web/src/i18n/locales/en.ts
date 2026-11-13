@@ -558,6 +558,7 @@ export default {
     memory: 'Memory',
     peak: 'Peak',
     swap: 'Swap',
+diskUnknown: 'Usage unknown',
     disk: 'Disk',
     network: 'Network',
     interface: 'Interface',

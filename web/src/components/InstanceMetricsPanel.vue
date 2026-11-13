@@ -127,6 +127,15 @@ function rateFor(name: string, direction: 'rx' | 'tx'): string {
 
   return `${formatBytes(rate[direction])}/s`
 }
+
+/** Incus reports usage -1 when the driver cannot measure a filesystem. */
+function diskUsageLabel(disk: { usage: number; total: number }): string {
+  if (disk.usage < 0) {
+    return t('metrics.diskUnknown')
+  }
+
+  return `${formatBytes(disk.usage)} / ${formatBytes(disk.total)}`
+}
 </script>
 
 <template>
@@ -182,9 +191,9 @@ function rateFor(name: string, direction: 'rx' | 'tx'): string {
           <span class="disk-path">{{ disk.mountpoint }}</span>
           <el-progress
             class="disk-bar"
-            :percentage="disk.total > 0 ? Math.min(100, (disk.usage / disk.total) * 100) : 0"
+            :percentage="disk.usage >= 0 && disk.total > 0 ? Math.min(100, (disk.usage / disk.total) * 100) : 0"
             :stroke-width="8"
-            :format="() => `${formatBytes(disk.usage)} / ${formatBytes(disk.total)}`"
+            :format="() => diskUsageLabel(disk)"
           />
         </div>
       </div>
