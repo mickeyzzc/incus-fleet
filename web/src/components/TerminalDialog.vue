@@ -27,6 +27,8 @@ let term: Terminal | null = null
 let fitAddon: FitAddon | null = null
 let socket: WebSocket | null = null
 let execStarted = false
+// Lines submitted while no session is live; replayed once the new shell opens.
+let pendingLines: string[] = []
 
 const visible = computed({
   get: () => props.modelValue,
@@ -85,11 +87,15 @@ async function mountTerminal(): Promise<boolean> {
 function connect(kind: 'console' | 'exec'): void {
   closeSocket()
 
+  execStarted = false
   socket = new WebSocket(api.terminalURL(props.cluster, props.instance, kind))
   socket.binaryType = 'arraybuffer'
   socket.onopen = () => {
     connected.value = true
     statusMessage.value = t('terminal.connected')
+    for (const line of pendingLines.splice(0)) {
+      sendLine(line)
+    }
   }
   socket.onmessage = (event) => {
     term?.write(decodePayload(event.data))
@@ -118,31 +124,47 @@ function switchMode(next: 'console' | 'exec'): void {
   }
 
   mode.value = next
-  execStarted = false
   term?.clear()
   connect(next)
 }
 
 function submitCommand(): void {
   const line = command.value
-  if (!line || !socket || socket.readyState !== WebSocket.OPEN) {
+  if (!line) {
+    return
+  }
+  command.value = ''
+
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    sendLine(line)
+    return
+  }
+
+  // The previous shell exited (single exec sessions end with the command);
+  // open a fresh one and replay this line once it is connected.
+  pendingLines.push(line)
+  connect('exec')
+}
+
+function sendLine(line: string): void {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
     return
   }
 
   if (!execStarted) {
+    // Exec sessions run a persistent interactive shell; every submitted line
+    // is forwarded as stdin so state such as exports and cwd is kept.
     execStarted = true
     socket.send(
       JSON.stringify({
-        command: ['bash', '-c', line],
+        command: ['bash'],
         width: term?.cols ?? 80,
         height: term?.rows ?? 25,
       }),
     )
-  } else {
-    socket.send(new TextEncoder().encode(`${line}\n`))
   }
 
-  command.value = ''
+  socket.send(new TextEncoder().encode(`${line}\n`))
 }
 
 function onResize(): void {
@@ -156,13 +178,22 @@ function onResize(): void {
 }
 
 function closeSocket(): void {
-  socket?.close()
+  if (socket) {
+    // Detach handlers first: late close/error events from a replaced session
+    // must not flip the status or write into the new connection.
+    socket.onopen = null
+    socket.onmessage = null
+    socket.onclose = null
+    socket.onerror = null
+    socket.close()
+  }
   socket = null
   connected.value = false
 }
 
 function closeSession(): void {
   closeSocket()
+  pendingLines = []
   term?.dispose()
   term = null
   fitAddon = null
@@ -196,10 +227,9 @@ onBeforeUnmount(closeSession)
       <el-input
         v-model="command"
         :placeholder="t('terminal.commandPlaceholder')"
-        :disabled="!connected"
         @keyup.enter="submitCommand"
       />
-      <el-button type="primary" :disabled="!connected" @click="submitCommand">
+      <el-button type="primary" @click="submitCommand">
         {{ t('common.start') }}
       </el-button>
       <el-button :disabled="!connected" @click="onResize">{{ t('common.refresh') }}</el-button>

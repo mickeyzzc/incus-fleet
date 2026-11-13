@@ -94,7 +94,7 @@ describe('TerminalDialog', () => {
     wrapper.unmount()
   })
 
-  it('sends the start frame for the first exec command and raw lines after', async () => {
+  it('starts a persistent shell and forwards each submitted line to it', async () => {
     const wrapper = mountDialog()
     await settle()
 
@@ -117,18 +117,93 @@ describe('TerminalDialog', () => {
     await input.setValue('df -h')
     await input.trigger('keyup.enter')
 
-    expect(socket.sent).toHaveLength(1)
+    expect(socket.sent).toHaveLength(2)
     expect(JSON.parse(socket.sent[0] as string)).toEqual({
-      command: ['bash', '-c', 'df -h'],
+      command: ['bash'],
       width: 80,
       height: 25,
     })
+    expect(new TextDecoder().decode(socket.sent[1] as ArrayBuffer)).toBe('df -h\n')
 
     await input.setValue('ls')
     await input.trigger('keyup.enter')
 
-    expect(socket.sent).toHaveLength(2)
-    expect(new TextDecoder().decode(socket.sent[1] as ArrayBuffer)).toBe('ls\n')
+    expect(socket.sent).toHaveLength(3)
+    expect(new TextDecoder().decode(socket.sent[2] as ArrayBuffer)).toBe('ls\n')
+
+    wrapper.unmount()
+  })
+
+  it('opens a new session and replays the line when submitting after the shell exited', async () => {
+    const wrapper = mountDialog()
+    await settle()
+
+    const radio = wrapper.findComponent({ name: 'ElRadioGroup' })
+    radio.vm.$emit('update:modelValue', 'exec')
+    await settle(200)
+
+    const first = MockWebSocket.instances[1]
+    if (!first) {
+      throw new Error('exec socket missing')
+    }
+    first.onopen?.()
+    await flushPromises()
+
+    const input = wrapper.find('.exec-bar input')
+    await input.setValue('df -h')
+    await input.trigger('keyup.enter')
+    await flushPromises()
+
+    // The command finished and the server closed the session.
+    first.close()
+    first.onclose?.()
+    await flushPromises()
+
+    await input.setValue('ls -la')
+    await input.trigger('keyup.enter')
+    await settle(200)
+
+    expect(MockWebSocket.instances).toHaveLength(3)
+    const second = MockWebSocket.instances[2]
+    if (!second) {
+      throw new Error('reconnect socket missing')
+    }
+    second.onopen?.()
+    await flushPromises()
+
+    expect(second.sent).toHaveLength(2)
+    expect(JSON.parse(second.sent[0] as string)).toEqual({ command: ['bash'], width: 80, height: 25 })
+    expect(new TextDecoder().decode(second.sent[1] as ArrayBuffer)).toBe('ls -la\n')
+
+    wrapper.unmount()
+  })
+
+  it('keeps the active session when a stale socket closes after a mode switch', async () => {
+    const wrapper = mountDialog()
+    await settle()
+
+    const staleSocket = MockWebSocket.instances[0]
+    if (!staleSocket) {
+      throw new Error('console socket missing')
+    }
+
+    const radio = wrapper.findComponent({ name: 'ElRadioGroup' })
+    radio.vm.$emit('update:modelValue', 'exec')
+    await settle(200)
+
+    const active = MockWebSocket.instances[1]
+    if (!active) {
+      throw new Error('exec socket missing')
+    }
+    active.onopen?.()
+    await flushPromises()
+
+    // The stale console session reports its close after the exec session is live.
+    staleSocket.onclose?.()
+    await flushPromises()
+
+    const status = wrapper.find('.terminal-toolbar .el-tag')
+    expect(status.text()).toBe('Connected.')
 
     wrapper.unmount()
   })
