@@ -21,9 +21,11 @@
 8. [运维操作:脚本、密码、密钥](#运维操作脚本密码密钥)
 9. [镜像升级与实例克隆](#镜像升级与实例克隆)
 10. [端口转发](#端口转发)
-11. [共享资产库与批量操作](#共享资产库与批量操作)
-12. [存储池与网络](#存储池与网络)
-13. [常见问题](#常见问题)
+11. [实战案例:部署 PostgreSQL 数据库容器](#实战案例部署-postgresql-数据库容器)
+12. [共享资产库与批量操作](#共享资产库与批量操作)
+13. [资源监控](#资源监控)
+14. [存储池与网络](#存储池与网络)
+15. [常见问题](#常见问题)
 
 ## 登录与语言
 
@@ -149,7 +151,10 @@ ISO 镜像保存在存储池中,可随时在列表中删除。
 fleet 为实例提供两类在线会话,均从实例详情抽屉或列表操作进入:
 
 - **终端(Exec)**:容器与虚拟机通用。在实例内以 root 打开交互式 shell,
-  支持窗口自适应与中断信号;适合命令行运维。
+  支持窗口自适应与中断信号;适合命令行运维。命令行模式下,会话启动一个
+  **持久 shell**,每条提交的命令都进入同一个 shell——环境变量、当前目录等
+  状态跨命令保留。若命令已结束、会话已关闭,继续输入会自动重开会话并执行,
+  无需手动重连。
 - **串行控制台(Console)**:排查启动问题、查看内核输出时使用。
 - **远程桌面(虚拟机)**:运行中的虚拟机可打开图形控制台。fleet 会为虚拟机
   自动配置 qemu SPICE 通道(管理 raw.qemu 中的 `-spice` TCP 监听,按实例名
@@ -193,6 +198,91 @@ fleet 为实例提供两类在线会话,均从实例详情抽屉或列表操作�
    如 `tcp:127.0.0.1:80`);
 3. 保存后访问宿主机对应端口即直达实例内服务。
 
+## 实战案例:部署 PostgreSQL 数据库容器
+
+本案例把前面各节串起来:在集群 `c2` 上创建一台接入局域网(同网段 IP)的
+Debian 容器,用在线终端安装最新版 PostgreSQL,配置密码与监听,并从另一台
+机器跨机验证。示例中密码一律以 `<数据库密码>` 占位,请替换为你自己的值。
+
+### 第一步:创建容器并接入同网段
+
+在集群详情页点击 **创建实例**:
+
+- 名称 `demo-db`,类型 **容器**,镜像选择集群上已有的 `debian/13`;
+- 根磁盘按需设置(示例 20GiB,数据库容器建议留足余量);
+- **网络**选择物理网卡(由局域网 DHCP 分配同网段地址),勾选 **创建后启动**。
+
+![创建 PostgreSQL 容器](images/pg-create-form.png)
+
+创建完成后,实例列表即可看到 `demo-db` 处于运行中,并获得与宿主机同网段
+的 IP(示例网段 `198.51.100.0/24` 中的 `198.51.100.x`):
+
+![demo-db 运行中](images/pg-running.png)
+
+### 第二步:在线终端安装最新版 PostgreSQL
+
+打开实例详情 → **终端** → **命令行**,输入命令并回车执行。Debian 仓库内的
+版本可能落后,接入 [PGDG](https://www.postgresql.org/download/linux/debian/)
+官方仓库即可安装当前最新大版本(示例安装到 PostgreSQL 18):
+
+```sh
+apt-get update
+apt-get install -y curl ca-certificates gnupg
+install -d /usr/share/postgresql-common/pgdg
+curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+  https://www.postgresql.org/media/keys/ACCC4CF8.asc
+echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+  https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+apt-get update
+apt-get install -y postgresql-18
+```
+
+安装完成后 `psql --version` 显示新版本,安装脚本会自动初始化集群数据目录:
+
+![安装 PostgreSQL 18](images/pg-install.png)
+
+### 第三步:配置密码与监听
+
+让数据库监听所有地址并放行局域网网段(把 `198.51.100.0/24` 换成你的实际
+网段),再为 `postgres` 账号设置密码:
+
+```sh
+sed -i "s/^#\?listen_addresses.*/listen_addresses = '*'/" \
+  /etc/postgresql/18/main/postgresql.conf
+echo "host all all 198.51.100.0/24 scram-sha-256" >> \
+  /etc/postgresql/18/main/pg_hba.conf
+systemctl restart postgresql
+```
+
+```sh
+su - postgres -c "psql -c \"ALTER USER postgres PASSWORD '<数据库密码>';\""
+```
+
+### 第四步:验证(密码 + 跨机)
+
+在终端里用局域网地址连回自己,验证监听与密码认证同时生效:
+
+```sh
+PGPASSWORD='<数据库密码>' psql -h 198.51.100.x -U postgres -c '\conninfo'
+```
+
+`Password Used: true`、`SSL Connection: true` 说明密码与加密均生效:
+
+![密码登录验证](images/psql-login.png)
+
+再从同网段的另一台实例(或任意局域网机器)连接,确认跨机可达:
+
+```sh
+PGPASSWORD='<数据库密码>' psql -h 198.51.100.x -U postgres -c 'select version();'
+```
+
+返回 `PostgreSQL 18.x ...` 即部署完成。日常运维可继续用在线终端执行
+`systemctl status postgresql`、查看日志、创建数据库等操作。
+
+> 提示:macvlan 实例与宿主机之间存在内核层面的隔离——**宿主机本身**无法
+> 直接访问同父网卡的 macvlan 实例地址,但局域网内其他机器(含其他宿主机上
+> 的实例)访问不受影响。验证时请从另一台机器发起连接。
+
 ## 共享资产库与批量操作
 
 共性内容统一保管、重复使用,是减少重复运维的核心。fleet 提供 **资产库**
@@ -224,7 +314,38 @@ fleet 为实例提供两类在线会话,均从实例详情抽屉或列表操作�
 ### 其他共性能力(roadmap)
 
 按同一模式可持续补充的共性能力:实例分组/标签(按组批量)、定时快照计划、
-备份导出模板、监控指标看板等,已在规划中。
+备份导出模板等,已在规划中。
+
+## 资源监控
+
+fleet 内置两层资源监控,**无需在实例内安装任何 agent**,数据直接来自 Incus
+的实时状态接口。
+
+### 集群级:宿主机资源
+
+集群详情页顶部展示集群成员(宿主机)的静态容量与实时水位:
+
+- **CPU 核心数**与架构;
+- **内存使用**:已用/总量,附水位进度条;
+- 存储、实例数量等信息。
+
+### 实例级:每个容器/虚拟机的监控
+
+实例详情抽屉新增 **监控** 标签页,每 3 秒自动采样:
+
+- **CPU**:相对单核的占用率曲线(由相邻两次采样的 CPU 时间差计算);
+- **内存**:用量/总量进度条,附峰值与 Swap;
+- **磁盘**:每个挂载点的用量与容量;
+- **网络**:每个接口的下行/上行速率(两次采样差值)与累计流量,附速率曲线。
+
+停止的实例只有状态行;虚拟机的指标依赖运行中的 Incus agent(用官方云镜像
+创建的虚拟机开机后数秒内自动就绪)。
+
+### 更深入的指标(roadmap)
+
+如需进程级、磁盘 IO、自定义采集等客户机内部指标,规划以 **Rust** 实现
+独立的轻量 guest agent,经 fleet 下发安装后回传更丰富的监控数据;当前
+Incus 状态接口已覆盖常规运维所需的核心指标。
 
 ## 存储池与网络
 
@@ -256,3 +377,8 @@ fleet 为实例提供两类在线会话,均从实例详情抽屉或列表操作�
 - **批量注入密钥失败一台会影响其他吗?** 不会,逐台独立执行并独立报告结果,
   失败实例可直接重试。
 - **公钥重复添加会怎样?** 相同内容的公钥只保留一条记录(自动按内容去重)。
+- **宿主机 ping 不通 macvlan 实例?** 这是 macvlan 的内核限制:宿主机与同父
+  网卡的 macvlan 实例之间不能直接通信,局域网其他机器之间互访正常。需要
+  宿主机直达实例时改用 bridge 网络,或从其他机器验证。
+- **监控标签页没有数据?** 实例必须处于运行状态;虚拟机需 Incus agent 就绪
+  (开机数秒内自动就绪)。速率为两次采样差值,刚打开时前几秒显示为 —。
