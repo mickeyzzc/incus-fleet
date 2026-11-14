@@ -46,7 +46,7 @@ The dashboard opens after sign-in and shows:
 - Total instances and the running/stopped split;
 - Resource overview (CPU, memory, storage).
 
-![Fleet dashboard](images/05-dashboard-resources.png)
+![Fleet dashboard](images-en/05-dashboard-resources.png)
 
 *Dashboard in the Simplified Chinese UI; switch languages from the gear menu.*
 
@@ -241,17 +241,17 @@ as `<database password>`; replace them with your own values.
 
 On the cluster detail page click **Create instance**:
 
-- Name `demo-db`, type **container**, image `debian/13` already present on the cluster;
+- Name `pgsql-01`, type **container**, image `debian/13` already present on the cluster;
 - Set the root disk as needed (20GiB in this example; leave headroom for a database);
 - Choose the **physical NIC** as the network (the LAN DHCP server assigns a same-subnet
   address), and enable **Start after creation**.
 
-![Create a PostgreSQL container](images/pg-create-form.png)
+![Create a PostgreSQL container](images-en/pg-create-form.png)
 
-When creation finishes, `demo-db` is running and has an address on the host subnet (for
+When creation finishes, `pgsql-01` is running and has an address on the host subnet (for
 example `198.51.100.x` in the `198.51.100.0/24` documentation subnet):
 
-![demo-db running](images/pg-running.png)
+![pgsql-01 running](images-en/pg-running.png)
 
 ### Step 2: install the latest PostgreSQL in the online terminal
 
@@ -274,7 +274,7 @@ apt-get install -y postgresql-18
 After installation, `psql --version` reports the new version and the install script
 initializes the cluster data directory:
 
-![Install PostgreSQL 18](images/pg-install.png)
+![Install PostgreSQL 18](images-en/pg-install.png)
 
 ### Step 3: configure the password and listener
 
@@ -305,7 +305,7 @@ PGPASSWORD='<database password>' psql -h 127.0.0.1 -U postgres -c '\conninfo'
 `Password Used: true` and `SSL Connection: true` confirm that the password and encryption are
 active:
 
-![Password login verification](images/psql-login.png)
+![Password login verification](images-en/psql-login.png)
 
 Then connect from another instance on the same subnet (or any LAN machine) to verify the LAN
 listener and the subnet rule:
@@ -371,7 +371,7 @@ and live utilization:
 - **Memory usage**: used/total with a utilization bar;
 - Storage, instance counts, and more.
 
-![Cluster resource utilization](images/06-cluster-resources.png)
+![Cluster resource utilization](images-en/06-cluster-resources.png)
 
 *Cluster detail: per-member capacity and live utilization.*
 
@@ -386,7 +386,7 @@ The instance detail drawer has a **Monitoring** tab that samples every 3 seconds
 - **Network**: per-interface receive/transmit rates (delta between samples) and cumulative
   traffic, with rate charts.
 
-![Instance monitoring panel](images/07-metrics-panel.png)
+![Instance monitoring panel](images-en/07-metrics-panel.png)
 
 *Instance drawer: CPU, memory, disk, and network sampled every 3 seconds.*
 
