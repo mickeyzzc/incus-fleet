@@ -1,12 +1,17 @@
 # Architecture
 
+**English** | [简体中文](zh-CN/architecture.md)
+
 Incus Fleet is a stateless-ish control plane that sits in front of two or more independent
-Incus clusters. It provides inventory, health, and a single-click cross-cluster migration API.
+Incus clusters. It provides inventory, health, lifecycle operations, shared operational assets,
+resource monitoring, and single-click cross-cluster migration behind one UI and API.
 
 ## Goals
 
 - Operate independent Incus clusters without joining them into one Incus cluster.
-- Give operators one UI/API for inventory and migration.
+- Give operators one UI/API for inventory, health, lifecycle operations, and migration.
+- Manage images and ISO installers across clusters, including one-click distribution.
+- Keep reusable SSH keys and scripts in one place and apply them in batches.
 - Move or copy containers and VMs between clusters, with rollback on failure.
 - Keep each deployment a single Go binary plus a small SQLite database.
 - Allow clusters to be added over time without redesigning the control plane.
@@ -53,9 +58,10 @@ other. Caddy load-balances browsers and pins each browser to one app instance (s
 | `cmd/incus-fleet` | Flags, config loading, structured logging, signal handling |
 | `internal/config` | YAML parsing, environment overrides, defaults, validation, cert file checks |
 | `internal/clusters` | Dials Incus endpoints, holds pinned-cert clients, builds health summaries, reconnect |
-| `internal/instances` | Lists instances across clusters and builds safe detail views |
+| `internal/instances` | Inventory, lifecycle, images, ISO, SPICE, files, snapshots, and guest operations |
+| `internal/assets` | Shared SSH key/script library and per-instance batch execution |
 | `internal/migrations` | Validates migration requests, persists tasks, runs copy/move, rollback |
-| `internal/store` | SQLite/PostgreSQL schema and migration task persistence |
+| `internal/store` | SQLite/PostgreSQL schema for migrations, keys, and scripts |
 | `internal/auth` | Constant-time admin token check and in-memory session table |
 | `internal/httpapi` | REST routes, auth middleware, error mapping, security headers, SPA fallback |
 | `internal/app` | Dependency wiring, HTTP server timeouts, graceful shutdown |
@@ -66,7 +72,8 @@ other. Caddy load-balances browsers and pins each browser to one app instance (s
 1. Parse CLI flags (`-config`, `-version`, `-check`).
 2. Load YAML, apply `INCUS_FLEET_*` environment overrides and defaults, validate.
 3. Verify referenced certificate files exist.
-4. Open the database and create the `migrations` table/index if needed.
+4. Open the database and create the `migrations`, `keystones`, and `scripts` schemas/indexes
+   if needed.
 5. Mark any tasks left in a non-final state as failed (`MarkInterrupted`). A previous process
    may have been killed during a transfer.
 6. Dial every configured Incus endpoint with its pinned client certificate.
@@ -96,6 +103,43 @@ Summaries include status, type, node, project, addresses, memory, process count,
 storage pool, and whether the instance supports stateful/live migration. Detail requests add
 guest OS information, selected configuration, devices, and live state, while avoiding
 unbounded or sensitive config maps.
+
+## Lifecycle operations
+
+All lifecycle work is synchronous from the HTTP caller's perspective and bounded by timeouts:
+
+- **State changes**: start, stop, and restart through the Incus state API. Stop/restart accept
+  a force flag.
+- **Create/clone/rebuild**: create from a local image with optional CPU, memory, root disk,
+  network, and static addresses; clone within a cluster; rebuild a stopped instance's root
+  disk from another image. Rebuild leaves data volumes untouched.
+- **Snapshots**: create (optionally stateful), restore, and delete.
+- **Devices**: attach disks (custom volume or host path) and NICs; detach by device name.
+- **Files**: list, download, upload, create directories, and delete files inside the guest.
+- **Guest actions**: run a script, set a password, or inject an SSH key. Payloads travel over
+  stdin, never as process arguments.
+- **Images**: import a local tarball, distribute it to another cluster with a direct Incus
+  transfer, refresh a cached image, and delete images.
+- **ISO installers**: upload ISO files as custom volumes, launch a blank VM from one, and
+  delete the volume.
+- **Consoles**: exec and serial terminals, the Incus VGA console, and a per-channel SPICE
+  websocket bridge. SPICE uses unauthenticated TCP listeners on cluster members, so the port
+  range must be firewalled.
+
+## Resource monitoring
+
+Host CPU, memory, storage, and instance counts come from the Incus cluster resources API.
+Per-instance metrics come from the live instance state API: CPU time, memory usage and peak,
+per-mountpoint disk usage, and per-interface network counters. No agent is installed for the
+core metrics; the frontend samples every 3 seconds and derives rates from counter deltas.
+
+## Shared assets and batch operations
+
+The asset library stores SSH public keys and scripts in the control-plane database. Keys are
+de-duplicated by content. Batch operations resolve the same `instances.RunOps` path used by
+single-instance maintenance actions, so key injection, script execution, and power operations
+behave consistently across one or many instances. Targets run sequentially and independently;
+one failure does not abort the rest.
 
 ## Migration flow
 
@@ -153,22 +197,28 @@ Progress text is a short stage label plus transfer metadata when Incus reports i
 
 ## Persistence
 
-Only migration tasks are persisted. Sessions, cluster summaries, and instance inventory are
-in memory.
+Migration tasks, shared SSH keys, and shared scripts are persisted. Sessions, cluster
+summaries, and instance inventory are in memory.
 
 ```
 migrations(
   id, source_cluster, target_cluster, instance, instance_type,
   mode, live, status, progress, error, created_at, updated_at
 )
+
+keystones(id, name, public_key, comment, created_at)
+
+scripts(id, name, description, body, created_at, updated_at)
 ```
 
 - SQLite uses WAL and a single connection so in-memory test databases stay coherent.
 - PostgreSQL uses `pgx` with `?` placeholders rebound to `$n`.
 - Timestamps are stored as Unix nanoseconds.
+- Identical public keys share a content-derived id, so storing the same key twice is a no-op.
 
 Migration history is operational data, not a source of truth for cluster state. Losing it does
-not lose instances.
+not lose instances. The key and script library is user content and should be included in
+database backups.
 
 ## Authentication and sessions
 
@@ -198,7 +248,10 @@ the user signs in again.
   path in `?redirect=`.
 - The API client is a typed wrapper over `fetch` with an `ApiError` envelope parser and an
   unauthorized hook that clears auth state.
-- Views poll migration state only while tasks are active.
+- Views poll migration state only while tasks are active. The instance monitoring tab samples
+  live metrics every 3 seconds while it is open.
+- The UI is bilingual (English and Simplified Chinese) via `vue-i18n`; the choice is stored in
+  the browser and applies immediately.
 - Production assets are embedded with `//go:embed all:dist`; the handler serves files from
   `dist`, caches hashed assets immutably, and falls back to `index.html` for SPA routes.
 
@@ -206,7 +259,8 @@ the user signs in again.
 
 The HTTP handler sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
 `Referrer-Policy: same-origin`, and a restrictive CSP. JSON error responses never include
-stack traces; 5xx details are logged server-side only.
+stack traces. Underlying error text is returned to the caller for 5xx responses while the full
+error and request context are also logged server-side.
 
 ## Scaling and expansion
 

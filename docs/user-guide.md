@@ -1,229 +1,259 @@
-# 用户操作手册
+# User Guide
 
-本手册以两集群场景为例,演示从登录到交付一台可用实例的完整操作。示例中的集群名
-`c1`、`c2` 请替换为你自己的集群名;地址、网段均为说明性示例。
+**English** | [简体中文](zh-CN/user-guide.md)
 
-前置条件:
+This guide walks through a complete two-cluster workflow, from signing in to delivering a
+usable instance. Replace the example cluster names `c1` and `c2` with your own. All addresses
+and subnets are documentation examples.
 
-- fleet 已按 [deployment](deployment.md) 部署并可访问(示例:`http://192.0.2.10:8080`)。
-- 你持有管理员 token(部署时写入 `INCUS_FLEET_AUTH_TOKEN`)。
-- 两个集群均已 [注册](#注册集群) 且在线。
+Prerequisites:
 
-## 目录
+- Fleet is deployed as described in [deployment](deployment.md) and reachable (example:
+  `http://fleet.example:8080`).
+- You have the admin token (written to `INCUS_FLEET_AUTH_TOKEN` at deploy time).
+- Both clusters are [registered](#register-a-cluster) and online.
 
-1. [登录与语言](#登录与语言)
-2. [认识仪表盘](#认识仪表盘)
-3. [镜像:导入与分发](#镜像导入与分发)
-4. [ISO 安装镜像与系统安装](#iso-安装镜像与系统安装)
-5. [创建实例(含同网段 IP)](#创建实例)
-6. [实例日常管理](#实例日常管理)
-7. [在线终端与远程桌面](#在线终端与远程桌面)
-8. [运维操作:脚本、密码、密钥](#运维操作脚本密码密钥)
-9. [镜像升级与实例克隆](#镜像升级与实例克隆)
-10. [端口转发](#端口转发)
-11. [实战案例:部署 PostgreSQL 数据库容器](#实战案例部署-postgresql-数据库容器)
-12. [共享资产库与批量操作](#共享资产库与批量操作)
-13. [资源监控](#资源监控)
-14. [存储池与网络](#存储池与网络)
-15. [常见问题](#常见问题)
+## Contents
 
-## 登录与语言
+1. [Sign in and choose a language](#sign-in-and-choose-a-language)
+2. [Tour the dashboard](#tour-the-dashboard)
+3. [Images: import and distribute](#images-import-and-distribute)
+4. [ISO installers and OS installation](#iso-installers-and-os-installation)
+5. [Create an instance](#create-an-instance)
+6. [Day-to-day instance management](#day-to-day-instance-management)
+7. [Online terminals and remote desktop](#online-terminals-and-remote-desktop)
+8. [Maintenance actions: scripts, passwords, keys](#maintenance-actions-scripts-passwords-keys)
+9. [Image upgrades and cloning](#image-upgrades-and-cloning)
+10. [Port forwarding](#port-forwarding)
+11. [Walkthrough: deploy a PostgreSQL container](#walkthrough-deploy-a-postgresql-container)
+12. [Shared asset library and batch operations](#shared-asset-library-and-batch-operations)
+13. [Resource monitoring](#resource-monitoring)
+14. [Storage pools and networks](#storage-pools-and-networks)
+15. [FAQ](#faq)
 
-1. 打开 fleet 地址,输入管理员 token,点击登录。会话有效期 12 小时,过期后
-   重新登录即可。
-2. 右上角齿轮 → **语言 / Language** 可在 中文 与 English 之间切换,选择即时生效
-   并保存在浏览器中。
+## Sign in and choose a language
 
-## 认识仪表盘
+1. Open the fleet URL, enter the admin token, and sign in. Sessions last 12 hours; sign in
+   again after they expire.
+2. Use the gear icon in the top-right corner → **Language** to switch between English and
+   中文. The choice applies immediately and is stored in the browser.
 
-登录后默认进入仪表盘,展示:
+## Tour the dashboard
 
-- 每个集群的在线状态、Incus 版本、实例数量;
-- 实例总数、运行/停止分布;
-- 资源概览(CPU、内存、存储)。
+The dashboard opens after sign-in and shows:
 
-集群列表点击任意集群进入该集群的详情页(实例、镜像、存储池、网络、Profile、成员)。
+- Online status, Incus version, and instance count for every cluster;
+- Total instances and the running/stopped split;
+- Resource overview (CPU, memory, storage).
 
-## 镜像导入与分发
+Click a cluster to open its detail page: instances, images, storage pools, networks,
+profiles, and members.
 
-fleet 支持把本地镜像文件上传到某一个集群,再一键分发到其他集群,实现
-"上传一次、集群共用"。
+## Images: import and distribute
 
-### 第一步:准备镜像文件
+Fleet uploads a local image file to one cluster, then distributes it to other clusters with
+one click: upload once, use everywhere.
 
-在任意装有 Incus 的机器上导出镜像:
+### Step 1: prepare the image files
+
+Export the image on any machine with Incus:
 
 ```bash
-# 统一文件(单 tar 包)
+# Unified file (one tar archive)
 incus image export debian/13 debian13
 
-# 拆分文件(元数据 tar 包 + .root 根文件系统)
-# 导出结果为 debian13(元数据)与 debian13.root(根文件系统)两个文件
+# Split files (metadata tar archive + .root filesystem)
+# Produces debian13 (metadata) and debian13.root (root filesystem)
 ```
 
-注意:ISO 安装镜像暂不支持导入;容器镜像与虚拟机镜像均可。
+ISO installers use the separate [ISO workflow](#iso-installers-and-os-installation); this
+image import handles container and VM images.
 
-### 第二步:上传到集群
+### Step 2: upload to a cluster
 
-1. 进入目标集群(如 `c2`)→ **镜像** 区块 → **导入**。
-2. 点击上传区选择镜像文件:
-   - 统一文件:只选 tar 包即可;
-   - 拆分文件:先选元数据 tar 包,再在 **Rootfs 文件** 处选择配套的 `.root` 文件。
-3. 选择镜像类型(容器 / 虚拟机),可选填别名(如 `debian/13`,便于创建实例时挑选)。
-4. 点击 **导入**。上传完成后镜像会以指纹出现在列表中。
+1. Open the target cluster (for example `c2`) → **Images** → **Import**.
+2. Choose the image files:
+   - Unified file: select only the tar archive;
+   - Split files: select the metadata tar archive, then the matching `.root` file under
+     **Rootfs file**.
+3. Choose the image type (container / virtual machine). Optionally set an alias (for example
+   `debian/13`) so the image is easy to pick when creating instances.
+4. Click **Import**. When the upload finishes, the image appears in the list by fingerprint.
 
-也可以用 API 上传(与界面等价):
+The API is equivalent to the UI:
 
 ```bash
 curl -H "Authorization: Bearer $INCUS_FLEET_AUTH_TOKEN" \
   -F "image=@debian13" -F "rootfs=@debian13.root" \
-  "http://192.0.2.10:8080/api/v1/clusters/c2/images/import?type=container&alias=debian/13"
+  "http://fleet.example:8080/api/v1/clusters/c2/images/import?type=container&alias=debian/13"
 ```
 
-### 第三步:分发到其他集群
+### Step 3: distribute to other clusters
 
-1. 在持有镜像的集群(如 `c2`)镜像列表中,点击该镜像的 **分发**。
-2. 选择目标集群(如 `c1`),可选填别名,点击 **分发**。
-3. 完成后目标集群的镜像列表即可看到同一指纹的镜像。
+1. In the image list of the cluster that owns the image (for example `c2`), click
+   **Distribute**.
+2. Choose the target cluster (for example `c1`), optionally set an alias, and confirm.
+3. The same fingerprint appears in the target cluster's image list when the transfer
+   completes.
 
-## ISO 安装镜像与系统安装
+## ISO installers and OS installation
 
-fleet 支持上传 ISO 安装镜像(如 Debian/Ubuntu/CentOS 官方安装盘),并从 ISO
-启动一台空白虚拟机完成系统安装。
+Fleet can upload ISO installers (for example the official Debian, Ubuntu, or CentOS images)
+and boot a blank virtual machine from the ISO to install the OS.
 
-1. 进入集群 → **ISO 安装镜像** 区块 → **上传 ISO**,选择 `.iso` 文件与存储池。
-2. 上传完成后列表会出现该 ISO。点击 **创建虚拟机**:
-   - 填写虚拟机名称(必填);
-   - 可选选择网络(安装过程需要联网拉取软件包时建议选择,物理网卡或托管网桥均可);
-   - 可选填写根磁盘容量(如 `20GiB`,给系统盘留足空间)。
-3. 提交后 fleet 会创建一台空白虚拟机并自动从 ISO 引导(自动放宽 Secure Boot
-   以兼容多数发行版安装器,并预先配好 SPICE 图形通道)。
-4. 打开该虚拟机的 **远程桌面**(见下文),即可在浏览器里看到安装程序界面,
-   像操作物理机一样完成安装。
-5. 安装完成后建议关机、在设备面板卸载 ISO 设备(或直接删除重装),再开机进入新系统。
+1. Open the cluster → **ISO installers** → **Upload ISO**, then choose the `.iso` file and a
+   storage pool.
+2. The ISO appears in the list. Click **Create VM**:
+   - Enter a VM name (required);
+   - Optionally choose a network (recommended when the installer needs to download packages;
+     a physical NIC or a managed bridge both work);
+   - Optionally set the root disk size (for example `20GiB`, enough for the OS).
+3. Fleet creates a blank VM that boots from the ISO. It relaxes Secure Boot for compatibility
+   with most installers and configures the SPICE graphics channel in advance.
+4. Open the VM's **Remote desktop** (see below) to see the installer in the browser and
+   complete the installation as if you were at a physical machine.
+5. When installation finishes, shut the VM down, detach the ISO in the device panel (or
+   delete and recreate the VM), then boot into the installed system.
 
-ISO 镜像保存在存储池中,可随时在列表中删除。
+ISO files live in the storage pool and can be deleted from the list at any time.
 
-## 创建实例
+## Create an instance
 
-进入集群 → **实例** → **创建实例**。关键字段:
+Open a cluster → **Instances** → **Create instance**. Key fields:
 
-| 字段 | 说明 |
+| Field | Notes |
 | --- | --- |
-| 名称 | 集群内唯一 |
-| 类型 | 容器 / 虚拟机 |
-| 镜像 | 按别名或指纹选择已导入的镜像 |
-| 网络 | 见下方说明 |
-| CPU / 内存 / 根盘大小 | 限制值,留空使用默认 |
+| Name | Unique within the cluster |
+| Type | Container / virtual machine |
+| Image | Pick an imported image by alias or fingerprint |
+| Network | See below |
+| CPU / memory / root disk size | Limits; leave blank for defaults |
 
-### 网络怎么选:同网段 IP 是关键
+### Choosing a network: same-subnet IPs
 
-实例的网络地址取决于所选网络:
+The instance address depends on the selected network:
 
-- **托管网桥**(如 `incusbr0`):实例接入 Incus 内部 NAT 网段(如 `10.x.x.x`),
-  出网经 NAT,外部无法直接访问。
-- **物理网卡(macvlan)**:列表中不带托管标记的网卡(如宿主机的 `eth0`)。
-  实例通过 macvlan 直接桥接到物理局域网,**从所在网段的 DHCP 获取与宿主机同
-  网段的 IP**(例如宿主机在 `198.51.100.0/24`,实例会拿到 `198.51.100.x`)。
-  局域网内其他设备可以直接访问该实例。
+- **Managed bridge** (for example `incusbr0`): the instance joins the Incus internal NAT
+  subnet (for example `10.x.x.x`). Outbound traffic is NATed and the instance is not directly
+  reachable from outside.
+- **Physical NIC (macvlan)**: NICs without the managed marker (for example the host NIC
+  `eth0`). The instance is bridged directly onto the physical LAN via macvlan and **gets a
+  DHCP address from the same subnet as the host** (for example, if the host is on
+  `198.51.100.0/24`, the instance receives `198.51.100.x`). Other LAN devices can reach the
+  instance directly.
 
-要让实例拿到与宿主机同网段的 IP:创建实例时,网络选择**物理网卡**(parent 为
-宿主机网卡名)即可,不要手动填静态 IP——macvlan 模式下地址由局域网 DHCP 分配。
+To give an instance an address on the host subnet, select the **physical NIC** (parent is the
+host NIC name) when creating it. Do not enter a static IP: macvlan addresses come from the LAN
+DHCP server.
 
-创建完成后,在实例列表的地址列确认 IP 已落在预期网段;若长时间未获取地址,
-检查交换机/路由器的 DHCP 与该网卡的桥接状态。
+After creation, confirm in the address column that the IP is in the expected subnet. If no
+address appears, check the switch/router DHCP service and the NIC bridge state.
 
-## 实例日常管理
+## Day-to-day instance management
 
-实例列表或详情抽屉中可执行:
+From the instance list or the detail drawer you can:
 
-- **启动 / 停止 / 重启**:停止与重启需二次确认,可勾选"强制"。
-- **快照**:创建(可含运行状态)、恢复、删除。恢复会回滚磁盘,请先确认。
-- **终端**:
-  - *Exec*:在实例内执行命令的交互式 shell;
-  - *Console*:串行控制台(容器推荐用 Exec;Console 断开码 1006 属正常关闭)。
-- **文件管理**:浏览实例文件系统、上传、下载、新建目录、删除文件。
-- **设备挂载**:为实例追加磁盘(挂载存储卷或宿主路径)或第二块网卡,卸载同样在此操作。
-- **删除实例**:需二次确认,勾选可同时删除其存储卷。
+- **Start / stop / restart**: stop and restart ask for confirmation and offer a **force**
+  option.
+- **Snapshots**: create (optionally with running state), restore, delete. Restoring rolls the
+  disk back; confirm before proceeding.
+- **Terminal**:
+  - *Exec*: an interactive shell inside the instance;
+  - *Console*: the serial console (prefer Exec for containers; console close code 1006 is a
+    normal shutdown).
+- **File management**: browse the instance filesystem, upload, download, create directories,
+  and delete files.
+- **Devices**: attach a disk (storage volume or host path) or a second NIC; detach devices in
+  the same panel.
+- **Delete instance**: asks for confirmation and can delete the instance's storage volumes at
+  the same time.
 
-## 在线终端与远程桌面
+## Online terminals and remote desktop
 
-fleet 为实例提供两类在线会话,均从实例详情抽屉或列表操作进入:
+Fleet provides three browser sessions, available from the detail drawer or the list actions:
 
-- **终端(Exec)**:容器与虚拟机通用。在实例内以 root 打开交互式 shell,
-  支持窗口自适应与中断信号;适合命令行运维。命令行模式下,会话启动一个
-  **持久 shell**,每条提交的命令都进入同一个 shell——环境变量、当前目录等
-  状态跨命令保留。若命令已结束、会话已关闭,继续输入会自动重开会话并执行,
-  无需手动重连。
-- **串行控制台(Console)**:排查启动问题、查看内核输出时使用。
-- **远程桌面(虚拟机)**:运行中的虚拟机可打开图形控制台。fleet 会为虚拟机
-  自动配置 qemu SPICE 通道(管理 raw.qemu 中的 `-spice` TCP 监听,按实例名
-  分配端口),浏览器经 fleet 的 websocket-TCP 桥接逐通道连接 SPICE 服务,
-  实时显示安装器/桌面画面。首次配置时运行中的虚拟机会重启一次以生效;之后
-  每次打开即连。容器没有显示设备,不提供远程桌面。
-  安全提示:SPICE TCP 监听无票据认证,监听在集群成员主机的所有网卡上;
-  请用防火墙限制该端口段的访问来源。
+- **Terminal (Exec)**: works for containers and VMs. Opens an interactive root shell, supports
+  window resizing and interrupt signals. In command-line mode the session runs a **persistent
+  shell**: every submitted command goes to the same shell, so environment variables and the
+  working directory survive across commands. If the command exits and the session closes, the
+  next input reopens the session automatically and runs the pending command.
+- **Serial console (Console)**: useful for boot problems and kernel output.
+- **Remote desktop (VMs)**: running VMs can open a graphical console. Fleet configures a QEMU
+  SPICE channel for the VM (a `-spice` TCP listener in `raw.qemu`, with a port allocated per
+  instance name). The browser connects to the SPICE server channel by channel through a
+  websocket-TCP bridge and shows the installer or desktop live. The first configuration
+  restarts a running VM once; later sessions connect immediately. Containers have no display
+  device and do not offer remote desktop.
 
-会话随页面关闭自动断开,不会在主机上留下常驻进程。
+  Security note: the SPICE TCP listener has no ticket authentication and listens on all
+  interfaces of the cluster member. Restrict access to the port range with a firewall.
 
-## 运维操作脚本密码密钥
+Sessions close with the page and leave no daemon process on the host.
 
-实例详情抽屉的 **运维操作** 面板提供三个高频动作,全部以实例内 root 身份执行:
+## Maintenance actions: scripts, passwords, keys
 
-| 动作 | 用法 | 说明 |
+The **Maintenance** panel in the instance detail drawer offers three frequent actions, all
+executed as root inside the instance:
+
+| Action | Usage | Notes |
 | --- | --- | --- |
-| 运行脚本 | 粘贴 shell 脚本 → 执行 | 通过 `sh -s` 执行,实时显示退出码与标准输出/错误 |
-| 修改密码 | 账号 + 新密码 | 通过 stdin 交给 `chpasswd`,密码不会出现在进程列表 |
-| 注入 SSH 密钥 | 账号 + 一行公钥 | 追加到该账号 `~/.ssh/authorized_keys`,自动修正目录与权限 |
+| Run script | Paste a shell script → run | Executes via `sh -s`, streams exit code, stdout, and stderr |
+| Set password | Account + new password | Piped to `chpasswd` on stdin; the password never appears in the process list |
+| Inject SSH key | Account + one public key line | Appends to `~/.ssh/authorized_keys`, fixes directory and file permissions |
 
-注入密钥后即可在局域网内 `ssh 账号@实例IP` 免密登录(配合上文同网段 IP)。
+After injecting a key you can `ssh account@instance-ip` from the LAN without a password (with
+the same-subnet IP described above).
 
-## 镜像升级与实例克隆
+## Image upgrades and cloning
 
-- **镜像升级(重建实例)**:在实例详情的运维面板中选择目标镜像(别名或指纹),
-  fleet 会把实例根盘重建为新镜像。注意:**必须先停止实例**,重建会清空根盘数据;
-  数据盘(存储卷)不受影响。
-- **刷新缓存镜像**:集群镜像列表中,缓存镜像可点击 **刷新**,让 Incus 从源
-  重新拉取最新版本(别名不变、指纹更新)。
-- **克隆实例**:实例列表行操作 **克隆**,输入新名称即可在同一集群内复制一台
-  完整实例(含磁盘与配置),可选复制后立即启动。适合用模板快速扩量。
+- **Image upgrade (rebuild)**: choose the target image (alias or fingerprint) in the
+  maintenance panel. Fleet rebuilds the instance root disk from the new image. The instance
+  **must be stopped** and the root disk is wiped; data disks (storage volumes) are unaffected.
+- **Refresh cached images**: in a cluster image list, a cached image has a **Refresh** action
+  that asks Incus to pull the latest version from the source (the alias stays, the fingerprint
+  changes).
+- **Clone instance**: use **Clone** in the instance row, enter a new name, and copy a complete
+  instance (disks and config) within the same cluster. Optionally start it after cloning. Good
+  for scaling out from a template.
 
-## 端口转发
+## Port forwarding
 
-实例的局域网 IP 可能不方便直连(例如宿主机只有部分端口对外开放),此时给实例
-挂载 **proxy 端口转发** 设备:
+Instance LAN addresses may not be directly reachable (for example when only a few host ports
+are exposed). Attach a **proxy port-forward** device to the instance:
 
-1. 实例详情 → **设备** → 挂载设备,类型选 **端口转发**;
-2. 填写监听地址(宿主机侧,如 `tcp:0.0.0.0:8080`)与连接地址(实例侧,
-   如 `tcp:127.0.0.1:80`);
-3. 保存后访问宿主机对应端口即直达实例内服务。
+1. Instance detail → **Devices** → attach device, type **Port forward**.
+2. Enter the listen address (host side, for example `tcp:0.0.0.0:8080`) and the connect
+   address (instance side, for example `tcp:127.0.0.1:80`).
+3. Save; traffic to the host port now reaches the service inside the instance.
 
-## 实战案例:部署 PostgreSQL 数据库容器
+## Walkthrough: deploy a PostgreSQL container
 
-本案例把前面各节串起来:在集群 `c2` 上创建一台接入局域网(同网段 IP)的
-Debian 容器,用在线终端安装最新版 PostgreSQL,配置密码与监听,并从另一台
-机器跨机验证。示例中密码一律以 `<数据库密码>` 占位,请替换为你自己的值。
+This walkthrough ties the previous sections together: create a Debian container on cluster
+`c2` with a LAN (same-subnet) address, install the latest PostgreSQL in the online terminal,
+configure its password and listener, and verify it from another machine. Passwords are shown
+as `<database password>`; replace them with your own values.
 
-### 第一步:创建容器并接入同网段
+### Step 1: create the container on the LAN
 
-在集群详情页点击 **创建实例**:
+On the cluster detail page click **Create instance**:
 
-- 名称 `demo-db`,类型 **容器**,镜像选择集群上已有的 `debian/13`;
-- 根磁盘按需设置(示例 20GiB,数据库容器建议留足余量);
-- **网络**选择物理网卡(由局域网 DHCP 分配同网段地址),勾选 **创建后启动**。
+- Name `demo-db`, type **container**, image `debian/13` already present on the cluster;
+- Set the root disk as needed (20GiB in this example; leave headroom for a database);
+- Choose the **physical NIC** as the network (the LAN DHCP server assigns a same-subnet
+  address), and enable **Start after creation**.
 
-![创建 PostgreSQL 容器](images/pg-create-form.png)
+![Create a PostgreSQL container](images/pg-create-form.png)
 
-创建完成后,实例列表即可看到 `demo-db` 处于运行中,并获得与宿主机同网段
-的 IP(示例网段 `198.51.100.0/24` 中的 `198.51.100.x`):
+When creation finishes, `demo-db` is running and has an address on the host subnet (for
+example `198.51.100.x` in the `198.51.100.0/24` documentation subnet):
 
-![demo-db 运行中](images/pg-running.png)
+![demo-db running](images/pg-running.png)
 
-### 第二步:在线终端安装最新版 PostgreSQL
+### Step 2: install the latest PostgreSQL in the online terminal
 
-打开实例详情 → **终端** → **命令行**,输入命令并回车执行。Debian 仓库内的
-版本可能落后,接入 [PGDG](https://www.postgresql.org/download/linux/debian/)
-官方仓库即可安装当前最新大版本(示例安装到 PostgreSQL 18):
+Open instance detail → **Terminal** → **Command line**, enter commands, and press Enter. The
+Debian archive may lag behind; add the official [PGDG](https://www.postgresql.org/download/linux/debian/)
+repository to install the current major version (PostgreSQL 18 in this example):
 
 ```sh
 apt-get update
@@ -237,14 +267,15 @@ apt-get update
 apt-get install -y postgresql-18
 ```
 
-安装完成后 `psql --version` 显示新版本,安装脚本会自动初始化集群数据目录:
+After installation, `psql --version` reports the new version and the install script
+initializes the cluster data directory:
 
-![安装 PostgreSQL 18](images/pg-install.png)
+![Install PostgreSQL 18](images/pg-install.png)
 
-### 第三步:配置密码与监听
+### Step 3: configure the password and listener
 
-让数据库监听所有地址并放行局域网网段(把 `198.51.100.0/24` 换成你的实际
-网段),再为 `postgres` 账号设置密码:
+Make the database listen on all addresses and allow the LAN subnet (replace
+`198.51.100.0/24` with your subnet), then set a password for the `postgres` account:
 
 ```sh
 sed -i "s/^#\?listen_addresses.*/listen_addresses = '*'/" \
@@ -255,136 +286,156 @@ systemctl restart postgresql
 ```
 
 ```sh
-su - postgres -c "psql -c \"ALTER USER postgres PASSWORD '<数据库密码>';\""
+su - postgres -c "psql -c \"ALTER USER postgres PASSWORD '<database password>';\""
 ```
 
-### 第四步:验证(密码 + 跨机)
+### Step 4: verify password authentication across machines
 
-在终端里用局域网地址连回自己,验证监听与密码认证同时生效:
+Inside the terminal, connect over local TCP (`127.0.0.1`) to verify password authentication and
+TLS. Debian's default `pg_hba.conf` already allows `host all all 127.0.0.1/32 scram-sha-256`:
 
 ```sh
-PGPASSWORD='<数据库密码>' psql -h 198.51.100.x -U postgres -c '\conninfo'
+PGPASSWORD='<database password>' psql -h 127.0.0.1 -U postgres -c '\conninfo'
 ```
 
-`Password Used: true`、`SSL Connection: true` 说明密码与加密均生效:
+`Password Used: true` and `SSL Connection: true` confirm that the password and encryption are
+active:
 
-![密码登录验证](images/psql-login.png)
+![Password login verification](images/psql-login.png)
 
-再从同网段的另一台实例(或任意局域网机器)连接,确认跨机可达:
+Then connect from another instance on the same subnet (or any LAN machine) to verify the LAN
+listener and the subnet rule:
 
 ```sh
-PGPASSWORD='<数据库密码>' psql -h 198.51.100.x -U postgres -c 'select version();'
+PGPASSWORD='<database password>' psql -h 198.51.100.x -U postgres -c 'select version();'
 ```
 
-返回 `PostgreSQL 18.x ...` 即部署完成。日常运维可继续用在线终端执行
-`systemctl status postgresql`、查看日志、创建数据库等操作。
+A result such as `PostgreSQL 18.x ...` means the deployment is complete. Continue using the
+online terminal for `systemctl status postgresql`, logs, and database creation.
 
-> 提示:macvlan 实例与宿主机之间存在内核层面的隔离——**宿主机本身**无法
-> 直接访问同父网卡的 macvlan 实例地址,但局域网内其他机器(含其他宿主机上
-> 的实例)访问不受影响。验证时请从另一台机器发起连接。
+> Note: macvlan instances are isolated from their host at the kernel level. **The host
+> itself** cannot reach a macvlan instance on the same parent NIC, but other LAN machines
+> (including instances on other hosts) can. Verify from another machine.
 
-## 共享资产库与批量操作
+## Shared asset library and batch operations
 
-共性内容统一保管、重复使用,是减少重复运维的核心。fleet 提供 **资产库**
-集中保管 SSH 公钥与常用脚本,并支持对多台实例一键批量执行。
+Keeping common content in one place and reusing it is key to reducing repetitive operations.
+Fleet provides an **Asset library** for SSH public keys and frequently used scripts, plus
+one-click batch execution against many instances.
 
-### 资产库:统一保管
+### Asset library: one place to keep shared content
 
-左侧菜单进入 **资产库**:
+Open **Asset library** in the left menu:
 
-- **SSH 公钥库**:保管公钥(名称 + 公钥内容,支持一行或多行,相同内容自动
-  去重)。这里只是保管,不会自动下发——注入时机由你决定。
-- **常用脚本库**:保管运维脚本(名称 + 描述 + 内容),例如初始化、装软件、
-  调优脚本,随取随用。
+- **SSH public keys**: stores keys (name + key material, one or more lines; identical content
+  is de-duplicated). Storing a key does not deploy it; you decide when to inject it.
+- **Scripts**: stores maintenance scripts (name + description + body), such as bootstrap,
+  package installation, or tuning scripts, ready to reuse.
 
-### 批量操作:一键应用到多台实例
+### Batch operations: apply to many instances at once
 
-进入 **实例** 页面,勾选多台实例(可跨集群),顶部出现批量工具栏:
+Open **Instances** and select multiple instances (across clusters is fine). A batch toolbar
+appears:
 
-| 批量动作 | 说明 |
+| Batch action | Notes |
 | --- | --- |
-| 批量注入密钥 | 从公钥库选一把或多把,一键注入每台实例的目标账号;逐台显示成功/失败与退出码 |
-| 批量执行脚本 | 从脚本库选一个脚本,以 root 在每台实例内执行;逐台捕获输出 |
-| 批量启动 / 停止 / 重启 | 对选中实例执行电源操作 |
+| Batch inject keys | Choose one or more keys from the library and inject them into the target account on each instance; shows success/failure and exit code per instance |
+| Batch run script | Choose a script and run it as root on every instance; captures output per instance |
+| Batch start / stop / restart | Power operations on the selected instances |
 
-典型用法:新装一批实例 → 勾选全部 → 批量注入公钥 → 用保管私钥直接 SSH 免密
-登录 → 批量执行初始化脚本。注入与脚本均走实例内 root 执行,密钥与脚本内容
-通过 stdin 传递,不会出现在进程列表。
+Typical flow: create a batch of instances → select all → batch inject a public key → SSH in
+with the matching private key → batch run the bootstrap script. Key injection and scripts run
+as root inside the instance, and key/script content travels over stdin, so it never appears in
+the process list.
 
-### 其他共性能力(roadmap)
+### Other shared capabilities (roadmap)
 
-按同一模式可持续补充的共性能力:实例分组/标签(按组批量)、定时快照计划、
-备份导出模板等,已在规划中。
+The same pattern can be extended to instance groups/tags (batch by group), scheduled snapshot
+policies, and backup export templates. These are planned.
 
-## 资源监控
+## Resource monitoring
 
-fleet 内置两层资源监控,**无需在实例内安装任何 agent**,数据直接来自 Incus
-的实时状态接口。
+Fleet includes two layers of resource monitoring with **no agent installed inside instances**.
+Data comes directly from the Incus live state API.
 
-### 集群级:宿主机资源
+### Cluster level: host resources
 
-仪表盘的每个集群卡片与集群详情页顶部都会展示宿主机的容量与实时水位:
+Every cluster card on the dashboard and the top of the cluster detail page shows host capacity
+and live utilization:
 
-- **CPU 核心数**与架构;
-- **内存使用**:已用/总量,附水位进度条;
-- 存储、实例数量等信息。
+- **CPU cores** and architecture;
+- **Memory usage**: used/total with a utilization bar;
+- Storage, instance counts, and more.
 
-![仪表盘资源概览](images/05-dashboard-resources.png)
+![Dashboard resource overview](images/05-dashboard-resources.png)
 
-![集群资源水位](images/06-cluster-resources.png)
+![Cluster resource utilization](images/06-cluster-resources.png)
 
-### 实例级:每个容器/虚拟机的监控
+### Instance level: per container/VM monitoring
 
-实例详情抽屉新增 **监控** 标签页,每 3 秒自动采样:
+The instance detail drawer has a **Monitoring** tab that samples every 3 seconds:
 
-- **CPU**:相对单核的占用率曲线(由相邻两次采样的 CPU 时间差计算);
-- **内存**:用量/总量进度条,附峰值与 Swap;
-- **磁盘**:每个挂载点的用量与容量;
-- **网络**:每个接口的下行/上行速率(两次采样差值)与累计流量,附速率曲线。
+- **CPU**: utilization relative to one core (derived from the CPU time delta between
+  consecutive samples);
+- **Memory**: used/total bar, with peak and swap;
+- **Disk**: usage and capacity per mount point;
+- **Network**: per-interface receive/transmit rates (delta between samples) and cumulative
+  traffic, with rate charts.
 
-![实例监控面板](images/07-metrics-panel.png)
+![Instance monitoring panel](images/07-metrics-panel.png)
 
-停止的实例只有状态行;虚拟机的指标依赖运行中的 Incus agent(用官方云镜像
-创建的虚拟机开机后数秒内自动就绪)。
+Stopped instances only show the status row. VM metrics depend on a running Incus agent (VMs
+created from official cloud images become ready a few seconds after boot).
 
-### 更深入的指标(roadmap)
+### Deeper metrics (roadmap)
 
-如需进程级、磁盘 IO、自定义采集等客户机内部指标,规划以 **Rust** 实现
-独立的轻量 guest agent,经 fleet 下发安装后回传更丰富的监控数据;当前
-Incus 状态接口已覆盖常规运维所需的核心指标。
+For guest-internal metrics such as per-process data, disk I/O, or custom collection, the plan
+is a lightweight **Rust** guest agent installed through Fleet that reports richer telemetry.
+The Incus state API already covers the core metrics needed for routine operations.
 
-## 存储池与网络
+## Storage pools and networks
 
-集群详情页提供:
+The cluster detail page provides:
 
-- **存储池**:查看驱动与容量,创建/编辑/删除存储池;每个池下可创建与删除
-  custom 卷(供设备挂载使用)。
-- **网络**:查看网络列表;托管网络可创建/编辑/删除,物理网卡只读(macvlan 由
-  实例创建时的设备定义,不单独建网络)。
-- **Profile**:配置模板的增删改,创建实例时可选择应用。
+- **Storage pools**: view driver and capacity; create, edit, and delete pools; create and
+  delete custom volumes under each pool (for device mounts).
+- **Networks**: list networks; managed networks can be created, edited, and deleted, while
+  physical NICs are read-only (macvlan is defined by the instance device, not as a separate
+  network).
+- **Profiles**: create, update, and delete configuration templates; select them when creating
+  instances.
 
-## 常见问题
+## FAQ
 
-- **上传镜像 413/失败?** 单镜像上限 8 GiB;超大镜像建议先压缩根文件系统。
-- **分发镜像卡住?** 分发经源/目标集群之间直连传输,跨站点时耗时取决于带宽,
-  可在目标集群镜像列表确认是否已出现。
-- **Console 终端断开(1006)?** 容器串行控制台在退出时以此码关闭属正常现象;
-  交互执行请优先使用 Exec。
-- **文件管理不能删除文件夹?** 暂不支持递归删除目录,可先删空后在实例内清理。
-- **物理网卡不出现?** 该网卡必须是宿主机的 unmanaged 状态(未加入 Incus 托管网桥)。
-- **远程桌面打不开或提示配置中?** 远程桌面仅支持虚拟机;首次打开会自动配置
-  SPICE 监听并重启该虚拟机,等待其启动完成后再重开一次会话即可。
-- **远程桌面需要放行哪些端口?** 每台虚拟机占用一个 TCP 端口(按名称自动
-  分配在 5910-5989 区间),建议用防火墙限制来源网段。
-- **运维操作报 agent 相关错误?** 虚拟机需要运行中的 Incus agent 才能执行命令,
-  用官方云镜像创建的虚拟机开机后数秒内 agent 会自动就绪。
-- **重建实例提示必须停止?** 镜像升级会重写根盘,Incus 要求实例处于停止状态;
-  先停止再重建。
-- **批量注入密钥失败一台会影响其他吗?** 不会,逐台独立执行并独立报告结果,
-  失败实例可直接重试。
-- **公钥重复添加会怎样?** 相同内容的公钥只保留一条记录(自动按内容去重)。
-- **宿主机 ping 不通 macvlan 实例?** 这是 macvlan 的内核限制:宿主机与同父
-  网卡的 macvlan 实例之间不能直接通信,局域网其他机器之间互访正常。需要
-  宿主机直达实例时改用 bridge 网络,或从其他机器验证。
-- **监控标签页没有数据?** 实例必须处于运行状态;虚拟机需 Incus agent 就绪
-  (开机数秒内自动就绪)。速率为两次采样差值,刚打开时前几秒显示为 —。
+- **Image upload returns 413 or fails?** The per-image limit is 8 GiB; compress the root
+  filesystem first for larger images.
+- **Image distribution seems stuck?** Distribution transfers directly between the source and
+  target clusters; cross-site transfers depend on bandwidth. Check the target cluster's image
+  list for the new image.
+- **Console disconnects with 1006?** The container serial console closes with that code on
+  exit, which is normal. Prefer Exec for interactive work.
+- **File manager cannot delete a folder?** Recursive directory deletion is not supported yet;
+  empty the directory and remove it inside the instance.
+- **A physical NIC is missing?** The NIC must be unmanaged on the host (not part of an Incus
+  managed bridge).
+- **Remote desktop will not open or says it is being configured?** Remote desktop only works
+  for VMs. The first open configures the SPICE listener and restarts the VM; wait for it to
+  boot and open the session again.
+- **Which ports must be allowed for remote desktop?** Each VM uses one TCP port, allocated
+  automatically in the 5910-5989 range by instance name. Restrict the source subnet with a
+  firewall.
+- **Maintenance actions report an agent error?** VMs need a running Incus agent to execute
+  commands. VMs created from official cloud images become ready a few seconds after boot.
+- **Rebuild says the instance must be stopped?** An image upgrade rewrites the root disk, and
+  Incus requires the instance to be stopped. Stop it and retry.
+- **Does one failed batch key injection affect the others?** No. Every instance runs
+  independently and reports its own result; failed instances can be retried directly.
+- **What happens when the same public key is added twice?** Identical key material is stored
+  once (de-duplicated by content).
+- **The host cannot ping a macvlan instance?** This is a kernel restriction of macvlan:
+  the host cannot talk directly to a macvlan instance on the same parent NIC, while other LAN
+  machines can. Use a bridge network if the host must reach the instance, or verify from
+  another machine.
+- **The monitoring tab has no data?** The instance must be running, and VMs need the Incus
+  agent (ready a few seconds after boot). Rates are deltas between samples, so the first few
+  seconds show —.

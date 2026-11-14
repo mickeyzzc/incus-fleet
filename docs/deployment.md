@@ -1,5 +1,7 @@
 # Deployment
 
+**English** | [简体中文](zh-CN/deployment.md)
+
 This guide deploys one incus-fleet instance per management host, with each instance connecting
 to every Incus cluster. A separate Caddy host load-balances the UI/API.
 
@@ -229,11 +231,28 @@ marked `Secure` in that case.
 If you round-robin without stickiness, browser logins will intermittently fail because the
 session cookie is only valid on the instance that created it.
 
-Caddy proxies WebSockets transparently: the terminal and file endpoints
-(`/api/v1/.../console|exec|files`) ride the same sticky cookie as the UI, so no extra
-configuration is needed.
+Caddy proxies WebSockets transparently: the terminal, VGA, SPICE, and file endpoints
+(`/api/v1/.../console|exec|vga|spice|files`) ride the same sticky cookie as the UI, so no extra
+configuration is needed. SPICE clients open several websocket connections per session, and all
+of them must reach the same app instance; the sticky cookie covers this when the browser
+supports it.
 
-## 6. Deploy upgrades
+## 6. Firewall and SPICE
+
+Incus Fleet configures a SPICE TCP listener for VMs that need a graphical console. The listener
+has no ticket authentication and binds on all interfaces of the cluster member, with ports
+allocated per instance name in the **5910-5989** range. Do not expose that range to untrusted
+networks. Allow it only from the app hosts that bridge browser websockets, for example:
+
+```bash
+sudo nft add rule inet filter input tcp dport 5910-5989 \
+  ip saddr @fleet_app_hosts accept
+```
+
+Container exec and serial consoles do not need any extra cluster-side port; they travel
+through the Incus API.
+
+## 7. Deploy upgrades
 
 1. Build and copy the new binary to `/home/incus/bin/incus-fleet`.
 2. `sudo systemctl restart incus-fleet` on one host; verify health.
@@ -244,7 +263,7 @@ configuration is needed.
 Roll back by restoring the previous binary and restarting. The database schema is additive; no
 downgrade step is currently required.
 
-## 7. Backup
+## 8. Backup
 
 Back up per app host:
 
@@ -253,9 +272,14 @@ Back up per app host:
 - `/home/incus/certs/` (private keys);
 - `/home/incus/data/fleet.db` (SQLite) or the PostgreSQL database.
 
-Stop the service or use SQLite's online backup before copying the database file.
+The database now holds migration history plus the shared SSH key and script library. A lost
+database does not lose instances, but it does lose those reusable assets, so include it in
+regular backups.
 
-## 8. Troubleshooting
+Stop the service or use SQLite's online backup before copying the database file. For
+PostgreSQL, use `pg_dump` against the fleet database.
+
+## 9. Troubleshooting
 
 | Symptom | Check |
 | --- | --- |
@@ -268,6 +292,10 @@ Stop the service or use SQLite's online backup before copying the database file.
 | Target storage pool missing | Create the same pool name on the target cluster |
 | Login works then fails after refresh | Caddy is not using sticky sessions |
 | Migration stuck/failed after restart | Unfinished tasks are marked failed; inspect target for partial copies |
+| ISO upload or launch fails | ISO volume exists in the pool, the VM name is free, the pool has room |
+| Remote desktop cannot connect | VM running, Incus agent ready, firewall allows 5910-5989 from the app host |
+| Image upload returns 413 | Image is over 8 GiB; compress the root filesystem or raise the limit in code |
+| Batch action reports partial failure | Inspect per-instance `error`/`stderr` in the 207 response; retry failed targets |
 
 Check the Incus side with:
 
@@ -287,4 +315,6 @@ incus info --show-log <instance>
 - [ ] Caddy presents TLS and uses sticky sessions
 - [ ] App API port 8080 is reachable only from the Caddy host (firewall)
 - [ ] Incus API 8443 is reachable only from the app hosts (firewall)
+- [ ] SPICE ports 5910-5989 are reachable only from the app hosts (firewall)
+- [ ] Database backups include the shared key and script library
 - [ ] Secret scan run before pushing

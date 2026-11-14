@@ -1,16 +1,23 @@
 # Incus Fleet
 
+**English** | [简体中文](README.zh-CN.md)
+
 Self-hosted control plane for managing multiple independent [Incus](https://linuxcontainers.org/incus/)
 clusters from one UI and API. Instances can be copied or moved between clusters with one click,
 including live migration for stateful virtual machines.
 
 ## Features
 
-- Fleet dashboard with per-cluster health, membership, storage, and instance counts
-- Container and VM inventory with detail drawers
+- Fleet dashboard with per-cluster health, membership, storage, host CPU/memory, and instance counts
+- Container and VM inventory with detail drawers and live resource monitoring
 - Cross-cluster `move` and `copy` migrations, with optional snapshots
 - Live migration for running VMs with `migration.stateful=true`
 - Automatic source restart when a migration fails or is interrupted
+- Image import, one-click distribution to other clusters, and cached-image refresh
+- ISO installer upload and blank-VM launch for manual OS installation
+- Browser-based exec terminals, serial consoles, and SPICE remote desktops
+- Guest file management, device mounting, snapshots, clone, rebuild, and password/key injection
+- Shared SSH key and script library with batch execution across clusters
 - SQLite by default; PostgreSQL selectable at initialization
 - Single Go binary with the Vue UI embedded
 - Admin-token login with HttpOnly sessions; bearer tokens for automation
@@ -63,7 +70,25 @@ INCUS_FLEET_AUTH_TOKEN="..." ./bin/incus-fleet -config config.local.yaml
 Open `http://127.0.0.1:8080` and sign in with the admin token.
 
 The config reference and full deployment steps are in [docs/deployment.md](docs/deployment.md).
-The HTTP API is documented in [docs/api.md](docs/api.md).
+The HTTP API is documented in [docs/api.md](docs/api.md). End-user workflows are covered in the
+[user guide](docs/user-guide.md).
+
+## Documentation
+
+| Document | English | 简体中文 |
+| --- | --- | --- |
+| User guide | [docs/user-guide.md](docs/user-guide.md) | [docs/zh-CN/user-guide.md](docs/zh-CN/user-guide.md) |
+| Architecture | [docs/architecture.md](docs/architecture.md) | [docs/zh-CN/architecture.md](docs/zh-CN/architecture.md) |
+| Deployment | [docs/deployment.md](docs/deployment.md) | [docs/zh-CN/deployment.md](docs/zh-CN/deployment.md) |
+| HTTP API | [docs/api.md](docs/api.md) | [docs/zh-CN/api.md](docs/zh-CN/api.md) |
+| Engineering standards | [docs/standards.md](docs/standards.md) | [docs/zh-CN/standards.md](docs/zh-CN/standards.md) |
+| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) | [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) |
+| Security policy | [SECURITY.md](SECURITY.md) | [SECURITY.zh-CN.md](SECURITY.zh-CN.md) |
+| Code of conduct | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | [CODE_OF_CONDUCT.zh-CN.md](CODE_OF_CONDUCT.zh-CN.md) |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) | [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md) |
+
+The English files are canonical. Chinese files mirror them and should be updated in the same
+change whenever behavior or instructions change.
 
 ## Development
 
@@ -87,16 +112,17 @@ Coding conventions and the TDD contract are in [docs/standards.md](docs/standard
 ```
 cmd/incus-fleet        process entry point
 internal/app           service wiring and HTTP lifecycle
+internal/assets        shared SSH key/script library and batch operations
 internal/auth          admin token and in-memory sessions
 internal/clusters      Incus connection manager and summaries
 internal/config        YAML config loading and validation
 internal/httpapi       REST API and embedded SPA handler
-internal/instances     instance inventory
+internal/instances     instance inventory, operations, images, ISO, SPICE
 internal/migrations    migration orchestration and rollback
 internal/store         SQLite/PostgreSQL persistence
 internal/testutil      test doubles for the Incus API
 deploy/                systemd, Caddy, and example configs
-docs/                  architecture, API, standards, deployment
+docs/                  architecture, API, standards, deployment, user guide
 web/                   Vue 3 + TypeScript + Vite + Element Plus UI
 ```
 
@@ -106,8 +132,23 @@ web/                   Vue 3 + TypeScript + Vite + Element Plus UI
 - The example configuration files contain placeholders only.
 - Cluster endpoints must use HTTPS and pinned client certificates; trust tokens are not used.
 - The UI stores no token in browser storage. Login exchanges the token for an HttpOnly cookie.
-- Report vulnerabilities privately to the repository owner.
+- SPICE listens on cluster member interfaces without ticket authentication. Restrict the
+  allocated port range (5910-5989) with a firewall.
+- Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and
+[docs/standards.md](docs/standards.md) before you start. All participants must follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-Proprietary. All rights reserved. See [LICENSE](LICENSE).
+Copyright (C) 2026 mickeyzzc and contributors.
+
+This project is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0). See
+[LICENSE](LICENSE) for the full text.
+
+AGPL-3.0 is a strong copyleft license: if you modify Incus Fleet and make it available to
+users over a network, you must offer those users the corresponding source code. This keeps
+the project open while preventing closed-source hosted derivatives.

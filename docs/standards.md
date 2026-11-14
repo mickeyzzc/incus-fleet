@@ -1,5 +1,7 @@
 # Engineering standards
 
+**English** | [简体中文](zh-CN/standards.md)
+
 These rules apply to every change in this repository. They are enforced by review, CI, and the
 Makefile where possible.
 
@@ -33,7 +35,8 @@ Coverage is a floor, not a goal. Assert behavior and error paths, not implementa
 
 ### Style
 
-- `gofmt` is mandatory; CI runs `make fmt-check`.
+- `gofmt` is mandatory; run `make fmt-check`. CI enforces formatting through
+  `golangci-lint`.
 - Exported identifiers have doc comments starting with the identifier name.
 - Wrap errors with context: `fmt.Errorf("migrations: copy instance: %w", err)`.
 - Use sentinel errors (`ErrInvalidRequest`, `ErrConflict`, `ErrNotFound`) when the HTTP layer
@@ -108,12 +111,35 @@ Coverage is a floor, not a goal. Assert behavior and error paths, not implementa
 - The repository ignores `/AGENTS.md`, `/docs/local/`, `*.key`, `*.pem`, `config*.yaml`,
   `/data/`, and `/coverage*`. Do not weaken these rules.
 - Root `AGENTS.md` and `docs/local/` are local-only and must never be pushed.
-- Sanitize committed docs and examples: placeholders only, no hostnames, PSKs, or tokens.
+- Sanitize committed docs, examples, tests, and screenshots: placeholders only, no real
+  hostnames, IP addresses, usernames, cluster names, PSKs, or tokens.
+- Use documentation addresses (`192.0.2.0/24`, `198.51.100.0/24`, `2001:db8::/32`),
+  `example.com` names, and generic cluster names such as `c1`/`c2`.
+- Screenshots must be captured against a disposable environment or redacted before commit.
+  Check every visible field: addresses, hostnames, instance names, usernames, MAC addresses,
+  and organization identifiers.
 - Run a secret scan before every push and before publishing the repository.
 - Cluster endpoints must be HTTPS and use pinned client certificates.
 - Use constant-time comparison for credentials and random, high-entropy session identifiers.
-- Do not log secrets or include internal error details in 5xx responses.
+- Do not log secrets. Never put tokens, keys, passwords, or other credentials in error strings.
+  The API currently returns underlying error text for 5xx responses and logs the full error, so
+  error text must stay safe to disclose.
 - Keep dependencies current; review security advisories for Go and npm packages.
+
+## Documentation standards
+
+- English is the default language. `README.md` and `docs/*.md` are canonical.
+- Every document has a Simplified Chinese mirror: `README.zh-CN.md`,
+  `docs/zh-CN/*.md`, `CONTRIBUTING.zh-CN.md`, `SECURITY.zh-CN.md`,
+  `CODE_OF_CONDUCT.zh-CN.md`, and `CHANGELOG.zh-CN.md`.
+- Each file starts with a language switch linking to its counterpart.
+- Update both languages in the same change. A stale translation is a documentation bug.
+- Use relative links inside `docs/zh-CN/` (`../deployment.md`, `../images/...`).
+- API changes must update `docs/api.md` and `docs/zh-CN/api.md`, including new routes, request
+  shapes, status codes, and limits.
+- Screenshots live in `docs/images/`. Add alt text and state the UI locale when it matters.
+- Do not document behavior that the code does not implement; verify claims against handlers,
+  constants, and tests.
 
 ## Git and review
 
@@ -131,6 +157,7 @@ A change is done when:
 - tests were written first and pass;
 - coverage gates pass;
 - `make check` passes locally;
-- user-facing docs/API docs are updated;
+- user-facing docs and API docs are updated in **both** English and Chinese;
+- screenshots and examples are sanitized;
 - no secrets or local-only files are staged;
 - operational impact (migration behavior, config, deployment) is called out.

@@ -1,5 +1,7 @@
 # HTTP API
 
+**English** | [简体中文](zh-CN/api.md)
+
 Base path: `/api/v1`. All request and response bodies are JSON unless noted. The same server
 also serves the Vue SPA at `/`.
 
@@ -15,8 +17,8 @@ The server has one shared admin token. There are two ways to authenticate:
    intended for automation and does not need a login step.
 
 `GET /api/v1/healthz`, `GET /api/v1/version`, `POST /auth/login`, and `POST /auth/logout` are
-public. Everything under `/clusters`, `/instances`, `/migrations`, and `GET /auth/session`
-requires authentication.
+public. Everything under `/clusters`, `/instances`, `/migrations`, `/keys`, `/scripts`, and
+`/batch`, plus `GET /auth/session`, requires authentication.
 
 ```bash
 curl -sS https://fleet.example/api/v1/clusters \
@@ -112,6 +114,30 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | GET | `/migrations?limit=` | yes | Recent migration tasks (default 50) |
 | POST | `/migrations` | yes | Submit a migration (`202 Accepted`) |
 | GET | `/migrations/{id}` | yes | One migration task |
+| POST | `/clusters/{cluster}/images/import?type=&alias=` | yes | Upload an image (`multipart/form-data`) |
+| POST | `/clusters/{cluster}/images/{fingerprint}/copy` | yes | Distribute a local image to another cluster |
+| POST | `/clusters/{cluster}/images/{fingerprint}/refresh` | yes | Re-pull a cached image from its origin |
+| GET | `/clusters/{cluster}/iso` | yes | List installer ISO volumes |
+| POST | `/clusters/{cluster}/iso?pool=` | yes | Upload an ISO installer (`multipart/form-data`) |
+| DELETE | `/clusters/{cluster}/iso/{pool}/{name}` | yes | Delete an ISO volume |
+| POST | `/clusters/{cluster}/iso/{pool}/{name}/launch` | yes | Create a blank VM that boots the ISO |
+| POST | `/clusters/{cluster}/instances/{instance}/clone` | yes | Clone an instance within its cluster |
+| POST | `/clusters/{cluster}/instances/{instance}/rebuild` | yes | Rebuild the root disk from another image |
+| POST | `/clusters/{cluster}/instances/{instance}/ops` | yes | Run a script, set a password, or inject a key |
+| GET | `/clusters/{cluster}/instances/{instance}/vga` | yes | Graphical console (WebSocket) |
+| GET | `/clusters/{cluster}/instances/{instance}/spice?port=` | yes | SPICE channel bridge (WebSocket) |
+| POST | `/clusters/{cluster}/instances/{instance}/spice/prepare` | yes | Configure the VM SPICE listener |
+| GET | `/keys` | yes | List shared SSH public keys |
+| POST | `/keys` | yes | Store a public key |
+| PATCH | `/keys/{id}` | yes | Update a stored public key |
+| DELETE | `/keys/{id}` | yes | Delete a stored public key |
+| GET | `/scripts` | yes | List shared scripts |
+| POST | `/scripts` | yes | Store a script |
+| PATCH | `/scripts/{id}` | yes | Update a stored script |
+| DELETE | `/scripts/{id}` | yes | Delete a stored script |
+| POST | `/batch/keys` | yes | Inject stored keys into many instances |
+| POST | `/batch/scripts` | yes | Run one stored script on many instances |
+| POST | `/batch/power` | yes | Start, stop, or restart many instances |
 
 `type` accepts `any` (default), `container`, or `virtual-machine`.
 
@@ -186,7 +212,7 @@ instance counts may be zero when the cluster cannot be inspected.
       "architecture": "x86_64",
       "description": "web frontend",
       "profiles": ["default"],
-      "ipv4": ["10.0.0.0.5"],
+      "ipv4": ["10.0.0.5"],
       "ipv6": [],
       "memory": 134217728,
       "processes": 12,
@@ -248,7 +274,7 @@ Attach body (disk):
 { "name": "data", "type": "disk", "pool": "default", "source": "data", "path": "/mnt/data", "size": "10GiB" }
 ```
 
-Attach body (NIC): `{ "name": "eth1", "type": "nic", "network": "incusbr0", "ipv4": "10.0.0.0.9" }`.
+Attach body (NIC): `{ "name": "eth1", "type": "nic", "network": "incusbr0", "ipv4": "10.0.0.9" }`.
 Disk requires `path`; NIC requires an existing `network`. Device names must not collide with
 existing devices. Both return the updated instance detail.
 
@@ -364,6 +390,143 @@ Not every stage occurs. `starting` is skipped for stopped instances with `auto_s
 `GET /api/v1/migrations?limit=20` returns `{"migrations": [...]}`. `limit` must be a positive
 integer. `GET /api/v1/migrations/{id}` returns one object.
 
+## Images
+
+### Import
+
+```http
+POST /api/v1/clusters/{cluster}/images/import?type=container&alias=debian/13
+Content-Type: multipart/form-data
+```
+
+Multipart fields:
+
+- `image` — the image metadata tar archive, or a unified image tar archive (required);
+- `rootfs` — the `.root` root filesystem, only for split exports.
+
+`type` accepts `container` (default) or `virtual-machine`; `alias` is optional. The request
+body is capped at 8 GiB. A successful import returns
+`{"fingerprint": "<sha256>"}`; if the Incus daemon reports no fingerprint the response is
+`204 No Content`.
+
+### Distribute
+
+`POST /clusters/{cluster}/images/{fingerprint}/copy` with
+`{"target_cluster": "c2", "alias": "debian/13"}` streams the image directly to another
+cluster and returns `204 No Content`. The target must differ from the source and be connected.
+
+### Refresh
+
+`POST /clusters/{cluster}/images/{fingerprint}/refresh` asks Incus to pull a cached image
+again from its origin, then returns `204 No Content`. The alias is preserved.
+
+## ISO installers
+
+| Method | Path | Result |
+| --- | --- | --- |
+| GET | `.../iso` | `{"isos": [{"name", "pool", "description", "size"}]}` |
+| POST | `.../iso?pool=default` | Upload (`image` multipart field, 12 GiB cap) → `201 {"name","pool"}` |
+| DELETE | `.../iso/{pool}/{name}` | `204 No Content` |
+| POST | `.../iso/{pool}/{name}/launch` | Create a VM from the ISO → `201` instance detail |
+
+Launch body:
+
+```json
+{
+  "name": "db-installer",
+  "storage_pool": "default",
+  "network": "incusbr0",
+  "root_disk": "20GiB",
+  "start": true
+}
+```
+
+`iso_name` comes from the URL path and does not need to be repeated in the body. Fleet
+relaxes Secure Boot for installer compatibility and configures SPICE automatically.
+
+## Instance operations
+
+### Clone
+
+`POST .../instances/{instance}/clone` with `{"target": "web-2", "start": true}` copies a
+complete instance (disks and config) within the same cluster and returns `201` with the new
+instance detail. `start` defaults to `true`.
+
+### Rebuild
+
+`POST .../instances/{instance}/rebuild` with `{"image": "debian/13"}` replaces the root disk
+with the given image (alias or fingerprint). The instance must be stopped. Data volumes are
+not changed. Returns the updated instance detail.
+
+### Maintenance actions
+
+`POST .../instances/{instance}/ops` executes one action as root inside the guest:
+
+```json
+{"action": "run-script", "script": "apt-get update && apt-get -y upgrade"}
+{"action": "set-password", "user": "root", "password": "<new password>"}
+{"action": "inject-key", "user": "root", "key": "ssh-ed25519 AAAA... user@example"}
+```
+
+The response is `{"exit_code": 0, "stdout": "...", "stderr": "..."}`. Scripts run through
+`sh -s`; passwords go to `chpasswd`; keys are appended to `~/.ssh/authorized_keys`. Payloads
+are written to stdin and never appear in process arguments.
+
+### Graphical console
+
+`POST .../instances/{instance}/spice/prepare` with `{"port": 0, "apply": true}` configures the
+VM's QEMU SPICE TCP listener. A zero port derives a stable port from the instance name in the
+range 5910-5989. The response is:
+
+```json
+{"port": 5931, "applied": true, "restart_required": false}
+```
+
+`apply: true` restarts a running VM so the QEMU arguments take effect; the first session may
+therefore require a restart. `GET .../spice?port=5931` upgrades to a WebSocket and bridges one
+SPICE channel to the VM's TCP listener. `GET .../vga` upgrades to the Incus graphical console
+WebSocket.
+
+The SPICE listener uses `disable-ticketing=on` and binds on all interfaces of the cluster
+member. Restrict the 5910-5989 range with a firewall; do not expose it to untrusted networks.
+
+## Shared assets
+
+### SSH public keys
+
+`GET /keys` returns `{"keys": [...]}`. Each key has `id`, `name`, `public_key`, `comment`, and
+`created_at`. `POST /keys` takes `name`, `public_key`, and an optional `comment` and returns
+`201` with the stored object. `public_key` may contain multiple newline-separated key lines;
+identical material is stored once under a content-derived id. `PATCH /keys/{id}` updates a
+key, and `DELETE /keys/{id}` returns `204 No Content`.
+
+### Scripts
+
+`GET /scripts` returns `{"scripts": [...]}` with `id`, `name`, `description`, `body`,
+`created_at`, and `updated_at`. `POST /scripts` requires `name` and `body` and returns `201`.
+`PATCH /scripts/{id}` updates a script; `DELETE /scripts/{id}` returns `204 No Content`.
+
+### Batch operations
+
+All three endpoints take a `targets` array of `{"cluster", "instance", "user"}` objects.
+`user` is optional and defaults to `root` for key injection; scripts always run as root.
+
+```json
+// POST /batch/keys
+{"targets": [{"cluster": "c1", "instance": "web"}], "key_ids": ["key-1a2b3c4d5e6f7788"]}
+
+// POST /batch/scripts
+{"targets": [{"cluster": "c1", "instance": "web"}], "script_id": "script-..."}
+
+// POST /batch/power
+{"targets": [{"cluster": "c1", "instance": "web"}], "action": "restart", "force": true}
+```
+
+Each call returns `{"items": [...]}` where an item is
+`{"cluster", "instance", "ok", "exit_code", "stdout", "stderr", "error"}`. Instances run
+independently: one failure does not stop the rest. The response is `200 OK` when every item
+succeeds and `207 Multi-Status` when any item reports an error.
+
 ## Errors
 
 All errors use one envelope:
@@ -385,13 +548,20 @@ All errors use one envelope:
 | 404 | `not_found` | Unknown cluster, instance, or migration |
 | 409 | `conflict` | Instance already on target, or migration already running for that instance |
 | 503 | `cluster_unavailable` | Configured cluster cannot be reached |
-| 500 | `internal_error` | Unexpected failure (details are logged, not returned) |
+| 500 | `internal_error` | Unexpected failure; `message` contains the underlying error detail |
+
+`207 Multi-Status` is not an error envelope: batch endpoints use it to return per-instance
+results when at least one target failed.
 
 ## Limits and behavior
 
-- Request bodies are limited to 1 MiB.
+- JSON request bodies are limited to 1 MiB.
+- Multipart uploads have separate caps: 8 GiB for images, 12 GiB for ISO files, and 32 MiB
+  for instance file uploads.
 - Migration execution has a 6-hour default timeout.
 - Source stop operations use a 300-second timeout.
+- Instance `exec` and maintenance actions use a 10-minute timeout; image transfer uses 30
+  minutes.
 - A process restart marks unfinished migrations as failed; it never resumes a transfer.
 - Concurrent migrations of the same source instance are rejected per app process. Running two
   app instances against the same clusters can still race; Incus will reject overlapping work.
