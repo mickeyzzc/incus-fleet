@@ -25,26 +25,27 @@ resource monitoring, and single-click cross-cluster migration behind one UI and 
 
 ## Runtime topology
 
-```
-                         ┌──────────────────────────────┐
-   Browser / API client  │  Caddy (sticky load balancer) │
-                         └───────────────┬──────────────┘
-                                         │
-                 ┌───────────────────────┴───────────────────────┐
-                 │                                               │
-     ┌───────────▼────────────┐                     ┌────────────▼───────────┐
-     │ incus-fleet @ host A   │                     │ incus-fleet @ host B   │
-     │  HTTP :8080            │                     │  HTTP :8080            │
-     │  SQLite / PostgreSQL   │                     │  SQLite / PostgreSQL   │
-     └───────┬────────┬───────┘                     └────────┬───────┬───────┘
-             │        │                                      │       │
-             │        └──────────── HTTPS + client cert ─────┼───────┘
-             │                                               │
-     ┌───────▼────────┐                             ┌────────▼─────────┐
-     │ Incus c1      │                             │ Incus c2        │
-     │ API :8443      │                             │ API :8443        │
-     │ storage /srv   │                             │ storage /srv     │
-     └────────────────┘                             └──────────────────┘
+```mermaid
+flowchart LR
+    client["Browser / API client"]
+    caddy["Caddy<br/>sticky sessions · TLS"]
+    client --> caddy
+
+    subgraph apps["App tier · independent instances"]
+        direction TB
+        appA["incus-fleet<br/>@ host A<br/>HTTP :8080<br/>SQLite / PostgreSQL"]
+        appB["incus-fleet<br/>@ host B<br/>HTTP :8080<br/>SQLite / PostgreSQL"]
+    end
+
+    subgraph clusters["Incus clusters"]
+        direction TB
+        c1["c1<br/>API :8443 · storage /srv"]
+        c2["c2<br/>API :8443 · storage /srv"]
+        c1 ~~~ c2
+    end
+
+    caddy --> apps
+    apps -->|HTTPS · client cert| clusters
 ```
 
 Each app instance connects to **both** Incus clusters. The app instances do not talk to each
@@ -179,6 +180,29 @@ DHCP renewal after the move.
 6. For `move`, delete the source instance (`verifying` / "removing source"). For `copy`, restart
    the source if it was stopped.
 7. `done` — progress "complete".
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> preflight
+    preflight --> stopping: source running, not live
+    preflight --> transferring: live or source stopped
+    stopping --> transferring
+    transferring --> verifying
+    verifying --> starting: target start needed
+    verifying --> done: no start needed
+    starting --> done
+    preflight --> failed
+    stopping --> failed
+    transferring --> failed
+    verifying --> failed
+    starting --> failed
+    failed --> [*]
+    done --> [*]
+```
+
+`stopping` and `starting` are conditional; `progress` carries the human-readable stage,
+including source removal after a successful `move`.
 
 ### Rollback rules
 

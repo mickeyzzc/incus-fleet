@@ -23,26 +23,27 @@ Incus Fleet 是一个近乎无状态的控制平面，位于两个或更多相�
 
 ## 运行时拓扑
 
-```
-                         ┌──────────────────────────────┐
-   Browser / API client  │  Caddy (sticky load balancer) │
-                         └───────────────┬──────────────┘
-                                         │
-                 ┌───────────────────────┴───────────────────────┐
-                 │                                               │
-     ┌───────────▼────────────┐                     ┌────────────▼───────────┐
-     │ incus-fleet @ host A   │                     │ incus-fleet @ host B   │
-     │  HTTP :8080            │                     │  HTTP :8080            │
-     │  SQLite / PostgreSQL   │                     │  SQLite / PostgreSQL   │
-     └───────┬────────┬───────┘                     └────────┬───────┬───────┘
-             │        │                                      │       │
-             │        └──────────── HTTPS + client cert ─────┼───────┘
-             │                                               │
-     ┌───────▼────────┐                             ┌────────▼─────────┐
-     │ Incus c1      │                             │ Incus c2        │
-     │ API :8443      │                             │ API :8443        │
-     │ storage /srv   │                             │ storage /srv     │
-     └────────────────┘                             └──────────────────┘
+```mermaid
+flowchart LR
+    client["浏览器 / API 客户端"]
+    caddy["Caddy<br/>会话粘滞 · TLS"]
+    client --> caddy
+
+    subgraph apps["应用层 · 相互独立的实例"]
+        direction TB
+        appA["incus-fleet<br/>@ 主机 A<br/>HTTP :8080<br/>SQLite / PostgreSQL"]
+        appB["incus-fleet<br/>@ 主机 B<br/>HTTP :8080<br/>SQLite / PostgreSQL"]
+    end
+
+    subgraph clusters["Incus 集群"]
+        direction TB
+        c1["c1<br/>API :8443 · 存储 /srv"]
+        c2["c2<br/>API :8443 · 存储 /srv"]
+        c1 ~~~ c2
+    end
+
+    caddy --> apps
+    apps -->|HTTPS · 客户端证书| clusters
 ```
 
 每个应用实例都会连接到**两个** Incus 集群。应用实例之间互不通信。Caddy 对浏览器做负载均衡，并把每个浏览器固定到同一个应用实例（参见[粘性会话](#粘性会话)）。
@@ -138,6 +139,28 @@ Incus Fleet 是一个近乎无状态的控制平面，位于两个或更多相�
 在线迁移会保留客户机的网络状态。如果源与目标集群使用不同子网，客户机可能继续保留源端的 DHCP 租约，在续约之前不可达（例如 `dhclient -r <if>` 之后再执行 `dhclient <if>`，或 `networkctl reconfigure <if>`）。控制平面不在客户机内执行命令；请使用相同子网，或在迁移后安排客户机续约 DHCP。
 6. 对于 `move`，删除源实例（`verifying` / "removing source"）。对于 `copy`，若源原本已停止，则重新启动它。
 7. `done` —— 进度为 "complete"。
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> preflight
+    preflight --> stopping: 源在运行且非在线迁移
+    preflight --> transferring: 在线迁移或源已停止
+    stopping --> transferring
+    transferring --> verifying
+    verifying --> starting: 需要启动目标
+    verifying --> done: 无需启动
+    starting --> done
+    preflight --> failed
+    stopping --> failed
+    transferring --> failed
+    verifying --> failed
+    starting --> failed
+    failed --> [*]
+    done --> [*]
+```
+
+`stopping` 与 `starting` 是条件阶段；`progress` 保存人类可读的阶段名，成功 `move` 后的源删除也包含在内。
 
 ### 回滚规则
 

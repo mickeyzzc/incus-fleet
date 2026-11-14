@@ -137,7 +137,11 @@ Coverage is a floor, not a goal. Assert behavior and error paths, not implementa
 - Use relative links inside `docs/zh-CN/` (`../deployment.md`, `../images/...`).
 - API changes must update `docs/api.md` and `docs/zh-CN/api.md`, including new routes, request
   shapes, status codes, and limits.
-- Screenshots live in `docs/images/`. Add alt text and state the UI locale when it matters.
+- Diagrams use Mermaid fenced code blocks tagged `mermaid`. Use an SVG in `docs/images/` only
+  when Mermaid cannot express the layout. Do not commit ASCII-art architecture or flow
+  diagrams; indented directory trees in code blocks are fine.
+- Screenshots live in `docs/images/`, referenced from the README or the user-guide step they
+  illustrate. Add descriptive alt text and state the UI locale when it matters.
 - Do not document behavior that the code does not implement; verify claims against handlers,
   constants, and tests.
 

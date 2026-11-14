@@ -10,12 +10,25 @@ Never commit real tokens, private keys, or production configuration.
 
 ## Topology
 
-```
-Caddy (sticky sessions, TLS)
-  ├── incus-fleet @ app-a  ──▶ Incus c1 (https://192.0.2.10:8443)
-  │                       └─▶ Incus c2 (https://192.0.2.11:8443)
-  └── incus-fleet @ app-b  ──▶ Incus c1
-                          └─▶ Incus c2
+```mermaid
+flowchart LR
+    caddy["Caddy<br/>sticky sessions · TLS"]
+
+    subgraph apps["App hosts · independent instances"]
+        direction TB
+        fleetA["incus-fleet<br/>@ app-a<br/>HTTP :8080"]
+        fleetB["incus-fleet<br/>@ app-b<br/>HTTP :8080"]
+    end
+
+    subgraph clusters["Incus clusters"]
+        direction TB
+        c1["c1<br/>https://192.0.2.10:8443"]
+        c2["c2<br/>https://192.0.2.11:8443"]
+        c1 ~~~ c2
+    end
+
+    caddy -->|sticky cookie| apps
+    apps -->|HTTPS · client cert| clusters
 ```
 
 Each app instance is independent: separate binary, config, certificates, database, and

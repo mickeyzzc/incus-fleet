@@ -11,7 +11,7 @@ Prerequisites:
 - Fleet is deployed as described in [deployment](deployment.md) and reachable (example:
   `http://fleet.example:8080`).
 - You have the admin token (written to `INCUS_FLEET_AUTH_TOKEN` at deploy time).
-- Both clusters are [registered](#register-a-cluster) and online.
+- Both clusters are [configured in Fleet](deployment.md#3-configure-the-application) and online.
 
 ## Contents
 
@@ -45,6 +45,10 @@ The dashboard opens after sign-in and shows:
 - Online status, Incus version, and instance count for every cluster;
 - Total instances and the running/stopped split;
 - Resource overview (CPU, memory, storage).
+
+![Fleet dashboard](images/05-dashboard-resources.png)
+
+*Dashboard in the Simplified Chinese UI; switch languages from the gear menu.*
 
 Click a cluster to open its detail page: instances, images, storage pools, networks,
 profiles, and members.
@@ -367,9 +371,9 @@ and live utilization:
 - **Memory usage**: used/total with a utilization bar;
 - Storage, instance counts, and more.
 
-![Dashboard resource overview](images/05-dashboard-resources.png)
-
 ![Cluster resource utilization](images/06-cluster-resources.png)
+
+*Cluster detail: per-member capacity and live utilization.*
 
 ### Instance level: per container/VM monitoring
 
@@ -383,6 +387,8 @@ The instance detail drawer has a **Monitoring** tab that samples every 3 seconds
   traffic, with rate charts.
 
 ![Instance monitoring panel](images/07-metrics-panel.png)
+
+*Instance drawer: CPU, memory, disk, and network sampled every 3 seconds.*
 
 Stopped instances only show the status row. VM metrics depend on a running Incus agent (VMs
 created from official cloud images become ready a few seconds after boot).

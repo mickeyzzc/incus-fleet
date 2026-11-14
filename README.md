@@ -6,6 +6,11 @@ Self-hosted control plane for managing multiple independent [Incus](https://linu
 clusters from one UI and API. Instances can be copied or moved between clusters with one click,
 including live migration for stateful virtual machines.
 
+![Incus Fleet dashboard with two clusters and host resource utilization](docs/images/05-dashboard-resources.png)
+
+*Dashboard in the Simplified Chinese UI; the interface is bilingual and English is available
+from the language switcher.*
+
 ## Features
 
 - Fleet dashboard with per-cluster health, membership, storage, host CPU/memory, and instance counts
@@ -28,9 +33,22 @@ including live migration for stateful virtual machines.
 
 ## Architecture at a glance
 
-```
-Browser ──▶ Caddy ──▶ incus-fleet (server A) ──▶ Incus cluster c1
-                  └─▶ incus-fleet (server B) ──▶ Incus cluster c2
+```mermaid
+flowchart LR
+    client["Browser / API client"]
+    caddy["Caddy<br/>TLS · sticky sessions"]
+    appA["incus-fleet<br/>server A"]
+    appB["incus-fleet<br/>server B"]
+    c1["Incus cluster c1"]
+    c2["Incus cluster c2"]
+
+    client --> caddy
+    caddy --> appA
+    caddy --> appB
+    appA --> c1
+    appA --> c2
+    appB --> c1
+    appB --> c2
 ```
 
 The two app instances are independent. Each one connects to both Incus clusters over the
@@ -72,6 +90,16 @@ Open `http://127.0.0.1:8080` and sign in with the admin token.
 The config reference and full deployment steps are in [docs/deployment.md](docs/deployment.md).
 The HTTP API is documented in [docs/api.md](docs/api.md). End-user workflows are covered in the
 [user guide](docs/user-guide.md).
+
+## Screenshots
+
+Cluster detail shows host capacity, storage pools, and instance state:
+
+![Cluster resource utilization](docs/images/06-cluster-resources.png)
+
+The instance drawer monitors CPU, memory, disk, and network every 3 seconds:
+
+![Instance monitoring panel](docs/images/07-metrics-panel.png)
 
 ## Documentation
 

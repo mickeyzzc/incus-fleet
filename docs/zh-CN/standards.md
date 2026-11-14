@@ -112,7 +112,8 @@
 - 在同一次改动中更新两种语言。过期的翻译属于文档缺陷。
 - 在 `docs/zh-CN/` 内使用相对链接（`../deployment.md`、`../images/...`）。
 - API 变更必须更新 `docs/api.md` 和 `docs/zh-CN/api.md`，包括新增路由、请求结构、状态码和限制。
-- 截图放在 `docs/images/`。添加替代文本，必要时说明 UI 语言。
+- 图表使用标记为 `mermaid` 的 Mermaid 代码块。仅当 Mermaid 无法表达布局时，才在 `docs/images/` 中放入 SVG；不要提交 ASCII 架构图或流程图，代码块中的缩进目录树不受此限。
+- 截图放在 `docs/images/`，并引用在 README 或它所说明的用户指南步骤中。添加描述性替代文本，必要时说明 UI 语言。
 - 不要记录代码未实现的行为；对照 handler、常量和测试核实说法。
 
 ## Git 与评审

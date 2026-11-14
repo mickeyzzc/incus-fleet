@@ -381,8 +381,9 @@ Content-Type: application/json
 
 状态推进顺序：
 
-```
-pending → preflight → stopping → transferring → verifying → starting → done
+```mermaid
+flowchart LR
+    pending --> preflight --> stopping --> transferring --> verifying --> starting --> done
 ```
 
 并非每个阶段都会出现。对于 `auto_start=false` 的已停止实例，会跳过 `starting`；

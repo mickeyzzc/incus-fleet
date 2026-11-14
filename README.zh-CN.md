@@ -6,6 +6,10 @@
 [Incus](https://linuxcontainers.org/incus/) 集群。实例可在集群之间一键复制或迁移，
 有状态虚拟机支持在线迁移。
 
+![Incus Fleet 仪表盘：两个集群与宿主机资源利用率](docs/images/05-dashboard-resources.png)
+
+*截图为简体中文界面；界面支持中英双语，可在语言切换器中切换。*
+
 ## 功能
 
 - 集群总览：在线状态、成员、存储、宿主机 CPU/内存与实例数量
@@ -28,9 +32,22 @@
 
 ## 架构概览
 
-```
-浏览器 ──▶ Caddy ──▶ incus-fleet（服务器 A）──▶ Incus 集群 c1
-                  └─▶ incus-fleet（服务器 B）──▶ Incus 集群 c2
+```mermaid
+flowchart LR
+    client["浏览器 / API 客户端"]
+    caddy["Caddy<br/>TLS · 会话粘滞"]
+    appA["incus-fleet<br/>服务器 A"]
+    appB["incus-fleet<br/>服务器 B"]
+    c1["Incus 集群 c1"]
+    c2["Incus 集群 c2"]
+
+    client --> caddy
+    caddy --> appA
+    caddy --> appB
+    appA --> c1
+    appA --> c2
+    appB --> c1
+    appB --> c2
 ```
 
 两个应用实例彼此独立。每个实例都通过网络连接两个 Incus 集群，并通过 Incus API
@@ -70,6 +87,16 @@ INCUS_FLEET_AUTH_TOKEN="..." ./bin/incus-fleet -config config.local.yaml
 配置参考与完整部署步骤见 [docs/zh-CN/deployment.md](docs/zh-CN/deployment.md)。
 HTTP API 见 [docs/zh-CN/api.md](docs/zh-CN/api.md)，日常操作见
 [用户手册](docs/zh-CN/user-guide.md)。
+
+## 界面截图
+
+集群详情展示宿主机容量、存储池与实例状态:
+
+![集群资源利用率](docs/images/06-cluster-resources.png)
+
+实例抽屉每 3 秒刷新一次 CPU、内存、磁盘与网络监控:
+
+![实例监控面板](docs/images/07-metrics-panel.png)
 
 ## 文档
 

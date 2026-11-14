@@ -379,8 +379,9 @@ Returns `202 Accepted` with the migration object. The task runs asynchronously.
 
 Status progression:
 
-```
-pending → preflight → stopping → transferring → verifying → starting → done
+```mermaid
+flowchart LR
+    pending --> preflight --> stopping --> transferring --> verifying --> starting --> done
 ```
 
 Not every stage occurs. `starting` is skipped for stopped instances with `auto_start=false`;
