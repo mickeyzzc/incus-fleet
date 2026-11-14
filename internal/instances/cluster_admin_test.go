@@ -168,7 +168,7 @@ func TestUpdateNetwork(t *testing.T) {
 		Type:        "bridge",
 		Managed:     true,
 		Description: "old",
-		Config:      api.ConfigMap{"ipv4.address": "10.0.0.0.1/24", "ipv4.nat": "true"},
+		Config:      api.ConfigMap{"ipv4.address": "10.0.0.1/24", "ipv4.nat": "true"},
 	}}}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
@@ -187,7 +187,7 @@ func TestUpdateNetwork(t *testing.T) {
 	if args[0].Name != "incusbr0" || args[0].ETag != "network-etag" || args[0].Network.Description != "new" {
 		t.Fatalf("updated network = %#v", args[0])
 	}
-	if args[0].Network.Config["ipv4.address"] != "10.0.0.0.1/24" {
+	if args[0].Network.Config["ipv4.address"] != "10.0.0.1/24" {
 		t.Fatalf("ipv4.address = %q", args[0].Network.Config["ipv4.address"])
 	}
 	if _, ok := args[0].Network.Config["ipv4.nat"]; ok {

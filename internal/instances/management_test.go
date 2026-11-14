@@ -71,7 +71,7 @@ func TestCreate(t *testing.T) {
 		RootDiskSize: "10GiB",
 		StoragePool:  "fast",
 		Network:      "incusbr1",
-		IPv4:         "10.0.0.0.50",
+		IPv4:         "10.0.0.50",
 		IPv6:         "fd42::50",
 		Start:        &start,
 	})
@@ -104,7 +104,7 @@ func TestCreate(t *testing.T) {
 		t.Fatalf("root = %#v", root)
 	}
 	nic := post.Devices["eth0"]
-	if nic["network"] != "incusbr1" || nic["ipv4.address"] != "10.0.0.0.50" || nic["ipv6.address"] != "fd42::50" {
+	if nic["network"] != "incusbr1" || nic["ipv4.address"] != "10.0.0.50" || nic["ipv6.address"] != "fd42::50" {
 		t.Fatalf("nic = %#v", nic)
 	}
 }
@@ -169,11 +169,11 @@ func TestCreateValidation(t *testing.T) {
 		{"bad disk", CreateRequest{Name: "ok", Image: "debian", RootDiskSize: "huge"}, "root disk size"},
 		{"missing pool", CreateRequest{Name: "ok", Image: "debian", StoragePool: "absent"}, "storage pool"},
 		{"missing network", CreateRequest{Name: "ok", Image: "debian", Network: "absent"}, "network"},
-		{"ip without network", CreateRequest{Name: "ok", Image: "debian", IPv4: "10.0.0.0.5"}, "network is required"},
+		{"ip without network", CreateRequest{Name: "ok", Image: "debian", IPv4: "10.0.0.5"}, "network is required"},
 		{"bad ipv4", CreateRequest{Name: "ok", Image: "debian", Network: "incusbr0", IPv4: "999.1.1.1"}, "ipv4"},
 		{"ipv6 as ipv4", CreateRequest{Name: "ok", Image: "debian", Network: "incusbr0", IPv4: "fd42::5"}, "ipv4"},
 		{"bad ipv6", CreateRequest{Name: "ok", Image: "debian", Network: "incusbr0", IPv6: "not-an-ip"}, "ipv6"},
-		{"ipv4 as ipv6", CreateRequest{Name: "ok", Image: "debian", Network: "incusbr0", IPv6: "10.0.0.0.5"}, "ipv6"},
+		{"ipv4 as ipv6", CreateRequest{Name: "ok", Image: "debian", Network: "incusbr0", IPv6: "10.0.0.5"}, "ipv6"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := svc.Create(context.Background(), "c1", tt.req)
@@ -223,7 +223,7 @@ func TestUpdate(t *testing.T) {
 	memory := "4GiB"
 	size := "20GiB"
 	network := "incusbr1"
-	ipv4 := "10.0.0.0.60"
+	ipv4 := "10.0.0.60"
 	ipv6 := "fd42::60"
 	description := "after"
 
@@ -253,7 +253,7 @@ func TestUpdate(t *testing.T) {
 	if put.Devices["root"]["size"] != "20GiB" || put.Devices["root"]["pool"] != "default" {
 		t.Fatalf("root = %#v", put.Devices["root"])
 	}
-	if put.Devices["eth0"]["network"] != "incusbr1" || put.Devices["eth0"]["ipv4.address"] != "10.0.0.0.60" || put.Devices["eth0"]["ipv6.address"] != "fd42::60" {
+	if put.Devices["eth0"]["network"] != "incusbr1" || put.Devices["eth0"]["ipv4.address"] != "10.0.0.60" || put.Devices["eth0"]["ipv6.address"] != "fd42::60" {
 		t.Fatalf("nic = %#v", put.Devices["eth0"])
 	}
 	if put.Description != "after" {
@@ -263,7 +263,7 @@ func TestUpdate(t *testing.T) {
 
 func TestUpdateClearsLimitsAndIPs(t *testing.T) {
 	instance := manageInstance("vm1")
-	instance.Devices["eth0"]["ipv4.address"] = "10.0.0.0.60"
+	instance.Devices["eth0"]["ipv4.address"] = "10.0.0.60"
 	instance.Devices["eth0"]["ipv6.address"] = "fd42::60"
 	srv := &incusfake.Server{Instance: instance}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
@@ -511,7 +511,7 @@ func TestResources(t *testing.T) {
 			{Name: "default", Driver: "dir", Config: api.ConfigMap{"source": "/srv/incus"}},
 		},
 		Networks: []api.Network{
-			{Name: "incusbr0", Type: "bridge", Managed: true, Config: api.ConfigMap{"ipv4.address": "10.0.0.0.1/24", "ipv6.address": "none"}, UsedBy: []string{"/1.0/instances/vm1"}, Description: "main"},
+			{Name: "incusbr0", Type: "bridge", Managed: true, Config: api.ConfigMap{"ipv4.address": "10.0.0.1/24", "ipv6.address": "none"}, UsedBy: []string{"/1.0/instances/vm1"}, Description: "main"},
 		},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
@@ -529,7 +529,7 @@ func TestResources(t *testing.T) {
 	if resources.StoragePools[1].Driver != "zfs" || len(resources.StoragePools[1].UsedBy) != 1 {
 		t.Fatalf("fast pool = %#v", resources.StoragePools[1])
 	}
-	if len(resources.Networks) != 1 || resources.Networks[0].IPv4 != "10.0.0.0.1/24" || resources.Networks[0].IPv6 != "none" {
+	if len(resources.Networks) != 1 || resources.Networks[0].IPv4 != "10.0.0.1/24" || resources.Networks[0].IPv6 != "none" {
 		t.Fatalf("networks = %#v", resources.Networks)
 	}
 	if !resources.Networks[0].Managed || resources.Networks[0].Description != "main" {
@@ -538,7 +538,7 @@ func TestResources(t *testing.T) {
 	if resources.StoragePools[0].Config["source"] != "/srv/incus" {
 		t.Fatalf("default pool config = %#v", resources.StoragePools[0].Config)
 	}
-	if resources.Networks[0].Config["ipv4.address"] != "10.0.0.0.1/24" {
+	if resources.Networks[0].Config["ipv4.address"] != "10.0.0.1/24" {
 		t.Fatalf("network config = %#v", resources.Networks[0].Config)
 	}
 

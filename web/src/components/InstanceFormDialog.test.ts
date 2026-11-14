@@ -75,7 +75,7 @@ describe('InstanceFormDialog', () => {
     await wrapper.find('input[placeholder="e.g. 512MiB or 2GiB"]').setValue('1GiB')
     await wrapper.find('input[placeholder="e.g. 10GiB"]').setValue('10GiB')
     selectAt(wrapper, 3, 'incusbr0')
-    await wrapper.find('input[placeholder="e.g. 10.0.0.0.50"]').setValue('10.0.0.0.50')
+    await wrapper.find('input[placeholder="e.g. 10.0.0.50"]').setValue('10.0.0.50')
     await wrapper.find('input[placeholder="e.g. fd42::50"]').setValue('fd42::50')
 
     await buttonByText(wrapper, 'Create instance').trigger('click')
@@ -93,7 +93,7 @@ describe('InstanceFormDialog', () => {
       root_disk_size: '10GiB',
       storage_pool: 'default',
       network: 'incusbr0',
-      ipv4: '10.0.0.0.50',
+      ipv4: '10.0.0.50',
       ipv6: 'fd42::50',
     })
     expect(ElMessage.success).toHaveBeenCalledWith('Created newct.')
@@ -151,7 +151,7 @@ describe('InstanceFormDialog', () => {
         eth0: {
           type: 'nic',
           network: 'incusbr0',
-          'ipv4.address': '10.0.0.0.50',
+          'ipv4.address': '10.0.0.50',
           'ipv6.address': 'fd42::50',
         },
       },
@@ -165,7 +165,7 @@ describe('InstanceFormDialog', () => {
 
     await wrapper.find('input[placeholder="e.g. 512MiB or 2GiB"]').setValue('')
     await wrapper.find('input[placeholder="e.g. 10GiB"]').setValue('20GiB')
-    await wrapper.find('input[placeholder="e.g. 10.0.0.0.50"]').setValue('10.0.0.0.60')
+    await wrapper.find('input[placeholder="e.g. 10.0.0.50"]').setValue('10.0.0.60')
 
     await buttonByText(wrapper, 'Save changes').trigger('click')
     await flushPromises()
@@ -177,7 +177,7 @@ describe('InstanceFormDialog', () => {
       root_disk_size: '20GiB',
       device: 'eth0',
       network: 'incusbr0',
-      ipv4: '10.0.0.0.60',
+      ipv4: '10.0.0.60',
       ipv6: 'fd42::50',
     })
     expect(ElMessage.success).toHaveBeenCalledWith('Updated web.')

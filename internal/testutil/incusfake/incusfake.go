@@ -1092,7 +1092,7 @@ func (s *Server) GetNetworks() ([]api.Network, error) {
 		return s.Networks, nil
 	}
 
-	return []api.Network{{Name: "incusbr0", Type: "bridge", Managed: true, Config: api.ConfigMap{"ipv4.address": "10.0.0.0.1/24", "ipv6.address": "none"}}}, nil
+	return []api.Network{{Name: "incusbr0", Type: "bridge", Managed: true, Config: api.ConfigMap{"ipv4.address": "10.0.0.1/24", "ipv6.address": "none"}}}, nil
 }
 
 // GetStoragePoolResources implements clusters.InstanceServer.
@@ -1190,7 +1190,7 @@ func (s *Server) GetNetwork(name string) (*api.Network, string, error) {
 		}
 	}
 	if s.Networks == nil && name == "incusbr0" {
-		return &api.Network{Name: "incusbr0", Type: "bridge", Managed: true, Config: api.ConfigMap{"ipv4.address": "10.0.0.0.1/24", "ipv6.address": "none"}}, "network-etag", nil
+		return &api.Network{Name: "incusbr0", Type: "bridge", Managed: true, Config: api.ConfigMap{"ipv4.address": "10.0.0.1/24", "ipv6.address": "none"}}, "network-etag", nil
 	}
 
 	return nil, "", api.StatusErrorf(http.StatusNotFound, "Network %q not found", name)

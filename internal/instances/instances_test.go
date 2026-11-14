@@ -79,9 +79,9 @@ func fullInstance(name, instanceType, status string, code api.StatusCode) api.In
 			Network: map[string]api.InstanceStateNetwork{
 				"eth0": {
 					Addresses: []api.InstanceStateNetworkAddress{
-						{Family: "inet", Address: "10.0.0.0.5"},
+						{Family: "inet", Address: "10.0.0.5"},
 						{Family: "inet", Address: "127.0.0.1"},
-						{Family: "inet", Address: "10.0.0.0.5"},
+						{Family: "inet", Address: "10.0.0.5"},
 						{Family: "inet6", Address: "fd42::5"},
 						{Family: "inet6", Address: "fe80::1"},
 					},
@@ -111,7 +111,7 @@ func TestList(t *testing.T) {
 	if got.Cluster != "c1" || got.Type != "virtual-machine" || got.Status != "Running" {
 		t.Fatalf("summary = %#v", got)
 	}
-	if len(got.IPv4) != 1 || got.IPv4[0] != "10.0.0.0.5" || len(got.IPv6) != 1 || got.IPv6[0] != "fd42::5" {
+	if len(got.IPv4) != 1 || got.IPv4[0] != "10.0.0.5" || len(got.IPv6) != 1 || got.IPv6[0] != "fd42::5" {
 		t.Fatalf("addresses = %#v %#v", got.IPv4, got.IPv6)
 	}
 	if got.Memory != 1234 || got.Processes != 12 || !got.StartedAt.Equal(startedAt()) {

@@ -46,7 +46,7 @@ function sampleResources(): ClusterResources {
         name: 'incusbr0',
         type: 'bridge',
         managed: true,
-        ipv4: '10.0.0.0.1/24',
+        ipv4: '10.0.0.1/24',
         ipv6: 'none',
         used_by: ['/1.0/instances/web'],
         locations: [],

@@ -277,7 +277,7 @@ export default {
     networkPhysical: '{name}（物理网卡，由局域网 DHCP 分配）',
     networkPhysicalHint: '物理网卡：实例直接接入局域网，由路由器 DHCP 分配同网段地址。',
     ipv4: '静态 IPv4',
-    ipv4Placeholder: '例如 10.0.0.0.50',
+    ipv4Placeholder: '例如 10.0.0.50',
     ipv6: '静态 IPv6',
     ipv6Placeholder: '例如 fd42::50',
     start: '创建后启动',

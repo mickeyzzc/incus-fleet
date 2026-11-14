@@ -278,7 +278,7 @@ export default {
     networkPhysical: '{name} (physical, LAN DHCP)',
     networkPhysicalHint: 'Physical NIC: the instance joins the LAN directly and takes its address from the router DHCP server.',
     ipv4: 'Static IPv4',
-    ipv4Placeholder: 'e.g. 10.0.0.0.50',
+    ipv4Placeholder: 'e.g. 10.0.0.50',
     ipv6: 'Static IPv6',
     ipv6Placeholder: 'e.g. fd42::50',
     start: 'Start after creation',

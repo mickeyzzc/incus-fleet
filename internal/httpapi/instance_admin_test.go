@@ -154,13 +154,13 @@ func TestInstanceAdminEndpoints(t *testing.T) {
 	}
 
 	rec = f.request(t, http.MethodPost, "/api/v1/clusters/c1/instances/web/devices", map[string]any{
-		"name": "eth1", "type": "nic", "network": "incusbr0", "ipv4": "10.0.0.0.9",
+		"name": "eth1", "type": "nic", "network": "incusbr0", "ipv4": "10.0.0.9",
 	}, cookie, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("attach nic status = %d body = %s", rec.Code, rec.Body.String())
 	}
 	nic := source.UpdateArgs()[2].Instance.Devices["eth1"]
-	if nic["network"] != "incusbr0" || nic["ipv4.address"] != "10.0.0.0.9" {
+	if nic["network"] != "incusbr0" || nic["ipv4.address"] != "10.0.0.9" {
 		t.Fatalf("attached nic = %#v", nic)
 	}
 

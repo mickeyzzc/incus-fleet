@@ -81,7 +81,7 @@ describe('InstanceDevices', () => {
 
     const inputs = dialog.findAll('input[type="text"]')
     await inputs[0]?.setValue('eth1')
-    await inputs[1]?.setValue('10.0.0.0.9')
+    await inputs[1]?.setValue('10.0.0.9')
 
     await dialog.findAll('button').at(-1)?.trigger('click')
     await flushPromises()
@@ -90,7 +90,7 @@ describe('InstanceDevices', () => {
       name: 'eth1',
       type: 'nic',
       network: 'incusbr0',
-      ipv4: '10.0.0.0.9',
+      ipv4: '10.0.0.9',
     })
     expect(ElMessage.success).toHaveBeenCalledWith('Device eth1 attached.')
   })

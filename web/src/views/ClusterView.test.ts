@@ -160,7 +160,7 @@ describe('ClusterView', () => {
     expect(wrapper.text()).toContain('/srv/incus')
     expect(wrapper.text()).toContain('Networks')
     expect(wrapper.text()).toContain('incusbr0')
-    expect(wrapper.text()).toContain('10.0.0.0.1/24')
+    expect(wrapper.text()).toContain('10.0.0.1/24')
   })
 
   it('opens the create dialog for the current cluster', async () => {

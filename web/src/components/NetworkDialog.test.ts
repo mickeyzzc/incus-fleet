@@ -15,7 +15,7 @@ function network(overrides: Partial<NetworkResource> = {}): NetworkResource {
     type: 'bridge',
     managed: true,
     description: 'main bridge',
-    config: { 'ipv4.address': '10.0.0.0.1/24' },
+    config: { 'ipv4.address': '10.0.0.1/24' },
     used_by: [],
     locations: [],
     ...overrides,
@@ -89,7 +89,7 @@ describe('NetworkDialog', () => {
 
     expect(api.updateNetwork).toHaveBeenCalledWith('c1', 'incusbr0', {
       description: 'main bridge',
-      config: { 'ipv4.address': '10.0.0.0.1/24' },
+      config: { 'ipv4.address': '10.0.0.1/24' },
     })
   })
 

@@ -388,7 +388,7 @@ func TestInstanceManagementEndpoints(t *testing.T) {
 			Name:    "incusbr0",
 			Type:    "bridge",
 			Managed: true,
-			Config:  api.ConfigMap{"ipv4.address": "10.0.0.0.1/24"},
+			Config:  api.ConfigMap{"ipv4.address": "10.0.0.1/24"},
 		}},
 	}
 	target := &incusfake.Server{}
@@ -402,7 +402,7 @@ func TestInstanceManagementEndpoints(t *testing.T) {
 		"cpu":          "2",
 		"memory":       "1GiB",
 		"network":      "incusbr0",
-		"ipv4":         "10.0.0.0.50",
+		"ipv4":         "10.0.0.50",
 		"storage_pool": "default",
 	}, cookie, "")
 	if rec.Code != http.StatusCreated {
@@ -468,7 +468,7 @@ func TestInstanceManagementEndpoints(t *testing.T) {
 	if len(resources.StoragePools) != 1 || resources.StoragePools[0].Name != "default" || resources.StoragePools[0].Source != "/srv/incus" {
 		t.Fatalf("pools = %#v", resources.StoragePools)
 	}
-	if len(resources.Networks) != 1 || resources.Networks[0].IPv4 != "10.0.0.0.1/24" {
+	if len(resources.Networks) != 1 || resources.Networks[0].IPv4 != "10.0.0.1/24" {
 		t.Fatalf("networks = %#v", resources.Networks)
 	}
 }
@@ -538,7 +538,7 @@ func TestClusterAdminEndpoints(t *testing.T) {
 			Name:    "incusbr0",
 			Type:    "bridge",
 			Managed: true,
-			Config:  api.ConfigMap{"ipv4.address": "10.0.0.0.1/24"},
+			Config:  api.ConfigMap{"ipv4.address": "10.0.0.1/24"},
 		}},
 		Profiles: []api.Profile{{
 			Name:    "web",
@@ -603,7 +603,7 @@ func TestClusterAdminEndpoints(t *testing.T) {
 		t.Fatalf("update network status = %d body = %s", rec.Code, rec.Body.String())
 	}
 	networkUpdates := source.UpdateNetworkArgs()
-	if len(networkUpdates) != 1 || networkUpdates[0].Network.Config["ipv4.address"] != "10.0.0.0.1/24" || networkUpdates[0].Network.Config["ipv4.nat"] != "false" {
+	if len(networkUpdates) != 1 || networkUpdates[0].Network.Config["ipv4.address"] != "10.0.0.1/24" || networkUpdates[0].Network.Config["ipv4.nat"] != "false" {
 		t.Fatalf("update network args = %#v", networkUpdates)
 	}
 

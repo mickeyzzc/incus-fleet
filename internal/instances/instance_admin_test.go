@@ -199,7 +199,7 @@ func TestAttachDetachDevice(t *testing.T) {
 		t.Fatalf("disk device = %#v", device)
 	}
 
-	detail, err = svc.AttachDevice(ctx, "c1", "web", DeviceRequest{Name: "eth1", Type: "nic", Network: "incusbr0", IPv4: "10.0.0.0.9"})
+	detail, err = svc.AttachDevice(ctx, "c1", "web", DeviceRequest{Name: "eth1", Type: "nic", Network: "incusbr0", IPv4: "10.0.0.9"})
 	if err != nil {
 		t.Fatalf("AttachDevice() nic error = %v", err)
 	}
@@ -207,7 +207,7 @@ func TestAttachDetachDevice(t *testing.T) {
 		t.Fatalf("nic detail = %#v", detail)
 	}
 	device = srv.UpdateArgs()[1].Instance.Devices["eth1"]
-	if device["type"] != "nic" || device["network"] != "incusbr0" || device["ipv4.address"] != "10.0.0.0.9" {
+	if device["type"] != "nic" || device["network"] != "incusbr0" || device["ipv4.address"] != "10.0.0.9" {
 		t.Fatalf("nic device = %#v", device)
 	}
 
