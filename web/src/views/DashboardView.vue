@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh, QuestionFilled } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
+import HelpDialog from '@/components/HelpDialog.vue'
 import StorageBar from '@/components/StorageBar.vue'
 import type { ClusterSummary } from '@/api/types'
 import { useClustersStore } from '@/stores/clusters'
@@ -17,6 +18,8 @@ const instances = useInstancesStore()
 const migrations = useMigrationsStore()
 const { t } = useI18n()
 
+const helpDialogOpen = ref(false)
+
 const totalInstances = computed(
   () => clusters.items.reduce((total, cluster) => total + cluster.instances.total, 0),
 )
@@ -25,6 +28,56 @@ const runningInstances = computed(
 )
 const totalVMs = computed(
   () => clusters.items.reduce((total, cluster) => total + cluster.instances.virtual_machines, 0),
+)
+
+/** Fleet-wide CPU capacity across online clusters. */
+const fleetCPU = computed(() => {
+  const online = clusters.items.filter((cluster) => cluster.online && cluster.cpu)
+  return online.reduce((total, cluster) => total + (cluster.cpu?.total ?? 0), 0)
+})
+
+/** Fleet-wide memory usage and capacity across online clusters. */
+const fleetMemory = computed(() => {
+  const online = clusters.items.filter((cluster) => cluster.online && cluster.memory)
+  return online.reduce(
+    (acc, cluster) => ({
+      used: acc.used + (cluster.memory?.used ?? 0),
+      total: acc.total + (cluster.memory?.total ?? 0),
+    }),
+    { used: 0, total: 0 },
+  )
+})
+
+const fleetMemoryPercent = computed(() => {
+  if (fleetMemory.value.total <= 0) {
+    return 0
+  }
+
+  return Math.round((fleetMemory.value.used / fleetMemory.value.total) * 100)
+})
+
+/** Fleet-wide storage usage and capacity across online clusters. */
+const fleetStorage = computed(() => {
+  const online = clusters.items.filter((cluster) => cluster.online)
+  return online.reduce(
+    (acc, cluster) => ({
+      used: acc.used + cluster.storage.used,
+      total: acc.total + cluster.storage.total,
+    }),
+    { used: 0, total: 0 },
+  )
+})
+
+const fleetStoragePercent = computed(() => {
+  if (fleetStorage.value.total <= 0) {
+    return 0
+  }
+
+  return Math.round((fleetStorage.value.used / fleetStorage.value.total) * 100)
+})
+
+const fleetMembers = computed(() =>
+  clusters.items.reduce((total, cluster) => total + cluster.members.length, 0),
 )
 
 onMounted(async () => {
@@ -79,6 +132,9 @@ function memoryShare(cluster: ClusterSummary): string {
       <div class="page-actions">
         <el-button :icon="Refresh" :loading="clusters.loading" @click="refresh">
           {{ t('common.refresh') }}
+        </el-button>
+        <el-button :icon="QuestionFilled" @click="helpDialogOpen = true">
+          {{ t('common.help') }}
         </el-button>
       </div>
     </div>
@@ -208,5 +264,107 @@ function memoryShare(cluster: ClusterSummary): string {
         class="panel"
       />
     </section>
+
+    <section class="panel resource-panel">
+      <div class="panel-body">
+        <div class="section-heading">
+          <h3 class="section-title">{{ t('metrics.clusterResource') }}</h3>
+        </div>
+        <div class="resource-grid">
+          <div class="resource-item">
+            <span class="resource-label">{{ t('common.cpu') }}</span>
+            <span class="resource-value">{{ fleetCPU }} <small>vCPU</small></span>
+            <span class="resource-hint">{{ t('dashboard.clustered') }} · {{ fleetMembers }} {{ t('cluster.members') }}</span>
+          </div>
+          <div class="resource-item">
+            <span class="resource-label">{{ t('common.memory') }}</span>
+            <span class="resource-value">
+              {{ formatBytes(fleetMemory.used) }} <small>/ {{ formatBytes(fleetMemory.total) }}</small>
+            </span>
+            <div class="resource-bar">
+              <div class="resource-bar-fill memory" :style="{ width: `${fleetMemoryPercent}%` }"></div>
+            </div>
+          </div>
+          <div class="resource-item">
+            <span class="resource-label">{{ t('metrics.disk') }}</span>
+            <span class="resource-value">
+              {{ formatBytes(fleetStorage.used) }} <small>/ {{ formatBytes(fleetStorage.total) }}</small>
+            </span>
+            <div class="resource-bar">
+              <div class="resource-bar-fill storage" :style="{ width: `${fleetStoragePercent}%` }"></div>
+            </div>
+          </div>
+          <div class="resource-item">
+            <span class="resource-label">{{ t('dashboard.instances') }}</span>
+            <span class="resource-value">{{ runningInstances }} <small>/ {{ totalInstances }}</small></span>
+            <span class="resource-hint">{{ t('dashboard.running', { count: runningInstances }) }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <HelpDialog v-model="helpDialogOpen" />
   </div>
 </template>
+
+<style scoped>
+.resource-panel {
+  margin-top: 4px;
+}
+
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+}
+
+.resource-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resource-label {
+  font-size: 12px;
+  color: var(--fleet-ink-soft, var(--el-text-color-secondary));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.resource-value {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.resource-value small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--fleet-ink-soft, var(--el-text-color-secondary));
+}
+
+.resource-hint {
+  font-size: 12px;
+  color: var(--fleet-ink-soft, var(--el-text-color-secondary));
+}
+
+.resource-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--el-fill-color);
+  overflow: hidden;
+}
+
+.resource-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.resource-bar-fill.memory {
+  background: linear-gradient(90deg, #3b82f6, #06b6d4);
+}
+
+.resource-bar-fill.storage {
+  background: linear-gradient(90deg, #10b981, #22c55e);
+}
+</style>

@@ -286,6 +286,11 @@ func (s *Service) DeleteVolume(clusterName, pool, name string) error {
 }
 
 // AttachDevice adds one disk or NIC device to an instance.
+//
+// Virtual machines cannot take a bare pool-backed disk (dir pools reject it
+// with a confusing Incus error), so a disk attach that names a pool but no
+// source first provisions a custom volume of the requested size and mounts
+// that; reruns reuse the same volume.
 func (s *Service) AttachDevice(ctx context.Context, clusterName, name string, req DeviceRequest) (Detail, error) {
 	deviceName := strings.TrimSpace(req.Name)
 	if validateName(deviceName) != nil {
@@ -304,6 +309,16 @@ func (s *Service) AttachDevice(ctx context.Context, clusterName, name string, re
 		}
 
 		return Detail{}, fmt.Errorf("instances: get %s:%s: %w", clusterName, name, err)
+	}
+
+	if isVMDiskWithoutSource(instance, req) {
+		volumeName, err := ensureVMDiskVolume(client, clusterName, name, deviceName, req.Pool, req.Size)
+		if err != nil {
+			return Detail{}, err
+		}
+
+		req.Source = volumeName
+		req.Size = ""
 	}
 
 	put := instance.InstancePut
@@ -334,6 +349,56 @@ func (s *Service) AttachDevice(ctx context.Context, clusterName, name string, re
 	}
 
 	return s.Get(clusterName, name)
+}
+
+// isVMDiskWithoutSource reports whether the request needs a backing custom
+// volume: a disk device for a virtual machine that names a pool but neither
+// an existing volume nor a host path.
+func isVMDiskWithoutSource(instance *api.Instance, req DeviceRequest) bool {
+	return instance.Type == "virtual-machine" &&
+		strings.TrimSpace(req.Type) == "disk" &&
+		strings.TrimSpace(req.Source) == "" &&
+		strings.TrimSpace(req.Pool) != ""
+}
+
+// ensureVMDiskVolume creates (or reuses) a custom volume sized for one VM
+// disk device and returns its name.
+func ensureVMDiskVolume(
+	client clusters.InstanceServer,
+	clusterName, instanceName, deviceName, pool, size string,
+) (string, error) {
+	volumeName := fmt.Sprintf("dev-%s-%s", instanceName, deviceName)
+
+	volumes, err := client.GetStoragePoolVolumes(pool)
+	if err != nil {
+		return "", fmt.Errorf("instances: list volumes on %s/%s: %w", clusterName, pool, err)
+	}
+	for _, volume := range volumes {
+		if volume.Name == volumeName && volume.Type == volumeType {
+			return volumeName, nil
+		}
+	}
+
+	config := map[string]string{}
+	if trimmed := strings.TrimSpace(size); trimmed != "" {
+		if err := validateSize("size", trimmed); err != nil {
+			return "", err
+		}
+
+		config["size"] = trimmed
+	}
+
+	post := api.StorageVolumesPost{
+		Name:        volumeName,
+		Type:        volumeType,
+		ContentType: "filesystem",
+		Config:      config,
+	}
+	if err := client.CreateStoragePoolVolume(pool, post); err != nil {
+		return "", fmt.Errorf("instances: create disk volume %s/%s/%s: %w", clusterName, pool, volumeName, err)
+	}
+
+	return volumeName, nil
 }
 
 // DetachDevice removes one locally defined device from an instance.

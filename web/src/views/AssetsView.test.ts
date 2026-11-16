@@ -132,9 +132,10 @@ describe('AssetsView', () => {
   it('deletes a script after confirmation', async () => {
     const wrapper = await mountView()
 
-    const buttons = wrapper.findAll('button').filter((b) => b.text() !== '')
-    // Last action button in the scripts table is the delete control.
-    await buttons.at(-1)!.trigger('click')
+    // The scripts table is the last table with delete buttons on this page
+    // (images and ISO tables render empty in tests).
+    const deleteButtons = wrapper.findAll('button').filter((b) => b.text() === 'Delete')
+    await deleteButtons.at(-1)!.trigger('click')
     await flushPromises()
 
     expect(api.deleteScript).toHaveBeenCalledWith('script-1')
