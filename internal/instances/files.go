@@ -6,6 +6,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 	incus "github.com/lxc/incus/v7/client"
@@ -14,7 +15,10 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/apitypes"
 )
 
-const uploadFileMode = 0o644
+const (
+	uploadFileMode    = 0o644
+	consoleRetryDelay = 700 * time.Millisecond
+)
 
 // ExecRequest starts an interactive command session.
 type ExecRequest struct {
@@ -28,30 +32,49 @@ type ExecRequest struct {
 // ConsoleOp opens an interactive console operation for an instance. The
 // relay reads the data and control channels from the operation metadata
 // secrets and waits for completion.
+//
+// Force is set so a reconnecting session always takes over: when the
+// browser closes a terminal the previous Incus console operation takes a
+// moment to release, and without force the immediate reconnect fails with
+// "This console is already connected". The takeover itself can still race
+// the teardown ("attaching to the container failed"), so the open is
+// retried briefly before giving up.
 func (s *Service) ConsoleOp(clusterName, name string) (incus.Operation, error) {
 	client, err := s.client(clusterName)
 	if err != nil {
 		return nil, err
 	}
 
-	// The relay reads the data and control channels from the operation
-	// metadata secrets directly; the callback only satisfies the SDK check.
-	op, _, err := client.ConsoleInstanceDynamic(name, api.InstanceConsolePost{
-		Type:   "console",
-		Width:  80,
-		Height: 25,
-	}, &incus.InstanceConsoleArgs{
-		Control: func(*websocket.Conn) {},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("instances: console %s:%s: %w", clusterName, name, err)
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		if attempt > 0 {
+			time.Sleep(consoleRetryDelay)
+		}
+
+		// The relay reads the data and control channels from the operation
+		// metadata secrets directly; the callback only satisfies the SDK check.
+		op, _, err := client.ConsoleInstanceDynamic(name, api.InstanceConsolePost{
+			Type:   "console",
+			Force:  true,
+			Width:  80,
+			Height: 25,
+		}, &incus.InstanceConsoleArgs{
+			Control: func(*websocket.Conn) {},
+		})
+		if err == nil {
+			return op, nil
+		}
+
+		lastErr = err
 	}
 
-	return op, nil
+	return nil, fmt.Errorf("instances: console %s:%s: %w", clusterName, name, lastErr)
 }
 
 // VgaOp opens the graphical console of a running virtual machine. The data
 // channel carries the raw SPICE protocol, which the browser client speaks.
+// Force mirrors ConsoleOp so SPICE reconnects never race a releasing
+// session.
 func (s *Service) VgaOp(clusterName, name string) (incus.Operation, error) {
 	client, err := s.client(clusterName)
 	if err != nil {
@@ -59,7 +82,8 @@ func (s *Service) VgaOp(clusterName, name string) (incus.Operation, error) {
 	}
 
 	op, _, err := client.ConsoleInstanceDynamic(name, api.InstanceConsolePost{
-		Type: "vga",
+		Type:  "vga",
+		Force: true,
 	}, &incus.InstanceConsoleArgs{
 		Control: func(*websocket.Conn) {},
 	})
