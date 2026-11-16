@@ -156,3 +156,118 @@ describe('AssetsView', () => {
     expect(ElMessage.error).toHaveBeenCalled()
   })
 })
+
+describe('AssetsView fleet-wide images and ISOs', () => {
+  const imageFixture = {
+    cluster: 'c1',
+    fingerprint: 'fp-1234567890abcdef',
+    alias: 'debian/13',
+    type: 'container',
+    os: 'debian',
+    release: 'trixie',
+    size: 1024 * 1024,
+    cached: false,
+    created_at: '2026-11-16T00:00:00Z',
+  }
+  const isoFixture = { name: 'debian.iso', pool: 'default', size: '1000', cluster: 'c1' }
+
+  beforeEach(() => {
+    vi.mocked(api.listClusters).mockResolvedValue([
+      { name: 'c1', display_name: 'C1', online: true },
+      { name: 'c2', display_name: 'C2', online: true },
+    ] as never)
+    vi.mocked(api.listAllImages).mockResolvedValue([imageFixture])
+    vi.mocked(api.listAllISOs).mockResolvedValue([isoFixture])
+    vi.mocked(api.copyImage).mockResolvedValue(undefined)
+    vi.mocked(api.deleteISO).mockResolvedValue(undefined)
+    vi.mocked(api.importISOWithProgress).mockResolvedValue({ name: 'debian.iso', pool: 'default' })
+  })
+
+  it('renders images and ISOs from every cluster with cluster tags', async () => {
+    const wrapper = await mountView()
+
+    expect(api.listAllImages).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('debian/13')
+    expect(wrapper.text()).toContain('fp-123456789…')
+    expect(wrapper.text()).toContain('debian.iso')
+  })
+
+  it('copies an image to a target cluster through the distribute dialog', async () => {
+    // Real select: the global ElSelect stub does not emit selection updates.
+    const wrapper = mount(AssetsView, {
+      props: { modelValue: undefined },
+      global: {
+        plugins: [ElementPlus],
+        stubs: { ElSelect: false, ElOption: false, teleport: false },
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    const distribute = wrapper.findAll('button').find((b) => b.text() === 'Distribute')!
+    await distribute.trigger('click')
+    await flushPromises()
+
+    const wrapperEl = wrapper.find('.el-select__wrapper')
+    await wrapperEl.trigger('click')
+    await flushPromises()
+    const option = [...document.querySelectorAll('.el-select-dropdown__item')].find((o) => o.textContent?.trim() === 'C2')!
+    option.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    const dialog = wrapper.findAllComponents({ name: 'ElDialog' }).find((d) => d.text().includes('Target cluster'))!
+    await dialog.findAll('button').find((b) => b.text() === 'Distribute')!.trigger('click')
+    await flushPromises()
+
+    expect(api.copyImage).toHaveBeenCalledWith('c1', 'fp-1234567890abcdef', {
+      target_cluster: 'c2',
+      alias: 'debian/13',
+    })
+
+    wrapper.unmount()
+  })
+
+  it('deletes an ISO after confirmation', async () => {
+    const wrapper = await mountView()
+
+    const deleteButtons = wrapper.findAll('button').filter((b) => b.text() === 'Delete')
+    await deleteButtons.at(-1)!.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteISO).toHaveBeenCalledWith('c1', 'default', 'debian.iso')
+  })
+
+  it('uploads an ISO through the background upload task with progress', async () => {
+    const wrapper = await mountView()
+
+    // open the upload dialog
+    const uploadButton = wrapper.findAll('button').find((b) => b.text() === 'Upload ISO')!
+    await uploadButton.trigger('click')
+    await flushPromises()
+
+    // pick a file through the file input
+    const input = wrapper.find('input[type="file"]')
+    expect(input.exists()).toBe(true)
+    const file = new File(['iso-bytes'], 'debian.iso', { type: 'application/octet-stream' })
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(api.importISOWithProgress).toHaveBeenCalledWith(
+      'c1',
+      { file, pool: 'default' },
+      expect.any(Function),
+    )
+  })
+})
+
+  it('deletes an image after confirmation', async () => {
+    const wrapper = await mountView()
+    vi.mocked(api.deleteImage).mockResolvedValue(undefined)
+
+    const imageRow = wrapper.findAll('.el-table__row').find((r) => r.text().includes('debian/13'))!
+    await imageRow.findAll('button').find((b) => b.text() === 'Delete')!.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteImage).toHaveBeenCalledWith('c1', 'fp-1234567890abcdef')
+  })

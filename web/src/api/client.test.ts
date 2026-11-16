@@ -533,3 +533,160 @@ describe('ApiClient', () => {
     }
   })
 })
+
+describe('ApiClient fleet-wide inventory and uploads', () => {
+  function routingClient(responses: Array<{ match: (url: string) => boolean; body: unknown }>) {
+    const fetchImpl = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      for (const route of responses) {
+        if (route.match(url)) {
+          return mockResponse(route.body)
+        }
+      }
+      return mockResponse({}, { status: 404, statusText: 'not found' })
+    })
+
+    return {
+      fetchImpl,
+      client: new ApiClient({ baseURL: 'https://fleet.local/', fetchImpl }),
+    }
+  }
+
+  it('aggregates images across clusters and tolerates offline clusters', async () => {
+    const { client } = routingClient([
+      { match: (u) => u.endsWith('/api/v1/clusters'), body: { clusters: [{ name: 'c1' }, { name: 'c2' }] } },
+      { match: (u) => u.includes('/clusters/c1/images'), body: { images: [{ fingerprint: 'fp1', aliases: ['debian/13'], size: 100, cached: false, created_at: 't' }] } },
+      { match: (u) => u.includes('/clusters/c2/images'), body: { images: [{ fingerprint: 'fp2', aliases: [], size: 5, cached: true, created_at: 't2' }] } },
+    ])
+
+    const images = await client.listAllImages()
+    expect(images).toHaveLength(2)
+    expect(images[0]).toMatchObject({ cluster: 'c1', fingerprint: 'fp1', alias: 'debian/13' })
+    expect(images[1]).toMatchObject({ cluster: 'c2', alias: '', cached: true })
+  })
+
+  it('keeps clusters with failing image lists out of the result', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/api/v1/clusters')) {
+        return mockResponse({ clusters: [{ name: 'good' }, { name: 'bad' }] })
+      }
+      if (url.includes('/clusters/good/images')) {
+        return mockResponse({ images: [{ fingerprint: 'fp', aliases: ['alpine'], size: 1, cached: true, created_at: 't' }] })
+      }
+      return mockResponse({}, { status: 503, statusText: 'down' })
+    })
+    const client = new ApiClient({ baseURL: 'https://fleet.local/', fetchImpl })
+
+    const images = await client.listAllImages()
+    expect(images).toHaveLength(1)
+    expect(images[0]?.cluster).toBe('good')
+  })
+
+  it('tags every ISO volume with its cluster', async () => {
+    const { client } = routingClient([
+      { match: (u) => u.endsWith('/api/v1/clusters'), body: { clusters: [{ name: 'c9' }] } },
+      { match: (u) => u.includes('/clusters/c9/iso'), body: { isos: [{ name: 'debian', pool: 'default', size: '10' }] } },
+    ])
+
+    const isos = await client.listAllISOs()
+    expect(isos).toEqual([{ name: 'debian', pool: 'default', size: '10', cluster: 'c9' }])
+  })
+
+  it('reports upload progress and resolves the parsed body', async () => {
+    class FakeXHR {
+      status = 201
+      response = { name: 'debian.iso', pool: 'default' }
+      responseType = ''
+      upload = { onprogress: null as ((event: ProgressEvent) => void) | null }
+      onload: ((event: ProgressEvent) => void) | null = null
+      open() {}
+      send() {
+        this.upload?.onprogress?.(new ProgressEvent('progress', { loaded: 500, total: 1000, lengthComputable: true }))
+        this.onload?.(new ProgressEvent('load'))
+      }
+    }
+    const OriginalXHR = globalThis.XMLHttpRequest
+    ;(globalThis as { XMLHttpRequest: unknown }).XMLHttpRequest = FakeXHR
+
+    try {
+      const client = new ApiClient({ baseURL: 'https://fleet.local/', fetchImpl: vi.fn() })
+      const seen: Array<[number, number]> = []
+      const result = await client.importISOWithProgress(
+        'c1',
+        { file: new File(['data'], 'debian.iso'), pool: 'default' },
+        (loaded, total) => seen.push([loaded, total]),
+      )
+
+      expect(result).toEqual({ name: 'debian.iso', pool: 'default' })
+      expect(seen).toEqual([[500, 1000]])
+    } finally {
+      ;(globalThis as { XMLHttpRequest: unknown }).XMLHttpRequest = OriginalXHR
+    }
+  })
+})
+
+describe('ApiClient upload error handling', () => {
+  it('rejects with an ApiError when the upload request errors', async () => {
+    class FailingXHR {
+      status = 0
+      response = null
+      responseType = ''
+      upload = { onprogress: null as ((event: ProgressEvent) => void) | null }
+      onerror: ((event: ProgressEvent) => void) | null = null
+      open() {}
+      send() {
+        this.onerror?.(new ProgressEvent('error'))
+      }
+    }
+    const OriginalXHR = globalThis.XMLHttpRequest
+    ;(globalThis as { XMLHttpRequest: unknown }).XMLHttpRequest = FailingXHR
+
+    try {
+      const client = new ApiClient({ baseURL: 'https://fleet.local/', fetchImpl: vi.fn() })
+      await expect(
+        client.importISOWithProgress('c1', { file: new File(['x'], 'a.iso') }, () => {}),
+      ).rejects.toMatchObject({ code: 'network_error' })
+    } finally {
+      ;(globalThis as { XMLHttpRequest: unknown }).XMLHttpRequest = OriginalXHR
+    }
+  })
+})
+
+describe('ApiClient remaining documented endpoints', () => {
+  it('hits resources, instance mutation, and file upload endpoints', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ resources: {} }))
+    const file = new File(['x'], 'f.txt')
+
+    await client.getResources('c1')
+    await client.createInstance('c1', { name: 'web', image: 'debian/13' })
+    await client.updateInstance('c1', 'web', { cpu: '2' })
+    await client.instanceAction('c1', 'web', { action: 'start' })
+    await client.uploadInstanceFile('c1', 'web', '/tmp/f.txt', file)
+    await client.prepareSPICE('c1', 'web')
+
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0]))
+    expect(urls).toContain('https://fleet.local/api/v1/clusters/c1/resources')
+    expect(urls).toContain('https://fleet.local/api/v1/clusters/c1/instances')
+    expect(urls).toContain('https://fleet.local/api/v1/clusters/c1/instances/web')
+    expect(urls).toContain('https://fleet.local/api/v1/clusters/c1/instances/web/state')
+    expect(urls).toContain('https://fleet.local/api/v1/clusters/c1/instances/web/files?path=%2Ftmp%2Ff.txt')
+    expect(urls).toContain('https://fleet.local/api/v1/clusters/c1/instances/web/spice/prepare')
+  })
+
+  it('builds console, VGA, SPICE, and download URLs', () => {
+    const { client } = clientWith()
+    Object.defineProperty(globalThis.window, 'location', {
+      writable: true,
+      value: { protocol: 'https:', host: 'fleet.local' },
+    })
+
+    expect(client.terminalURL('c1', 'web', 'console')).toBe('wss://fleet.local/api/v1/clusters/c1/instances/web/console')
+    expect(client.terminalURL('c1', 'web', 'exec')).toBe('wss://fleet.local/api/v1/clusters/c1/instances/web/exec')
+    expect(client.vgaURL('c1', 'web')).toBe('wss://fleet.local/api/v1/clusters/c1/instances/web/vga')
+    expect(client.spiceURL('c1', 'web', 5959)).toBe('wss://fleet.local/api/v1/clusters/c1/instances/web/spice?port=5959')
+    expect(client.downloadFileURL('c1', 'web', '/tmp/f.txt')).toBe(
+      '/api/v1/clusters/c1/instances/web/files?path=%2Ftmp%2Ff.txt',
+    )
+  })
+})

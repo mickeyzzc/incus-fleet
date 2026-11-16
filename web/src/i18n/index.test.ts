@@ -57,3 +57,33 @@ describe('i18n', () => {
     expect(localStorage.getItem('incus-fleet.locale')).toBe('zh-CN')
   })
 })
+
+describe('i18n degraded environments', () => {
+  it('falls back to the browser language when storage is unavailable', () => {
+    const original = Storage.prototype.getItem
+    Storage.prototype.getItem = () => {
+      throw new Error('storage blocked')
+    }
+
+    try {
+      expect(detectLocale()).toBe('en')
+    } finally {
+      Storage.prototype.getItem = original
+    }
+  })
+
+  it('keeps switching locales when persistence fails', () => {
+    const original = Storage.prototype.setItem
+    Storage.prototype.setItem = () => {
+      throw new Error('storage blocked')
+    }
+
+    try {
+      setLocale('zh-CN')
+      expect(currentLocale()).toBe('zh-CN')
+    } finally {
+      Storage.prototype.setItem = original
+      localStorage.removeItem('incus-fleet.locale')
+    }
+  })
+})
