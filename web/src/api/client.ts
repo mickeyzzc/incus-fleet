@@ -3,6 +3,7 @@ import type {
   BatchKeysRequest,
   BatchPowerRequest,
   BatchScriptsRequest,
+  ClusterImage,
   ClusterResources,
   ClusterSummary,
   CloneRequest,
@@ -689,6 +690,116 @@ export class ApiClient {
   /** Builds the authenticated download URL for one instance file. */
   downloadFileURL(cluster: string, instance: string, path: string): string {
     return `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/files?path=${encodeURIComponent(path)}`
+  }
+
+  /** Lists every image across all reachable clusters, tagged with its cluster. */
+  async listAllImages(): Promise<ClusterImage[]> {
+    const clusters = await this.listClusters()
+    const perCluster = await Promise.all(
+      clusters.map(async (cluster) => {
+        try {
+          const images = await this.listImages(cluster.name)
+          return images.map((img) => ({
+            cluster: cluster.name,
+            fingerprint: img.fingerprint,
+            alias: img.aliases[0] ?? '',
+            type: img.type,
+            os: img.os,
+            release: img.release,
+            description: img.description,
+            size: img.size,
+            cached: img.cached,
+            created_at: img.created_at,
+          }))
+        } catch {
+          return []
+        }
+      }),
+    )
+
+    return perCluster.flat()
+  }
+
+  /** Lists every ISO volume across all reachable clusters, tagged with its cluster. */
+  async listAllISOs(): Promise<ISOSummary[]> {
+    const clusters = await this.listClusters()
+    const perCluster = await Promise.all(
+      clusters.map(async (cluster) => {
+        try {
+          const isos = await this.listISOs(cluster.name)
+          return isos.map((iso) => ({ ...iso, cluster: cluster.name }))
+        } catch {
+          return []
+        }
+      }),
+    )
+
+    return perCluster.flat()
+  }
+
+  /**
+   * Uploads one multipart form while reporting upload progress. Uses XHR
+   * because fetch cannot observe upload progress. Progress reports
+   * (loaded, total) in bytes.
+   */
+  uploadFormWithProgress<T>(
+    path: string,
+    form: FormData,
+    onProgress: (loaded: number, total: number) => void,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', path)
+      xhr.responseType = 'json'
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          onProgress(event.loaded, event.total)
+        }
+      }
+
+      xhr.onload = () => {
+        const body = (xhr.response ?? null) as { code?: string; message?: string } | null
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(body as T)
+          return
+        }
+        reject(
+          new ApiError(
+            xhr.status,
+            body?.code ?? 'http_error',
+            body?.message ?? `upload failed with status ${xhr.status}`,
+          ),
+        )
+      }
+
+      xhr.onerror = () => {
+        reject(new ApiError(0, 'network_error', 'network error during upload'))
+      }
+
+      xhr.send(form)
+    })
+  }
+
+  /** Uploads one ISO with progress reporting. */
+  async importISOWithProgress(
+    cluster: string,
+    request: ImportISORequest,
+    onProgress: (loaded: number, total: number) => void,
+  ): Promise<{ name: string; pool: string }> {
+    const query = new URLSearchParams()
+    if (request.pool) {
+      query.set('pool', request.pool)
+    }
+
+    const form = new FormData()
+    form.append('image', request.file, request.file.name)
+
+    return this.uploadFormWithProgress<{ name: string; pool: string }>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/iso?${query.toString()}`,
+      form,
+      onProgress,
+    )
   }
 
   /** Builds the websocket URL for an instance console or exec session. */

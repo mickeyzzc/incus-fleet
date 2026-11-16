@@ -172,6 +172,60 @@ func TestVolumeValidation(t *testing.T) {
 	}
 }
 
+func TestAttachDeviceVMProvisionsVolume(t *testing.T) {
+	srv := &incusfake.Server{
+		Instance:     manageInstance("vm1"),
+		NetworkNames: []string{"incusbr0"},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+	ctx := context.Background()
+
+	// Pool + size without a source: fleet provisions the backing volume.
+	detail, err := svc.AttachDevice(ctx, "c1", "vm1", DeviceRequest{
+		Name: "data", Type: "disk", Pool: "default", Path: "/mnt/data", Size: "50GiB",
+	})
+	if err != nil {
+		t.Fatalf("AttachDevice() error = %v", err)
+	}
+	if detail.Name != "vm1" {
+		t.Fatalf("detail = %#v", detail)
+	}
+
+	created := srv.CreateVolumeArgs()
+	if len(created) != 1 {
+		t.Fatalf("created volumes = %#v", created)
+	}
+	volume := created[0].Volume
+	if volume.Name != "dev-vm1-data" || volume.Type != "custom" || volume.Config["size"] != "50GiB" {
+		t.Fatalf("volume = %#v", volume)
+	}
+
+	device := srv.UpdateArgs()[0].Instance.Devices["data"]
+	if device["type"] != "disk" || device["pool"] != "default" || device["source"] != "dev-vm1-data" || device["path"] != "/mnt/data" {
+		t.Fatalf("disk device = %#v", device)
+	}
+	if _, hasSize := device["size"]; hasSize {
+		t.Fatalf("device should not carry size when backed by a volume: %#v", device)
+	}
+
+	// A rerun with the volume already present reuses it.
+	reuse := &incusfake.Server{
+		Instance: manageInstance("vm1"),
+		Volumes: []api.StorageVolume{
+			{Name: "dev-vm1-data", Type: "custom", ContentType: "filesystem"},
+		},
+	}
+	reuseSvc := newTestService(t, map[string]*incusfake.Server{"c1": reuse})
+	if _, err := reuseSvc.AttachDevice(ctx, "c1", "vm1", DeviceRequest{
+		Name: "data", Type: "disk", Pool: "default", Path: "/mnt/data", Size: "50GiB",
+	}); err != nil {
+		t.Fatalf("reuse AttachDevice() error = %v", err)
+	}
+	if len(reuse.CreateVolumeArgs()) != 0 {
+		t.Fatalf("existing volume was recreated: %#v", reuse.CreateVolumeArgs())
+	}
+}
+
 func TestAttachDetachDevice(t *testing.T) {
 	srv := &incusfake.Server{
 		Instance:     manageInstance("web"),

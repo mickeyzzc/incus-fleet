@@ -15,6 +15,7 @@ import IsoLaunchDialog from '@/components/IsoLaunchDialog.vue'
 import MemberDialog from '@/components/MemberDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
 import NetworkDialog from '@/components/NetworkDialog.vue'
+import NodeUpgradeDialog from '@/components/NodeUpgradeDialog.vue'
 import ProfileDialog from '@/components/ProfileDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import StorageBar from '@/components/StorageBar.vue'
@@ -62,6 +63,10 @@ const volumesPool = ref<StoragePoolResource | null>(null)
 const importDialogOpen = ref(false)
 const distributeOpen = ref(false)
 const distributeFingerprint = ref('')
+
+// Node management
+const nodeUpgradeDialogOpen = ref(false)
+const nodeUpgradeMember = ref<{ name: string; version: string }>({ name: '', version: '' })
 
 const summary = computed(() => clusters.byName(props.cluster))
 const resources = computed(() => instances.resources(props.cluster))
@@ -331,6 +336,15 @@ async function cleanupCachedImages(): Promise<void> {
 function instanceTypeLabel(type: string): string {
   return type === 'virtual-machine' ? t('common.virtualMachine') : t('common.container')
 }
+
+// Node management: guided Incus upgrade per member.
+function openNodeUpgrade(member: ClusterMember): void {
+  nodeUpgradeMember.value = {
+    name: member.name,
+    version: summary.value?.server_version ?? '',
+  }
+  nodeUpgradeDialogOpen.value = true
+}
 </script>
 
 <template>
@@ -462,6 +476,16 @@ function instanceTypeLabel(type: string): string {
             @click="openMemberDialog(member)"
           >
             {{ member.name }} · {{ memberStatusLabel(member.status) }}
+            <el-button
+              v-if="member.status === 'Online'"
+              type="primary"
+              size="small"
+              link
+              class="upgrade-link"
+              @click.stop="openNodeUpgrade(member)"
+            >
+              {{ t('node.upgrade') }}
+            </el-button>
           </el-tag>
           <el-tag v-for="network in summary.networks" :key="network" size="small" effect="plain">
             {{ network }}
@@ -879,6 +903,11 @@ function instanceTypeLabel(type: string): string {
       @saved="instances.fetchProfiles(cluster, true)"
     />
     <MemberDialog v-model="memberDialogOpen" :cluster="cluster" :member="memberEditing" />
+    <NodeUpgradeDialog
+      v-model="nodeUpgradeDialogOpen"
+      :member-name="nodeUpgradeMember.name"
+      :current-version="nodeUpgradeMember.version"
+    />
     <StorageVolumesDialog
       v-model="volumesDialogOpen"
       :cluster="cluster"

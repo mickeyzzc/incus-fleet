@@ -270,6 +270,8 @@ export interface ISOSummary {
   pool: string
   description?: string
   size?: string
+  /** Set when listed across all clusters by the assets page. */
+  cluster?: string
 }
 
 export interface ImportISORequest {
@@ -335,6 +337,20 @@ export interface BatchItem {
 export interface BatchKeysRequest {
   targets: BatchTarget[]
   key_ids: string[]
+}
+
+/** One image as seen across the whole fleet. */
+export interface ClusterImage {
+  cluster: string
+  fingerprint: string
+  alias: string
+  type: string
+  os?: string
+  release?: string
+  description?: string
+  size: number
+  cached: boolean
+  created_at: string
 }
 
 export interface BatchScriptsRequest {

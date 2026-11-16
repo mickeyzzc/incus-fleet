@@ -118,3 +118,30 @@ describe('DashboardView', () => {
     expect(wrapper.text()).toContain('control plane down')
   })
 })
+
+describe('DashboardView fleet resource summary', () => {
+  it('renders fleet-wide CPU, memory, disk, and instance totals', async () => {
+    setActivePinia(createPinia())
+    vi.mocked(api.listClusters).mockResolvedValue([
+      clusterSummary({
+        cpu: { total: 4, architecture: 'x86_64' },
+        memory: { used: 2_000_000_000, total: 16_000_000_000 },
+      }),
+      clusterSummary({
+        name: 'c2',
+        display_name: 'Cluster 63',
+        cpu: { total: 8, architecture: 'x86_64' },
+        memory: { used: 1_200_000_000, total: 16_000_000_000 },
+      }),
+    ])
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('12 vCPU')
+    expect(wrapper.text()).toContain('3.0 GiB')
+    expect(wrapper.text()).toContain('29.8 GiB')
+
+    wrapper.unmount()
+  })
+})
