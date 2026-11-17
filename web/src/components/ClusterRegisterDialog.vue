@@ -127,7 +127,7 @@ async function submit(): Promise<void> {
       </div>
       <div class="field">
         <label class="field-label">{{ t('clusterRegister.endpoint') }}<span class="required">*</span></label>
-        <el-input v-model="endpoint" placeholder="https://192.168.64.21:8443" />
+        <el-input v-model="endpoint" placeholder="https://192.0.2.10:8443" />
       </div>
       <div class="field">
         <label class="field-label">{{ t('clusterRegister.project') }}</label>

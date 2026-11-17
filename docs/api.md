@@ -202,7 +202,7 @@ instance counts may be zero when the cluster cannot be inspected.
 {
   "name": "c64",
   "display_name": "Cluster 64",
-  "endpoint": "https://192.168.64.21:8443",
+  "endpoint": "https://192.0.2.10:8443",
   "project": "default",
   "tls_cert": "-----BEGIN CERTIFICATE-----\n...",
   "tls_key": "-----BEGIN EC PRIVATE KEY-----\n...",
@@ -239,25 +239,86 @@ manager also returns `404`.
 Counters are cumulative since instance boot and only include running instances; the dashboard
 polls every 3 seconds and derives per-second rates from consecutive samples.
 
-## Node network (the host running the fleet app)
+## Adding a cluster member
 
-These endpoints manage the physical node itself (not Instances inside clusters). They require the
-sudo whitelist and unit changes described in `docs/deployment.md`.
+`POST /api/v1/clusters/{cluster}/members` provisions a new host and joins it to the cluster. The
+fleet server connects to the host over SSH, optionally installs Incus from an apt repository,
+submits the Incus join request through the host's local socket, and waits for the member to report
+`Online`.
 
 ```json
-// GET /api/v1/node?wifi=wlo1
 {
-  "host": "n100-server",
+  "name": "node-c",
+  "address": "198.51.100.11",
+  "ssh_user": "node-admin",
+  "ssh_port": 22,
+  "ssh_password": "optional-ssh-password",
+  "sudo_password": "optional-sudo-password",
+  "install_incus": true,
+  "install_vms": true,
+  "ignore_host_key": true,
+  "storage_source": "/srv/incus",
+  "incus_repo": "https://pkgs.zabbly.com/incus/lts-7.0",
+  "incus_repo_key": "https://pkgs.zabbly.com/key.asc"
+}
+```
+
+- `name` is optional; the node hostname is used when omitted.
+- `ssh_user` defaults to `node_access.ssh_user`; the fleet SSH key is used unless
+  `ssh_password` is supplied.
+- `sudo_password` is used once when the SSH account needs a password for sudo. After a successful
+  join the fleet installs a passwordless whitelist for the account.
+- `install_incus` adds the apt source (`incus_repo`/`incus_repo_key`) and installs the package.
+  The installed version must match the cluster's Incus version.
+- `ignore_host_key` skips SSH host key verification for a node that is not in `known_hosts` yet.
+- `storage_source` fills the per-member `storage-pool/default/source` value; it defaults to
+  `/srv/incus`.
+
+`201` returns the joined member and the provisioning steps:
+
+```json
+{
+  "member": {"name": "node-c", "status": "Online", "roles": [], "url": "https://198.51.100.11:8443"},
+  "steps": [
+    {"name": "connect", "status": "ok", "detail": "SSH connection established to 198.51.100.11"},
+    {"name": "install", "status": "ok", "detail": "Incus installed from https://pkgs.zabbly.com/incus/lts-7.0"},
+    {"name": "token", "status": "ok", "detail": "Join token generated for node-c"},
+    {"name": "join", "status": "ok", "detail": "Join request accepted by cluster c2"},
+    {"name": "online", "status": "ok", "detail": "Member node-c is online"},
+    {"name": "sudoers", "status": "ok", "detail": "Passwordless node network sudo rules installed"},
+    {"name": "fleet_key", "status": "ok", "detail": "Fleet SSH key authorized for node-admin"}
+  ]
+}
+```
+
+Post-join setup steps report `warning`/`skipped` without failing the request because the member is
+already part of the cluster. Errors map to `400 invalid_request`, `404 not_found`, `409 conflict`
+(member name already present), `503 cluster_unavailable`, or `500 internal_error`.
+
+The request can take several minutes; the handler extends its write deadline and the server's
+global timeout still applies to the request context. Passwords are used only in memory and are
+never persisted or logged.
+
+## Node network (per cluster member)
+
+These endpoints manage host networking on one cluster member. The fleet host's own member is
+served locally through `sudo -n`; every other member is reached over SSH with the identity from
+`node_access`. Both paths require the sudo whitelist described in `docs/deployment.md`.
+
+```json
+// GET /api/v1/clusters/c2/members/node-b/node?wifi=wlan0
+{
+  "host": "node-b",
   "nics": [
-    {"name": "enp1s0", "state": "up", "kind": "ethernet", "mac": "aa:bb:cc:dd:ee:ff", "mtu": 1500,
-     "addresses": [{"family": "inet", "address": "192.168.62.21", "prefixlen": 24}]},
-    {"name": "wlo1", "state": "up", "kind": "wifi", "addresses": [],
+    {"name": "eth0", "state": "up", "kind": "ethernet", "mac": "aa:bb:cc:dd:ee:ff", "mtu": 1500,
+     "addresses": [{"family": "inet", "address": "198.51.100.10", "prefixlen": 24}]},
+    {"name": "wlan0", "state": "up", "kind": "wifi", "addresses": [],
      "wifi": {"connected": true, "ssid": "Office", "signal": -55, "frequency": 2437}}
   ],
-  "routes": [{"destination": "default", "gateway": "192.168.62.1", "device": "enp1s0", "metric": "100"}],
+  "routes": [{"destination": "default", "gateway": "198.51.100.1", "device": "eth0", "metric": "100"}],
   "firewall": [{"handle": "7", "rule": "tcp dport 22 accept comment \"fleet_rule\""}],
   "wifi_scan": [{"ssid": "Office", "signal": -45, "frequency": 2437, "secure": true}],
-  "wifi_device": "wlo1",
+  "wifi_device": "wlan0",
   "capabilities": ["nics", "routes", "firewall"]
 }
 ```
@@ -266,16 +327,18 @@ The `wifi` query parameter selects the interface to scan; without it the first w
 is used. Scan results are deduplicated by SSID (strongest BSS kept) and require the interface to
 be up.
 
+All paths below are relative to `/api/v1/clusters/{cluster}/members/{member}/node`:
+
 | Method & path | Purpose |
 |---|---|
-| `POST /node/networks/{name}/state` `{"up": bool}` | bring a NIC up/down |
-| `PATCH /node/networks/{name}` `{"dhcp": bool, "address": "10.62.0.50/24", "gateway": "...", "persist": bool}` | static address or DHCP; `persist` writes `/etc/network/interfaces.d/<name>` |
-| `POST /node/networks/{name}/wifi` `{"ssid": "...", "password": "..."}` | associate + DHCP lease via wpa_supplicant |
-| `GET/POST /node/routes`, `DELETE /node/routes/{destination}` | routing table and static routes |
-| `GET/POST /node/firewall`, `DELETE /node/firewall/{handle}` | fleet_filter nftables table rules |
+| `POST /networks/{name}/state` `{"up": bool}` | bring a NIC up/down |
+| `PATCH /networks/{name}` `{"dhcp": bool, "address": "10.0.0.50/24", "gateway": "...", "persist": bool}` | static address or DHCP; `persist` writes `/etc/network/interfaces.d/<name>` |
+| `POST /networks/{name}/wifi` `{"ssid": "...", "password": "..."}` | associate + DHCP lease via wpa_supplicant |
+| `GET/POST /routes`, `DELETE /routes/{destination}` | routing table and static routes |
+| `GET/POST /firewall`, `DELETE /firewall/{handle}` | fleet_filter nftables table rules |
 
-Handler errors map to `400 invalid_request` (bad input) and `503 node_unavailable` (missing sudo
-rules, binaries, or host failure).
+Handler errors map to `400 invalid_request` (bad input), `404 not_found` (unknown cluster or
+member), and `503 node_unavailable` (missing SSH access, sudo rules, binaries, or host failure).
 
 ## Instances
 

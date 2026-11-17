@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -23,6 +25,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/config"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
+	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
@@ -37,14 +40,20 @@ type apiFixture struct {
 	store      *store.SQLStore
 	nodeRunner *fakeNodeRunner
 	auth       *auth.Authenticator
+	manager    *clusters.Manager
 }
 
 func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 	t.Helper()
 
+	certPath := filepath.Join(t.TempDir(), "cluster.crt")
+	if err := os.WriteFile(certPath, []byte("-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	cfgs := []config.Cluster{
-		{Name: "c1", DisplayName: "c1", Endpoint: "https://192.0.2.10:8443"},
-		{Name: "c2", DisplayName: "c2", Endpoint: "https://198.51.100.11:8443"},
+		{Name: "c1", DisplayName: "c1", Endpoint: "https://192.0.2.10:8443", TLSServerCert: certPath},
+		{Name: "c2", DisplayName: "c2", Endpoint: "https://198.51.100.11:8443", TLSServerCert: certPath},
 	}
 	dial := func(_ context.Context, cfg config.Cluster) (clusters.InstanceServer, error) {
 		switch cfg.Name {
@@ -75,6 +84,8 @@ func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 	}
 
 	nodeRunner := newFakeNodeRunner()
+	nodeAccess := nodeaccess.New(manager, nodenet.NewService(nodeRunner), config.NodeAccess{},
+		nodeaccess.WithLocalMember("test-node"))
 	authenticator := auth.New("secret", time.Hour)
 	handler := New(Deps{
 		Clusters:   manager,
@@ -82,7 +93,7 @@ func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 		Assets:     assets.New(st, instances.New(manager)),
 		Migrations: migrationService,
 		Store:      st,
-		NodeNet:    nodenet.NewService(nodeRunner),
+		NodeNet:    nodeAccess,
 		Auth:       authenticator,
 		StaticFS:   staticFS,
 		Logger:     logger,
@@ -104,6 +115,7 @@ func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 		store:      st,
 		nodeRunner: nodeRunner,
 		auth:       authenticator,
+		manager:    manager,
 	}
 }
 

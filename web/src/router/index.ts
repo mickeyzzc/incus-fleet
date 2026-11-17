@@ -31,6 +31,13 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'titles.cluster' },
   },
   {
+    path: '/clusters/:cluster/members/:member',
+    name: 'node-detail',
+    component: () => import('@/views/NodeDetailView.vue'),
+    props: true,
+    meta: { titleKey: 'titles.node' },
+  },
+  {
     path: '/instances',
     name: 'instances',
     component: () => import('@/views/InstancesView.vue'),
@@ -50,9 +57,7 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/node',
-    name: 'node',
-    component: () => import('@/views/NodeView.vue'),
-    meta: { titleKey: 'titles.node' },
+    redirect: '/',
   },
   {
     path: '/:pathMatch(.*)*',

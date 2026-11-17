@@ -18,6 +18,8 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/httpapi"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
+	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
+	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/version"
@@ -89,7 +91,13 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	instancesService := instances.New(manager)
 	migrationsService := migrations.New(manager, st, logger)
 	assetsService := assets.New(st, instancesService)
-	nodenetService := nodenet.NewService(nodenet.SudoRunner{})
+	localNodeNet := nodenet.NewService(nodenet.SudoRunner{})
+	nodeOptions := []nodeaccess.Option{}
+	if cfg.LocalMember != "" {
+		nodeOptions = append(nodeOptions, nodeaccess.WithLocalMember(cfg.LocalMember))
+	}
+	nodeAccess := nodeaccess.New(manager, localNodeNet, cfg.NodeAccess, nodeOptions...)
+	nodeJoin := nodejoin.New(manager, cfg.NodeAccess, logger)
 	authenticator := auth.New(cfg.Server.AuthToken, 12*time.Hour)
 
 	// Clusters registered at runtime through the web UI persist in the
@@ -121,7 +129,8 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		Assets:     assetsService,
 		Migrations: migrationsService,
 		Store:      st,
-		NodeNet:    nodenetService,
+		NodeNet:    nodeAccess,
+		NodeJoin:   nodeJoin,
 		Auth:       authenticator,
 		StaticFS:   o.staticFS,
 		Logger:     logger,

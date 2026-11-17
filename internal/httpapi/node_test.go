@@ -63,20 +63,20 @@ func (f *fakeNodeRunner) recordedCalls() []string {
 func fakeNodeOutputs() map[string]string {
 	return map[string]string{
 		"ip -j addr show": `[
-			{"ifname":"enp1s0","operstate":"UP","flags":["BROADCAST","MULTICAST","UP"],"mtu":1500,"address":"aa:bb","link_type":"ether",
-			 "addr_info":[{"family":"inet","local":"192.168.62.21","prefixlen":24}]},
-			{"ifname":"wlo1","operstate":"UP","flags":["BROADCAST","MULTICAST","UP"],"link_type":"wlan","addr_info":[]}
+			{"ifname":"eth0","operstate":"UP","flags":["BROADCAST","MULTICAST","UP"],"mtu":1500,"address":"aa:bb","link_type":"ether",
+			 "addr_info":[{"family":"inet","local":"192.0.2.10","prefixlen":24}]},
+			{"ifname":"wlan0","operstate":"UP","flags":["BROADCAST","MULTICAST","UP"],"link_type":"wlan","addr_info":[]}
 		]`,
-		"ip -j route show": `[{"dst":"default","gateway":"192.168.62.1","dev":"enp1s0","metric":100}]`,
+		"ip -j route show": `[{"dst":"default","gateway":"192.0.2.1","dev":"eth0","metric":100}]`,
 		"nft -a list table inet fleet_filter": "table inet fleet_filter { # handle 3\n" +
 			"\tchain input { # handle 1\n" +
 			"\t\ttype filter hook input priority filter; policy accept;\n" +
 			"\t\ttcp dport 22 accept comment \"fleet_rule\" # handle 7\n" +
 			"\t}\n}",
-		"iw dev wlo1 link": "Connected to aa:bb (on wlo1)\n\tSSID: Office\n\tsignal: -55.00 dBm\n\tfreq: 2437.0\n",
-		"iw dev wlo1 info": "Interface wlo1\n\tssid Office\n",
-		"iw dev wlo1 scan": "BSS aa:bb\n\tfreq: 2437\n\tsignal: -45.00 dBm\n\tSSID: Office\n\tRSN: x\n",
-		"hostname ":        "n100-server",
+		"iw dev wlan0 link": "Connected to aa:bb (on wlan0)\n\tSSID: Office\n\tsignal: -55.00 dBm\n\tfreq: 2437.0\n",
+		"iw dev wlan0 info": "Interface wlan0\n\tssid Office\n",
+		"iw dev wlan0 scan": "BSS aa:bb\n\tfreq: 2437\n\tsignal: -45.00 dBm\n\tSSID: Office\n\tRSN: x\n",
+		"hostname ":         "node-a",
 	}
 }
 
@@ -88,24 +88,29 @@ func TestNodeSnapshotAndReadEndpoints(t *testing.T) {
 	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
 	cookie := f.login(t)
 
-	rec := f.request(t, http.MethodGet, "/api/v1/node", nil, cookie, "")
+	rec := f.request(t, http.MethodGet, "/api/v1/clusters/c1/members/test-node/node", nil, cookie, "")
 	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /api/v1/node status = %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("GET /api/v1/clusters/c1/members/test-node/node status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	for _, want := range []string{"n100-server", "enp1s0", "wlo1", "Office", "192.168.62.21"} {
+	for _, want := range []string{"node-a", "eth0", "wlan0", "Office", "192.0.2.10"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("snapshot missing %q: %s", want, rec.Body.String())
 		}
 	}
 
-	routes := f.request(t, http.MethodGet, "/api/v1/node/routes", nil, cookie, "")
-	if routes.Code != http.StatusOK || !strings.Contains(routes.Body.String(), "192.168.62.1") {
+	routes := f.request(t, http.MethodGet, "/api/v1/clusters/c1/members/test-node/node/routes", nil, cookie, "")
+	if routes.Code != http.StatusOK || !strings.Contains(routes.Body.String(), "192.0.2.1") {
 		t.Fatalf("GET routes = %d body=%s", routes.Code, routes.Body.String())
 	}
 
-	firewall := f.request(t, http.MethodGet, "/api/v1/node/firewall", nil, cookie, "")
+	firewall := f.request(t, http.MethodGet, "/api/v1/clusters/c1/members/test-node/node/firewall", nil, cookie, "")
 	if firewall.Code != http.StatusOK || !strings.Contains(firewall.Body.String(), "tcp dport 22") {
 		t.Fatalf("GET firewall = %d body=%s", firewall.Code, firewall.Body.String())
+	}
+
+	unknown := f.request(t, http.MethodGet, "/api/v1/clusters/c1/members/ghost/node", nil, cookie, "")
+	if unknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown member status = %d body=%s", unknown.Code, unknown.Body.String())
 	}
 }
 
@@ -113,22 +118,22 @@ func TestNodeWriteEndpoints(t *testing.T) {
 	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
 	cookie := f.login(t)
 
-	state := f.request(t, http.MethodPost, "/api/v1/node/networks/enp1s0/state", map[string]bool{"up": false}, cookie, "")
+	state := f.request(t, http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/networks/eth0/state", map[string]bool{"up": false}, cookie, "")
 	if state.Code != http.StatusNoContent {
 		t.Fatalf("NIC state status = %d body=%s", state.Code, state.Body.String())
 	}
 
-	address := f.request(t, http.MethodPatch, "/api/v1/node/networks/enp1s0", map[string]any{
+	address := f.request(t, http.MethodPatch, "/api/v1/clusters/c1/members/test-node/node/networks/eth0", map[string]any{
 		"dhcp":    false,
-		"address": "10.62.0.50",
-		"gateway": "10.62.0.1",
+		"address": "10.0.0.50",
+		"gateway": "10.0.0.1",
 		"persist": true,
 	}, cookie, "")
 	if address.Code != http.StatusNoContent {
 		t.Fatalf("address status = %d body=%s", address.Code, address.Body.String())
 	}
 
-	wifi := f.request(t, http.MethodPost, "/api/v1/node/networks/wlo1/wifi", map[string]string{
+	wifi := f.request(t, http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/networks/wlan0/wifi", map[string]string{
 		"ssid":     "Office",
 		"password": "secret",
 	}, cookie, "")
@@ -136,21 +141,21 @@ func TestNodeWriteEndpoints(t *testing.T) {
 		t.Fatalf("wifi status = %d body=%s", wifi.Code, wifi.Body.String())
 	}
 
-	route := f.request(t, http.MethodPost, "/api/v1/node/routes", map[string]string{
-		"destination": "10.63.0.0/24",
-		"gateway":     "192.168.62.1",
-		"device":      "enp1s0",
+	route := f.request(t, http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/routes", map[string]string{
+		"destination": "10.0.1.0/24",
+		"gateway":     "192.0.2.1",
+		"device":      "eth0",
 	}, cookie, "")
 	if route.Code != http.StatusNoContent {
 		t.Fatalf("add route status = %d body=%s", route.Code, route.Body.String())
 	}
 
-	routeDelete := f.request(t, http.MethodDelete, "/api/v1/node/routes/10.63.0.0%2F24", nil, cookie, "")
+	routeDelete := f.request(t, http.MethodDelete, "/api/v1/clusters/c1/members/test-node/node/routes/10.0.1.0%2F24", nil, cookie, "")
 	if routeDelete.Code != http.StatusNoContent {
 		t.Fatalf("delete route status = %d body=%s", routeDelete.Code, routeDelete.Body.String())
 	}
 
-	rule := f.request(t, http.MethodPost, "/api/v1/node/firewall", map[string]any{
+	rule := f.request(t, http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/firewall", map[string]any{
 		"port":    65022,
 		"proto":   "tcp",
 		"action":  "accept",
@@ -160,20 +165,20 @@ func TestNodeWriteEndpoints(t *testing.T) {
 		t.Fatalf("add rule status = %d body=%s", rule.Code, rule.Body.String())
 	}
 
-	ruleDelete := f.request(t, http.MethodDelete, "/api/v1/node/firewall/7", nil, cookie, "")
+	ruleDelete := f.request(t, http.MethodDelete, "/api/v1/clusters/c1/members/test-node/node/firewall/7", nil, cookie, "")
 	if ruleDelete.Code != http.StatusNoContent {
 		t.Fatalf("delete rule status = %d body=%s", ruleDelete.Code, ruleDelete.Body.String())
 	}
 
 	calls := strings.Join(f.nodeRunner.recordedCalls(), "\n")
 	for _, want := range []string{
-		"ip link set dev enp1s0 down",
-		"ip addr add 10.62.0.50/24 dev enp1s0",
-		"ip route replace default via 10.62.0.1 dev enp1s0",
-		"tee /etc/network/interfaces.d/enp1s0 <stdin",
-		"wpa_supplicant -B -i wlo1 -c /etc/wpa_supplicant/fleet.conf",
-		"ip route add 10.63.0.0/24 via 192.168.62.1 dev enp1s0",
-		"ip route del 10.63.0.0/24",
+		"ip link set dev eth0 down",
+		"ip addr add 10.0.0.50/24 dev eth0",
+		"ip route replace default via 10.0.0.1 dev eth0",
+		"tee /etc/network/interfaces.d/eth0 <stdin",
+		"wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/fleet.conf",
+		"ip route add 10.0.1.0/24 via 192.0.2.1 dev eth0",
+		"ip route del 10.0.1.0/24",
 		"nft add rule inet fleet_filter input tcp dport 65022 accept",
 		"nft delete rule inet fleet_filter input handle 7",
 	} {
@@ -187,29 +192,29 @@ func TestNodeValidationAndUnavailable(t *testing.T) {
 	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
 	cookie := f.login(t)
 
-	badJSON := f.request(t, http.MethodPost, "/api/v1/node/networks/enp1s0/state", "{not json", cookie, "")
+	badJSON := f.request(t, http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/networks/eth0/state", "{not json", cookie, "")
 	if badJSON.Code != http.StatusBadRequest {
 		t.Fatalf("bad json status = %d", badJSON.Code)
 	}
 
-	badAddress := f.request(t, http.MethodPatch, "/api/v1/node/networks/enp1s0", map[string]any{"address": "not-an-ip"}, cookie, "")
+	badAddress := f.request(t, http.MethodPatch, "/api/v1/clusters/c1/members/test-node/node/networks/eth0", map[string]any{"address": "not-an-ip"}, cookie, "")
 	if badAddress.Code != http.StatusBadRequest {
 		t.Fatalf("invalid address status = %d body=%s", badAddress.Code, badAddress.Body.String())
 	}
 
-	badWifi := f.request(t, http.MethodPost, "/api/v1/node/networks/wlo1/wifi", map[string]string{"ssid": ""}, cookie, "")
+	badWifi := f.request(t, http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/networks/wlan0/wifi", map[string]string{"ssid": ""}, cookie, "")
 	if badWifi.Code != http.StatusBadRequest {
 		t.Fatalf("empty ssid status = %d body=%s", badWifi.Code, badWifi.Body.String())
 	}
 
-	badRule := f.request(t, http.MethodPost, "/api/v1/node/firewall", map[string]any{"port": 0, "proto": "tcp", "action": "accept"}, cookie, "")
+	badRule := f.request(t, http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/firewall", map[string]any{"port": 0, "proto": "tcp", "action": "accept"}, cookie, "")
 	if badRule.Code != http.StatusBadRequest {
 		t.Fatalf("invalid port status = %d body=%s", badRule.Code, badRule.Body.String())
 	}
 
 	// Host failures surface as 503 service_unavailable.
 	f.nodeRunner.failOn = "ip -j addr show"
-	unavailable := f.request(t, http.MethodGet, "/api/v1/node", nil, cookie, "")
+	unavailable := f.request(t, http.MethodGet, "/api/v1/clusters/c1/members/test-node/node", nil, cookie, "")
 	if unavailable.Code != http.StatusServiceUnavailable || !strings.Contains(unavailable.Body.String(), "node_unavailable") {
 		t.Fatalf("unavailable status = %d body=%s", unavailable.Code, unavailable.Body.String())
 	}
@@ -228,7 +233,7 @@ func TestNodeDisabled(t *testing.T) {
 	}).Handler()
 
 	cookie := f.login(t)
-	rec := f.request(t, http.MethodGet, "/api/v1/node", nil, cookie, "")
+	rec := f.request(t, http.MethodGet, "/api/v1/clusters/c1/members/test-node/node", nil, cookie, "")
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "node_unavailable") {
 		t.Fatalf("disabled status = %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -275,7 +280,7 @@ func TestClusterRegistrationEndpoints(t *testing.T) {
 
 	registered := f.request(t, http.MethodPost, "/api/v1/clusters", map[string]string{
 		"name":     "c64",
-		"endpoint": "https://192.168.64.21:8443",
+		"endpoint": "https://192.0.2.10:8443",
 		"tls_cert": "cert",
 		"tls_key":  "key",
 	}, cookie, "")
@@ -284,7 +289,7 @@ func TestClusterRegistrationEndpoints(t *testing.T) {
 	}
 
 	persisted, err := f.store.GetCluster(context.Background(), "c64")
-	if err != nil || persisted.Endpoint != "https://192.168.64.21:8443" {
+	if err != nil || persisted.Endpoint != "https://192.0.2.10:8443" {
 		t.Fatalf("registered cluster = %#v err=%v", persisted, err)
 	}
 
@@ -311,16 +316,16 @@ func TestNodeHandlerHostFailures(t *testing.T) {
 		path   string
 		body   any
 	}{
-		{"nic state", "ip link set", http.MethodPost, "/api/v1/node/networks/enp1s0/state", map[string]bool{"up": true}},
-		{"apply dhcp", "dhcpcd", http.MethodPatch, "/api/v1/node/networks/enp1s0", map[string]any{"dhcp": true}},
-		{"apply static", "ip addr add", http.MethodPatch, "/api/v1/node/networks/enp1s0", map[string]any{"address": "10.62.0.50"}},
-		{"wifi", "wpa_supplicant -v", http.MethodPost, "/api/v1/node/networks/wlo1/wifi", map[string]string{"ssid": "Office"}},
-		{"routes list", "ip -j route show", http.MethodGet, "/api/v1/node/routes", nil},
-		{"route add", "ip route add", http.MethodPost, "/api/v1/node/routes", map[string]string{"destination": "10.63.0.0/24", "gateway": "192.168.62.1", "device": "enp1s0"}},
-		{"route delete", "ip route del", http.MethodDelete, "/api/v1/node/routes/10.63.0.0%2F24", nil},
-		{"firewall list", "nft -a list", http.MethodGet, "/api/v1/node/firewall", nil},
-		{"firewall add", "nft add rule", http.MethodPost, "/api/v1/node/firewall", map[string]any{"port": 65022, "proto": "tcp", "action": "accept"}},
-		{"firewall delete", "nft delete rule", http.MethodDelete, "/api/v1/node/firewall/7", nil},
+		{"nic state", "ip link set", http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/networks/eth0/state", map[string]bool{"up": true}},
+		{"apply dhcp", "dhcpcd", http.MethodPatch, "/api/v1/clusters/c1/members/test-node/node/networks/eth0", map[string]any{"dhcp": true}},
+		{"apply static", "ip addr add", http.MethodPatch, "/api/v1/clusters/c1/members/test-node/node/networks/eth0", map[string]any{"address": "10.0.0.50"}},
+		{"wifi", "wpa_supplicant -v", http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/networks/wlan0/wifi", map[string]string{"ssid": "Office"}},
+		{"routes list", "ip -j route show", http.MethodGet, "/api/v1/clusters/c1/members/test-node/node/routes", nil},
+		{"route add", "ip route add", http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/routes", map[string]string{"destination": "10.0.1.0/24", "gateway": "192.0.2.1", "device": "eth0"}},
+		{"route delete", "ip route del", http.MethodDelete, "/api/v1/clusters/c1/members/test-node/node/routes/10.0.1.0%2F24", nil},
+		{"firewall list", "nft -a list", http.MethodGet, "/api/v1/clusters/c1/members/test-node/node/firewall", nil},
+		{"firewall add", "nft add rule", http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/firewall", map[string]any{"port": 65022, "proto": "tcp", "action": "accept"}},
+		{"firewall delete", "nft delete rule", http.MethodDelete, "/api/v1/clusters/c1/members/test-node/node/firewall/7", nil},
 	}
 
 	for _, tc := range cases {

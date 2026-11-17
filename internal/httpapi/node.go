@@ -4,19 +4,29 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 )
 
-// nodeSnapshot renders the physical network configuration of the node
-// fleet runs on.
-func (a *API) nodeSnapshot(w http.ResponseWriter, r *http.Request) {
+// nodeService returns the node network service or writes a 503.
+func (a *API) nodeService(w http.ResponseWriter) (*nodeaccess.Service, bool) {
 	if a.nodenet == nil {
 		writeError(w, http.StatusServiceUnavailable, "node_unavailable", "node network management is not enabled")
+		return nil, false
+	}
+
+	return a.nodenet, true
+}
+
+// nodeSnapshot renders the physical network configuration of one member.
+func (a *API) nodeSnapshot(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.nodeService(w)
+	if !ok {
 		return
 	}
 
 	wifiDevice := strings.TrimSpace(r.URL.Query().Get("wifi"))
-	snapshot, err := a.nodenet.Snapshot(r.Context(), wifiDevice)
+	snapshot, err := service.Snapshot(r.Context(), r.PathValue("cluster"), r.PathValue("member"), wifiDevice)
 	if err != nil {
 		a.serviceError(w, r, err)
 		return
@@ -25,8 +35,13 @@ func (a *API) nodeSnapshot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snapshot)
 }
 
-// nodeNICState brings one NIC up or down.
+// nodeNICState brings one member NIC up or down.
 func (a *API) nodeNICState(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.nodeService(w)
+	if !ok {
+		return
+	}
+
 	var req struct {
 		Up bool `json:"up"`
 	}
@@ -35,7 +50,7 @@ func (a *API) nodeNICState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.nodenet.SetNICState(r.PathValue("name"), req.Up); err != nil {
+	if err := service.SetNICState(r.PathValue("cluster"), r.PathValue("member"), r.PathValue("name"), req.Up); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}
@@ -43,15 +58,20 @@ func (a *API) nodeNICState(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// nodeApplyAddress switches one NIC between DHCP and a static address.
+// nodeApplyAddress switches one member NIC between DHCP and a static address.
 func (a *API) nodeApplyAddress(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.nodeService(w)
+	if !ok {
+		return
+	}
+
 	var req nodenet.AddressRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
-	if err := a.nodenet.ApplyAddress(r.Context(), r.PathValue("name"), req); err != nil {
+	if err := service.ApplyAddress(r.Context(), r.PathValue("cluster"), r.PathValue("member"), r.PathValue("name"), req); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}
@@ -59,8 +79,13 @@ func (a *API) nodeApplyAddress(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// nodeWifiConnect associates one Wi-Fi interface with an access point.
+// nodeWifiConnect associates one member Wi-Fi interface with an access point.
 func (a *API) nodeWifiConnect(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.nodeService(w)
+	if !ok {
+		return
+	}
+
 	var req struct {
 		SSID     string `json:"ssid"`
 		Password string `json:"password"`
@@ -70,7 +95,7 @@ func (a *API) nodeWifiConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.nodenet.WifiConnect(r.PathValue("name"), req.SSID, req.Password); err != nil {
+	if err := service.WifiConnect(r.PathValue("cluster"), r.PathValue("member"), r.PathValue("name"), req.SSID, req.Password); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}
@@ -78,9 +103,14 @@ func (a *API) nodeWifiConnect(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// nodeRoutes lists the routing table.
+// nodeRoutes lists the routing table of one member.
 func (a *API) nodeRoutes(w http.ResponseWriter, r *http.Request) {
-	routes, err := a.nodenet.ListRoutes()
+	service, ok := a.nodeService(w)
+	if !ok {
+		return
+	}
+
+	routes, err := service.ListRoutes(r.PathValue("cluster"), r.PathValue("member"))
 	if err != nil {
 		a.serviceError(w, r, err)
 		return
@@ -89,8 +119,13 @@ func (a *API) nodeRoutes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"routes": routes})
 }
 
-// nodeAddRoute adds one static route.
+// nodeAddRoute adds one static route on a member.
 func (a *API) nodeAddRoute(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.nodeService(w)
+	if !ok {
+		return
+	}
+
 	var req struct {
 		Destination string `json:"destination"`
 		Gateway     string `json:"gateway"`
@@ -101,7 +136,7 @@ func (a *API) nodeAddRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.nodenet.AddRoute(req.Destination, req.Gateway, req.Device); err != nil {
+	if err := service.AddRoute(r.PathValue("cluster"), r.PathValue("member"), req.Destination, req.Gateway, req.Device); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}
@@ -109,9 +144,14 @@ func (a *API) nodeAddRoute(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// nodeDeleteRoute removes one static route.
+// nodeDeleteRoute removes one static route from a member.
 func (a *API) nodeDeleteRoute(w http.ResponseWriter, r *http.Request) {
-	if err := a.nodenet.DeleteRoute(r.PathValue("destination")); err != nil {
+	service, ok := a.nodeService(w)
+	if !ok {
+		return
+	}
+
+	if err := service.DeleteRoute(r.PathValue("cluster"), r.PathValue("member"), r.PathValue("destination")); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}
@@ -119,9 +159,14 @@ func (a *API) nodeDeleteRoute(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// nodeFirewall lists the fleet-managed nftables rules.
+// nodeFirewall lists the fleet-managed nftables rules of one member.
 func (a *API) nodeFirewall(w http.ResponseWriter, r *http.Request) {
-	rules, err := a.nodenet.ListFirewall()
+	service, ok := a.nodeService(w)
+	if !ok {
+		return
+	}
+
+	rules, err := service.ListFirewall(r.PathValue("cluster"), r.PathValue("member"))
 	if err != nil {
 		a.serviceError(w, r, err)
 		return
@@ -130,15 +175,20 @@ func (a *API) nodeFirewall(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"rules": rules})
 }
 
-// nodeAddFirewallRule adds one input rule.
+// nodeAddFirewallRule adds one input rule on a member.
 func (a *API) nodeAddFirewallRule(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.nodeService(w)
+	if !ok {
+		return
+	}
+
 	var req nodenet.FirewallRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
-	if err := a.nodenet.AddFirewallRule(req); err != nil {
+	if err := service.AddFirewallRule(r.PathValue("cluster"), r.PathValue("member"), req); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}
@@ -148,7 +198,12 @@ func (a *API) nodeAddFirewallRule(w http.ResponseWriter, r *http.Request) {
 
 // nodeDeleteFirewallRule removes one input rule by handle.
 func (a *API) nodeDeleteFirewallRule(w http.ResponseWriter, r *http.Request) {
-	if err := a.nodenet.DeleteFirewallRule(r.PathValue("handle")); err != nil {
+	service, ok := a.nodeService(w)
+	if !ok {
+		return
+	}
+
+	if err := service.DeleteFirewallRule(r.PathValue("cluster"), r.PathValue("member"), r.PathValue("handle")); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}

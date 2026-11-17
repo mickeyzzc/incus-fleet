@@ -9,7 +9,7 @@ async function mountDialog(open = true) {
   const wrapper = mount(NodeUpgradeDialog, {
     props: {
       modelValue: open,
-      memberName: 'n100-server',
+      memberName: 'node-a',
       currentVersion: '7.0.2',
     },
     global: { plugins: [ElementPlus] },
@@ -23,7 +23,7 @@ describe('NodeUpgradeDialog', () => {
   it('shows the member, the current Incus version, and the guided steps', async () => {
     const wrapper = await mountDialog()
 
-    expect(wrapper.text()).toContain('n100-server')
+    expect(wrapper.text()).toContain('node-a')
     expect(wrapper.text()).toContain('7.0.2')
     expect(wrapper.text()).toContain('apt-get install -y incus')
     expect(wrapper.text()).toContain('systemctl restart incus incus.socket')

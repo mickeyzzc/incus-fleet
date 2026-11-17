@@ -20,6 +20,8 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
+	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
+	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 
@@ -38,7 +40,8 @@ type Deps struct {
 	Assets     *assets.Service
 	Migrations *migrations.Service
 	Store      *store.SQLStore
-	NodeNet    *nodenet.Service
+	NodeNet    *nodeaccess.Service
+	NodeJoin   *nodejoin.Service
 	Auth       *auth.Authenticator
 	StaticFS   fs.FS
 	Logger     *slog.Logger
@@ -52,7 +55,8 @@ type API struct {
 	assets     *assets.Service
 	migrations *migrations.Service
 	store      *store.SQLStore
-	nodenet    *nodenet.Service
+	nodenet    *nodeaccess.Service
+	nodejoin   *nodejoin.Service
 	auth       *auth.Authenticator
 	logger     *slog.Logger
 	version    string
@@ -73,6 +77,7 @@ func New(deps Deps) *API {
 		migrations: deps.Migrations,
 		store:      deps.Store,
 		nodenet:    deps.NodeNet,
+		nodejoin:   deps.NodeJoin,
 		auth:       deps.Auth,
 		logger:     logger,
 		version:    deps.Version,
@@ -115,16 +120,17 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("GET /api/v1/clusters/{cluster}/traffic", a.requireAuth(http.HandlerFunc(a.clusterTraffic)))
 	mux.Handle("POST /api/v1/clusters", a.requireAuth(http.HandlerFunc(a.registerCluster)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}", a.requireAuth(http.HandlerFunc(a.unregisterCluster)))
-	mux.Handle("GET /api/v1/node", a.requireAuth(http.HandlerFunc(a.nodeSnapshot)))
-	mux.Handle("POST /api/v1/node/networks/{name}/state", a.requireAuth(http.HandlerFunc(a.nodeNICState)))
-	mux.Handle("PATCH /api/v1/node/networks/{name}", a.requireAuth(http.HandlerFunc(a.nodeApplyAddress)))
-	mux.Handle("POST /api/v1/node/networks/{name}/wifi", a.requireAuth(http.HandlerFunc(a.nodeWifiConnect)))
-	mux.Handle("GET /api/v1/node/routes", a.requireAuth(http.HandlerFunc(a.nodeRoutes)))
-	mux.Handle("POST /api/v1/node/routes", a.requireAuth(http.HandlerFunc(a.nodeAddRoute)))
-	mux.Handle("DELETE /api/v1/node/routes/{destination}", a.requireAuth(http.HandlerFunc(a.nodeDeleteRoute)))
-	mux.Handle("GET /api/v1/node/firewall", a.requireAuth(http.HandlerFunc(a.nodeFirewall)))
-	mux.Handle("POST /api/v1/node/firewall", a.requireAuth(http.HandlerFunc(a.nodeAddFirewallRule)))
-	mux.Handle("DELETE /api/v1/node/firewall/{handle}", a.requireAuth(http.HandlerFunc(a.nodeDeleteFirewallRule)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/members", a.requireAuth(http.HandlerFunc(a.addClusterMember)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/members/{member}/node", a.requireAuth(http.HandlerFunc(a.nodeSnapshot)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/networks/{name}/state", a.requireAuth(http.HandlerFunc(a.nodeNICState)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/members/{member}/node/networks/{name}", a.requireAuth(http.HandlerFunc(a.nodeApplyAddress)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/networks/{name}/wifi", a.requireAuth(http.HandlerFunc(a.nodeWifiConnect)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/members/{member}/node/routes", a.requireAuth(http.HandlerFunc(a.nodeRoutes)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/routes", a.requireAuth(http.HandlerFunc(a.nodeAddRoute)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/members/{member}/node/routes/{destination}", a.requireAuth(http.HandlerFunc(a.nodeDeleteRoute)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/members/{member}/node/firewall", a.requireAuth(http.HandlerFunc(a.nodeFirewall)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/firewall", a.requireAuth(http.HandlerFunc(a.nodeAddFirewallRule)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/members/{member}/node/firewall/{handle}", a.requireAuth(http.HandlerFunc(a.nodeDeleteFirewallRule)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.listSnapshots)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.createSnapshot)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore", a.requireAuth(http.HandlerFunc(a.restoreSnapshot)))
@@ -802,14 +808,17 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, migrations.ErrInvalidRequest),
 		errors.Is(err, instances.ErrInvalidRequest),
+		errors.Is(err, nodejoin.ErrInvalidRequest),
 		errors.Is(err, nodenet.ErrInvalidRequest):
 		status, code = http.StatusBadRequest, "invalid_request"
-	case errors.Is(err, migrations.ErrConflict):
+	case errors.Is(err, migrations.ErrConflict),
+		errors.Is(err, nodejoin.ErrConflict):
 		status, code = http.StatusConflict, "conflict"
 	case errors.Is(err, migrations.ErrNotFound),
 		errors.Is(err, instances.ErrNotFound),
 		errors.Is(err, store.ErrNotFound),
-		errors.Is(err, clusters.ErrUnknownCluster):
+		errors.Is(err, clusters.ErrUnknownCluster),
+		errors.Is(err, nodeaccess.ErrUnknownMember):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, clusters.ErrUnavailable):
 		status, code = http.StatusServiceUnavailable, "cluster_unavailable"

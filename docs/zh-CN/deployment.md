@@ -203,6 +203,65 @@ curl -fsS http://127.0.0.1:8080/api/v1/healthz
 curl -fsS http://127.0.0.1:8080/api/v1/version
 ```
 
+### 节点网络管理（可选）
+
+每个集群成员都有自己的 **Node network** 页面（Cluster → Nodes → Manage node）。fleet 所在
+主机通过 `sudo -n` 本地执行；其他成员通过 SSH 访问。两条路径都需要 sudo 白名单：
+
+```bash
+sudo install -m 0440 -o root -g root deploy/nodesudoers /etc/sudoers.d/incus-fleet-nodesudoers
+sudo visudo -cf /etc/sudoers.d/incus-fleet-nodesudoers   # 语法检查
+sudo mkdir -p /etc/network/interfaces.d /etc/wpa_supplicant
+sudo systemctl daemon-reload && sudo systemctl restart incus-fleet
+```
+
+白名单覆盖 `ip`、`nft`、`iw`、`dhcpcd`、`wpa_supplicant`、`hostname`，以及仅限
+`/etc/network/interfaces.d/*` 和 `/etc/wpa_supplicant/fleet.conf` 的 `tee`（接口名在使用前
+会校验）。不同发行版的二进制路径可能不同；如果主机把它们放在别处，请调整该文件（runner 按
+相同的 PATH 顺序解析二进制，并把绝对路径传给 sudo）。
+
+远程成员使用专用 SSH 身份。在应用主机上以服务账户生成密钥，并把公钥授权给每个成员上的
+管理用户：
+
+```bash
+sudo -u incus-fleet install -d -m 0700 /home/incus/.ssh
+sudo -u incus-fleet ssh-keygen -t ed25519 -N '' -f /home/incus/.ssh/id_ed25519
+# 在每个成员上执行（管理用户必须具备上面的 sudo 白名单）：
+ssh-copy-id -i /home/incus/.ssh/id_ed25519.pub node-admin@192.0.2.20
+```
+
+在 `/home/incus/config.yaml` 中配置该身份：
+
+```yaml
+node_access:
+  ssh_user: node-admin
+  ssh_key: /home/incus/.ssh/id_ed25519
+  ssh_port: 22
+  # 生产环境请固定主机密钥：
+  # ssh_known_hosts: /home/incus/.ssh/known_hosts
+  ssh_insecure_ignore_host_key: true   # 仅实验环境；优先使用 known_hosts
+```
+
+SSH 账户需要对白名单中的二进制免密 sudo。如果该账户已经拥有全量免密 sudo，白名单是可选的。
+**Add node** 工作流会为它使用的 SSH 账户自动安装这份白名单。
+
+示例 systemd 单元设置 `NoNewPrivileges=false` 和 `PrivateDevices=false`，因为 sudo 是 setuid
+二进制，且 `ip`/`iw`/`nft` 需要真实的设备视图；`ReadWritePaths` 授予上面两个 `/etc` 目录。
+请保留其余加固项。Wi-Fi 扫描/连接还需要在每个节点安装 `wpasupplicant`
+（`apt-get install -y wpasupplicant`）。
+
+#### 从 UI 添加节点
+
+**Add node** 对话框可以准备一台裸机并加入集群。它需要：
+
+- 能通过 SSH 连接目标，且账户可以执行 `sudo`（可以在对话框中输入一次性的 sudo 密码）。
+- 目标能访问现有集群使用的 Incus apt 仓库。安装的 Incus 版本必须与集群版本一致。
+- 成员本地存储池有可写的 source 路径（默认 `/srv/incus`）。
+- 如果要运行 VM，对话框可以安装 `qemu`、`ovmf` 和 `swtpm`。
+
+为了方便新节点接入，对话框默认跳过 SSH 主机密钥校验；生产环境请配置 `ssh_known_hosts` 并
+取消该选项。SSH 和 sudo 密码只用于本次请求，不会被存储。
+
 ## 5. 配置 Caddy
 
 由于会话保存在内存中，Caddy 必须把每个浏览器固定到同一个应用实例。示例 `deploy/caddy/Caddyfile` 使用 `lb_policy cookie` 加上被动/主动健康检查：

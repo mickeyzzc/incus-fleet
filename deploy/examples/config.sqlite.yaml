@@ -10,6 +10,18 @@ database:
   driver: sqlite
   dsn: /home/incus/data/fleet.db
 
+# Optional: SSH identity for node network management and adding members.
+# The account must have passwordless sudo on every member (see nodesudoers).
+# node_access:
+#   ssh_user: node-admin
+#   ssh_key: /home/incus/.ssh/id_ed25519
+#   ssh_port: 22
+#   ssh_known_hosts: /home/incus/.ssh/known_hosts
+#   ssh_insecure_ignore_host_key: false
+#
+# Optional: local Incus member name when it differs from the hostname.
+# local_member: app-a
+
 clusters:
   - name: c1
     display_name: Primary site

@@ -86,6 +86,7 @@ type InstanceServer interface {
 	UpdateProfile(name string, profile api.ProfilePut, etag string) error
 	DeleteProfile(name string) error
 	GetClusterMember(name string) (*api.ClusterMember, string, error)
+	CreateClusterMember(member api.ClusterMembersPost) (incus.Operation, error)
 	UpdateClusterMember(name string, member api.ClusterMemberPut, etag string) error
 	IsClustered() bool
 }
@@ -116,6 +117,9 @@ func (c *Connection) Endpoint() string { return c.cfg.Endpoint }
 
 // Project returns the Incus project used for this connection.
 func (c *Connection) Project() string { return c.cfg.Project }
+
+// Config returns the configured cluster entry.
+func (c *Connection) Config() config.Cluster { return c.cfg }
 
 // Client returns the project-scoped client or the last connection error.
 func (c *Connection) Client() (InstanceServer, error) {

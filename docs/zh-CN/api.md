@@ -195,6 +195,99 @@ POST /api/v1/auth/logout
 
 `POST /clusters/{cluster}/reconnect` 直接返回更新后的摘要对象（不做外层包装）。
 
+## 添加集群成员
+
+`POST /api/v1/clusters/{cluster}/members` 会准备一台新主机并加入集群。fleet 服务通过 SSH
+连接主机，可选地从 apt 仓库安装 Incus，通过主机本地 socket 提交加入请求，并等待成员上报
+`Online`。
+
+```json
+{
+  "name": "node-c",
+  "address": "198.51.100.11",
+  "ssh_user": "node-admin",
+  "ssh_port": 22,
+  "ssh_password": "optional-ssh-password",
+  "sudo_password": "optional-sudo-password",
+  "install_incus": true,
+  "install_vms": true,
+  "ignore_host_key": true,
+  "storage_source": "/srv/incus",
+  "incus_repo": "https://pkgs.zabbly.com/incus/lts-7.0",
+  "incus_repo_key": "https://pkgs.zabbly.com/key.asc"
+}
+```
+
+- `name` 可选；省略时使用节点 hostname。
+- `ssh_user` 默认取 `node_access.ssh_user`；除非提供 `ssh_password`，否则使用 fleet SSH 密钥。
+- `sudo_password` 仅在 SSH 账户需要密码执行 sudo 时使用一次。加入成功后，fleet 会为该账户安装免密白名单。
+- `install_incus` 会添加 apt 源（`incus_repo`/`incus_repo_key`）并安装软件包。安装的版本必须与集群的 Incus 版本一致。
+- `ignore_host_key` 跳过 SSH 主机密钥校验，适用于尚未加入 `known_hosts` 的节点。
+- `storage_source` 填充每个成员的 `storage-pool/default/source`；默认 `/srv/incus`。
+
+`201` 返回加入的成员和准备步骤：
+
+```json
+{
+  "member": {"name": "node-c", "status": "Online", "roles": [], "url": "https://198.51.100.11:8443"},
+  "steps": [
+    {"name": "connect", "status": "ok", "detail": "SSH connection established to 198.51.100.11"},
+    {"name": "install", "status": "ok", "detail": "Incus installed from https://pkgs.zabbly.com/incus/lts-7.0"},
+    {"name": "token", "status": "ok", "detail": "Join token generated for node-c"},
+    {"name": "join", "status": "ok", "detail": "Join request accepted by cluster c2"},
+    {"name": "online", "status": "ok", "detail": "Member node-c is online"},
+    {"name": "sudoers", "status": "ok", "detail": "Passwordless node network sudo rules installed"},
+    {"name": "fleet_key", "status": "ok", "detail": "Fleet SSH key authorized for node-admin"}
+  ]
+}
+```
+
+加入后的配置步骤（`sudoers`、`fleet_key` 等）如果返回 `warning`/`skipped`，不会让请求失败，
+因为成员已经加入集群。错误映射为 `400 invalid_request`、`404 not_found`、`409 conflict`
+（成员名已存在）、`503 cluster_unavailable` 或 `500 internal_error`。
+
+请求可能需要数分钟；handler 会延长写超时，服务器的全局超时仍作用于请求上下文。密码只在
+内存中使用，不会持久化或记录到日志。
+
+## 节点网络（按集群成员）
+
+这些端点管理某个集群成员的主机网络。fleet 所在主机通过 `sudo -n` 本地执行；其他成员通过
+`node_access` 的 SSH 身份访问。两条路径都需要 `docs/deployment.md` 中的 sudo 白名单。
+
+```json
+// GET /api/v1/clusters/c2/members/node-b/node?wifi=wlan0
+{
+  "host": "node-b",
+  "nics": [
+    {"name": "eth0", "state": "up", "kind": "ethernet", "mac": "aa:bb:cc:dd:ee:ff", "mtu": 1500,
+     "addresses": [{"family": "inet", "address": "198.51.100.10", "prefixlen": 24}]},
+    {"name": "wlan0", "state": "up", "kind": "wifi", "addresses": [],
+     "wifi": {"connected": true, "ssid": "Office", "signal": -55, "frequency": 2437}}
+  ],
+  "routes": [{"destination": "default", "gateway": "198.51.100.1", "device": "eth0", "metric": "100"}],
+  "firewall": [{"handle": "7", "rule": "tcp dport 22 accept comment \"fleet_rule\""}],
+  "wifi_scan": [{"ssid": "Office", "signal": -45, "frequency": 2437, "secure": true}],
+  "wifi_device": "wlan0",
+  "capabilities": ["nics", "routes", "firewall"]
+}
+```
+
+`wifi` 查询参数选择要扫描的接口；省略时使用第一个无线接口。扫描结果按 SSID 去重（保留信号
+最强的 BSS），并要求接口处于 up 状态。
+
+以下路径都相对于 `/api/v1/clusters/{cluster}/members/{member}/node`：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /networks/{name}/state` `{"up": bool}` | 启用/禁用网卡 |
+| `PATCH /networks/{name}` `{"dhcp": bool, "address": "10.0.0.50/24", "gateway": "...", "persist": bool}` | 静态地址或 DHCP；`persist` 写入 `/etc/network/interfaces.d/<name>` |
+| `POST /networks/{name}/wifi` `{"ssid": "...", "password": "..."}` | 通过 wpa_supplicant 关联并获取 DHCP 租约 |
+| `GET/POST /routes`、`DELETE /routes/{destination}` | 路由表和静态路由 |
+| `GET/POST /firewall`、`DELETE /firewall/{handle}` | fleet_filter nftables 表规则 |
+
+Handler 错误映射为 `400 invalid_request`（输入错误）、`404 not_found`（未知集群或成员）和
+`503 node_unavailable`（缺少 SSH 访问、sudo 规则、二进制，或主机故障）。
+
 ## 实例
 
 ```json

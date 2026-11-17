@@ -380,7 +380,7 @@ func (s *Service) SetNICState(name string, up bool) error {
 	}
 
 	if _, err := s.run.Run("ip", "link", "set", "dev", name, state); err != nil {
-		return fmt.Errorf("nodenet: set %s %s: %v", name, state, err)
+		return fmt.Errorf("%w: set %s %s: %v", ErrUnavailable, name, state, err)
 	}
 
 	return nil
@@ -389,7 +389,7 @@ func (s *Service) SetNICState(name string, up bool) error {
 // AddressRequest configures one interface address.
 type AddressRequest struct {
 	DHCP    bool   `json:"dhcp"`
-	Address string `json:"address,omitempty"` // CIDR, e.g. 10.62.0.50/24
+	Address string `json:"address,omitempty"` // CIDR, e.g. 10.0.0.50/24
 	Gateway string `json:"gateway,omitempty"`
 	Persist bool   `json:"persist"`
 }
@@ -404,7 +404,7 @@ func (s *Service) ApplyAddress(_ context.Context, name string, req AddressReques
 
 	if req.DHCP {
 		if _, err := s.run.Run("dhcpcd", "-1", "--nohook", "resolv.conf", name); err != nil {
-			return fmt.Errorf("nodenet: dhcp on %s: %v", name, err)
+			return fmt.Errorf("%w: dhcp on %s: %v", ErrUnavailable, name, err)
 		}
 	} else {
 		if req.Address == "" {
@@ -425,11 +425,11 @@ func (s *Service) ApplyAddress(_ context.Context, name string, req AddressReques
 		}
 
 		if _, err := s.run.Run("ip", "addr", "add", req.Address, "dev", name); err != nil {
-			return fmt.Errorf("nodenet: add %s on %s: %v", req.Address, name, err)
+			return fmt.Errorf("%w: add %s on %s: %v", ErrUnavailable, req.Address, name, err)
 		}
 		if req.Gateway != "" {
 			if _, err := s.run.Run("ip", "route", "replace", "default", "via", req.Gateway, "dev", name); err != nil {
-				return fmt.Errorf("nodenet: gateway via %s on %s: %v", req.Gateway, name, err)
+				return fmt.Errorf("%w: gateway via %s on %s: %v", ErrUnavailable, req.Gateway, name, err)
 			}
 		}
 	}
@@ -456,7 +456,7 @@ func (s *Service) persistAddress(name string, req AddressRequest) error {
 
 	// tee as root writes the ifupdown snippet into interfaces.d.
 	if err := s.run.RunStdin("tee", []string{"/etc/network/interfaces.d/" + name}, snippet); err != nil {
-		return fmt.Errorf("nodenet: persist %s: %v", name, err)
+		return fmt.Errorf("%w: persist %s: %v", ErrUnavailable, name, err)
 	}
 
 	return nil
@@ -509,7 +509,7 @@ func (s *Service) AddRoute(destination, gateway, device string) error {
 	}
 
 	if _, err := s.run.Run("ip", "route", "add", destination, "via", gateway, "dev", device); err != nil {
-		return fmt.Errorf("nodenet: add route %s via %s: %v", destination, gateway, err)
+		return fmt.Errorf("%w: add route %s via %s: %v", ErrUnavailable, destination, gateway, err)
 	}
 
 	return nil
@@ -522,7 +522,7 @@ func (s *Service) DeleteRoute(destination string) error {
 	}
 
 	if _, err := s.run.Run("ip", "route", "del", destination); err != nil {
-		return fmt.Errorf("nodenet: delete route %s: %v", destination, err)
+		return fmt.Errorf("%w: delete route %s: %v", ErrUnavailable, destination, err)
 	}
 
 	return nil
@@ -604,7 +604,7 @@ func (s *Service) AddFirewallRule(req FirewallRequest) error {
 
 	args := []string{"add", "rule", fleetTable, "input", proto, "dport", strconv.Itoa(req.Port), action, "comment", fmt.Sprintf("%q", comment)}
 	if _, err := s.run.Run("nft", args...); err != nil {
-		return fmt.Errorf("nodenet: add rule: %v", err)
+		return fmt.Errorf("%w: add rule: %v", ErrUnavailable, err)
 	}
 
 	return nil
@@ -617,7 +617,7 @@ func (s *Service) DeleteFirewallRule(handle string) error {
 	}
 
 	if _, err := s.run.Run("nft", "delete", "rule", fleetTable, "input", "handle", handle); err != nil {
-		return fmt.Errorf("nodenet: delete rule handle %s: %v", handle, err)
+		return fmt.Errorf("%w: delete rule handle %s: %v", ErrUnavailable, handle, err)
 	}
 
 	return nil
@@ -633,10 +633,10 @@ func (s *Service) ensureFleetTable() error {
 	}
 
 	if _, err := s.run.Run("nft", "add", "table", "inet", "fleet_filter"); err != nil {
-		return fmt.Errorf("nodenet: create table: %v", err)
+		return fmt.Errorf("%w: create table: %v", ErrUnavailable, err)
 	}
 	if _, err := s.run.Run("nft", "add", "chain", "inet", "fleet_filter", "input", "{", "type", "filter", "hook", "input", "priority", "-10", ";", "policy", "accept", ";", "}"); err != nil {
-		return fmt.Errorf("nodenet: create chain: %v", err)
+		return fmt.Errorf("%w: create chain: %v", ErrUnavailable, err)
 	}
 
 	return nil
@@ -709,20 +709,20 @@ func (s *Service) WifiConnect(dev, ssid, password string) error {
 
 	config := fmt.Sprintf("network={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n", ssid, password)
 	if err := s.run.RunStdin("tee", []string{"/etc/wpa_supplicant/fleet.conf"}, config); err != nil {
-		return fmt.Errorf("nodenet: write wifi config: %v", err)
+		return fmt.Errorf("%w: write wifi config: %v", ErrUnavailable, err)
 	}
 
 	args := []string{"-B", "-i", dev, "-c", "/etc/wpa_supplicant/fleet.conf"}
 	if _, err := s.run.Run("wpa_supplicant", args...); err != nil {
-		return fmt.Errorf("nodenet: wpa_supplicant on %s: %v", dev, err)
+		return fmt.Errorf("%w: wpa_supplicant on %s: %v", ErrUnavailable, dev, err)
 	}
 
 	// Bring the link up and lease an address.
 	if _, err := s.run.Run("ip", "link", "set", "dev", dev, "up"); err != nil {
-		return fmt.Errorf("nodenet: bring %s up: %v", dev, err)
+		return fmt.Errorf("%w: bring %s up: %v", ErrUnavailable, dev, err)
 	}
 	if _, err := s.run.Run("dhcpcd", "-1", "--nohook", "resolv.conf", dev); err != nil {
-		return fmt.Errorf("nodenet: dhcp on %s: %v", dev, err)
+		return fmt.Errorf("%w: dhcp on %s: %v", ErrUnavailable, dev, err)
 	}
 
 	return nil

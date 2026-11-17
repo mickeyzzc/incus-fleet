@@ -35,9 +35,13 @@ const pageTitle = computed(() => {
   return t('app.brand')
 })
 const elementLocale = computed(() => (locale.value === 'zh-CN' ? zhCn : en))
-const activeMenu = computed(() =>
-  route.name === 'cluster' ? `/clusters/${String(route.params.cluster ?? '')}` : route.path,
-)
+const activeMenu = computed(() => {
+  if (route.name === 'cluster' || route.name === 'node-detail') {
+    return `/clusters/${String(route.params.cluster ?? '')}`
+  }
+
+  return route.path
+})
 
 watch(
   () => auth.authenticated,
@@ -101,9 +105,6 @@ async function logout(): Promise<void> {
             </el-menu-item>
           </el-sub-menu>
 
-          <el-menu-item index="/node">
-            <span>{{ t('nav.node') }}</span>
-          </el-menu-item>
           <el-menu-item index="/instances">
             <el-icon><Box /></el-icon>
             <span>{{ t('nav.instances') }}</span>

@@ -29,7 +29,7 @@ func TestRegisterAndUnregister(t *testing.T) {
 	summary, err := manager.Register(context.Background(), config.Cluster{
 		Name:        "c64",
 		DisplayName: "Cluster 64",
-		Endpoint:    "https://192.168.64.21:8443",
+		Endpoint:    "https://192.0.2.10:8443",
 		Project:     "default",
 	})
 	if err != nil {

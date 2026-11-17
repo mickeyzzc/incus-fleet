@@ -597,6 +597,33 @@ export interface NodeFirewallRequest {
   comment?: string
 }
 
+/** Provisions a new host and joins it to a cluster. */
+export interface ClusterMemberJoinRequest {
+  name?: string
+  address: string
+  ssh_user?: string
+  ssh_port?: number
+  ssh_password?: string
+  sudo_password?: string
+  install_incus: boolean
+  install_vms: boolean
+  ignore_host_key: boolean
+  storage_source?: string
+  incus_repo?: string
+  incus_repo_key?: string
+}
+
+export interface ClusterMemberJoinStep {
+  name: string
+  status: string
+  detail?: string
+}
+
+export interface ClusterMemberJoinResult {
+  member: ClusterMember
+  steps: ClusterMemberJoinStep[]
+}
+
 export interface ClusterRegisterRequest {
   name: string
   display_name?: string

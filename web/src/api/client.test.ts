@@ -695,30 +695,49 @@ describe('ApiClient node network and cluster registration endpoints', () => {
   it('hits every node network endpoint', async () => {
     const { client, fetchImpl } = clientWith(mockResponse({ host: 'n1', nics: [] }))
 
-    await client.nodeSnapshot()
-    await client.nodeSnapshot('wlan0')
-    await client.nodeNICState('eth0', false)
-    await client.nodeApplyAddress('eth0', { dhcp: false, address: '10.62.0.50', persist: true })
-    await client.nodeWifiConnect('wlan0', 'OfficeWiFi', 'secret')
-    await client.nodeAddRoute('10.63.0.0/24', '10.62.0.1', 'eth0')
-    await client.nodeDeleteRoute('10.63.0.0/24')
-    await client.nodeAddFirewallRule({ port: 22, proto: 'tcp', action: 'accept', comment: 'ssh' })
-    await client.nodeDeleteFirewallRule('42')
+    await client.nodeSnapshot('c1', 'n1')
+    await client.nodeSnapshot('c1', 'n1', 'wlan0')
+    await client.nodeNICState('c1', 'n1', 'eth0', false)
+    await client.nodeApplyAddress('c1', 'n1', 'eth0', { dhcp: false, address: '10.0.0.50', persist: true })
+    await client.nodeWifiConnect('c1', 'n1', 'wlan0', 'OfficeWiFi', 'secret')
+    await client.nodeAddRoute('c1', 'n1', '10.0.1.0/24', '10.0.0.1', 'eth0')
+    await client.nodeDeleteRoute('c1', 'n1', '10.0.1.0/24')
+    await client.nodeAddFirewallRule('c1', 'n1', { port: 22, proto: 'tcp', action: 'accept', comment: 'ssh' })
+    await client.nodeDeleteFirewallRule('c1', 'n1', '42')
 
+    const auth = 'https://fleet.local/api/v1/clusters/c1/members/n1/node'
     const urls = fetchImpl.mock.calls.map((c) => String(c[0]))
-    expect(urls).toContain('https://fleet.local/api/v1/node')
-    expect(urls).toContain('https://fleet.local/api/v1/node?wifi=wlan0')
-    expect(urls).toContain('https://fleet.local/api/v1/node/networks/eth0/state')
-    expect(urls).toContain('https://fleet.local/api/v1/node/networks/eth0')
-    expect(urls).toContain('https://fleet.local/api/v1/node/networks/wlan0/wifi')
-    expect(urls).toContain('https://fleet.local/api/v1/node/routes')
-    expect(urls).toContain('https://fleet.local/api/v1/node/routes/10.63.0.0%2F24')
-    expect(urls).toContain('https://fleet.local/api/v1/node/firewall')
-    expect(urls).toContain('https://fleet.local/api/v1/node/firewall/42')
+    expect(urls).toContain(auth)
+    expect(urls).toContain(`${auth}?wifi=wlan0`)
+    expect(urls).toContain(`${auth}/networks/eth0/state`)
+    expect(urls).toContain(`${auth}/networks/eth0`)
+    expect(urls).toContain(`${auth}/networks/wlan0/wifi`)
+    expect(urls).toContain(`${auth}/routes`)
+    expect(urls).toContain(`${auth}/routes/10.0.1.0%2F24`)
+    expect(urls).toContain(`${auth}/firewall`)
+    expect(urls).toContain(`${auth}/firewall/42`)
 
     const methods = fetchImpl.mock.calls.map((c) => (c[1] as RequestInit | undefined)?.method)
     expect(methods).toContain('PATCH')
     expect(methods).toContain('DELETE')
+  })
+
+  it('provisions a new cluster member', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ member: { name: 'n2' }, steps: [] }))
+
+    const result = await client.joinClusterMember('c2', {
+      address: '198.51.100.11',
+      install_incus: true,
+      install_vms: false,
+      ignore_host_key: true,
+      ssh_user: 'node-admin',
+    })
+
+    expect(result.member.name).toBe('n2')
+    const [url, init] = fetchImpl.mock.calls[0] ?? []
+    expect(String(url)).toBe('https://fleet.local/api/v1/clusters/c2/members')
+    expect((init as RequestInit).method).toBe('POST')
+    expect(String((init as RequestInit).body)).toContain('198.51.100.11')
   })
 
   it('hits traffic and cluster registration endpoints', async () => {

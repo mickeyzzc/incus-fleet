@@ -6,6 +6,7 @@ import { ArrowLeft, Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 import InstanceActions from '@/components/InstanceActions.vue'
+import AddClusterMemberDialog from '@/components/AddClusterMemberDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import ImageDistributeDialog from '@/components/ImageDistributeDialog.vue'
@@ -58,6 +59,7 @@ const profileDialogOpen = ref(false)
 const profileEditing = ref<Profile | null>(null)
 const memberDialogOpen = ref(false)
 const memberEditing = ref<ClusterMember | null>(null)
+const addMemberOpen = ref(false)
 const volumesDialogOpen = ref(false)
 const volumesPool = ref<StoragePoolResource | null>(null)
 const importDialogOpen = ref(false)
@@ -244,6 +246,15 @@ async function confirmDeleteProfile(profile: Profile): Promise<void> {
 function openMemberDialog(member: ClusterMember): void {
   memberEditing.value = member
   memberDialogOpen.value = true
+}
+
+/** Opens the node detail page where host networking is managed. */
+function openNodeDetail(member: ClusterMember): void {
+  void router.push({ name: 'node-detail', params: { cluster: props.cluster, member: member.name } })
+}
+
+async function memberAdded(): Promise<void> {
+  await clusters.fetchAll()
 }
 
 function openVolumesDialog(pool: StoragePoolResource): void {
@@ -466,31 +477,74 @@ function openNodeUpgrade(member: ClusterMember): void {
         </div>
 
         <div class="cluster-tags">
-          <el-tag
-            v-for="member in summary.members"
-            :key="member.name"
-            size="small"
-            effect="plain"
-            class="member-tag"
-            :title="t('admin.clickMemberHint')"
-            @click="openMemberDialog(member)"
-          >
-            {{ member.name }} · {{ memberStatusLabel(member.status) }}
-            <el-button
-              v-if="member.status === 'Online'"
-              type="primary"
-              size="small"
-              link
-              class="upgrade-link"
-              @click.stop="openNodeUpgrade(member)"
-            >
-              {{ t('node.upgrade') }}
-            </el-button>
-          </el-tag>
           <el-tag v-for="network in summary.networks" :key="network" size="small" effect="plain">
             {{ network }}
           </el-tag>
         </div>
+      </div>
+    </section>
+
+    <section v-if="summary" class="panel">
+      <div class="panel-body">
+        <div class="page-header" style="margin-bottom: 14px">
+          <div>
+            <h3 class="section-title">{{ t('cluster.nodes') }}</h3>
+            <p class="subtitle">{{ t('cluster.nodesHint') }}</p>
+          </div>
+          <div class="page-actions">
+            <el-button :icon="Plus" type="primary" @click="addMemberOpen = true">
+              {{ t('cluster.addNode') }}
+            </el-button>
+          </div>
+        </div>
+
+        <el-table :data="summary.members" size="small" stripe>
+          <el-table-column :label="t('common.name')" min-width="160">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openNodeDetail(row)">
+                {{ row.name }}
+              </el-button>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.status')" width="110">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'Online' ? 'success' : 'info'" size="small" effect="plain">
+                {{ memberStatusLabel(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.memberRoles')" min-width="150">
+            <template #default="{ row }">
+              <span class="mono">{{ row.roles?.join(', ') || t('common.none') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.architectures')" width="120">
+            <template #default="{ row }">{{ row.architecture || t('common.none') }}</template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.memberAddress')" min-width="190">
+            <template #default="{ row }">
+              <span class="mono">{{ row.url || summary.endpoint }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" width="220" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openNodeDetail(row)">
+                {{ t('cluster.manageNode') }}
+              </el-button>
+              <el-button link type="primary" @click="openMemberDialog(row)">
+                {{ t('common.edit') }}
+              </el-button>
+              <el-button
+                v-if="row.status === 'Online'"
+                link
+                type="warning"
+                @click="openNodeUpgrade(row)"
+              >
+                {{ t('node.upgrade') }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
     </section>
 
@@ -902,6 +956,7 @@ function openNodeUpgrade(member: ClusterMember): void {
       :profile="profileEditing"
       @saved="instances.fetchProfiles(cluster, true)"
     />
+    <AddClusterMemberDialog v-model="addMemberOpen" :cluster="cluster" @added="memberAdded" />
     <MemberDialog v-model="memberDialogOpen" :cluster="cluster" :member="memberEditing" />
     <NodeUpgradeDialog
       v-model="nodeUpgradeDialogOpen"

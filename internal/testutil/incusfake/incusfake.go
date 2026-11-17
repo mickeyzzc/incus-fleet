@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	incus "github.com/lxc/incus/v7/client"
@@ -32,6 +33,7 @@ type Server struct {
 	ClusterErr        error
 	Members           []api.ClusterMember
 	MembersErr        error
+	MembersFunc       func() ([]api.ClusterMember, error)
 	Instances         []api.InstanceFull
 	InstancesErr      error
 	Instance          *api.Instance
@@ -96,6 +98,9 @@ type Server struct {
 	DeleteProfileErr  error
 	Member            *api.ClusterMember
 	MemberErr         error
+	CreateMemberErr   error
+	JoinToken         *api.ClusterMemberJoinToken
+	JoinTokenMetadata map[string]any
 	UpdateMemberErr   error
 	PoolNames         []string
 	PoolNamesErr      error
@@ -127,6 +132,7 @@ type Server struct {
 	updateProfiles  []UpdateProfileArgs
 	deleteProfiles  []string
 	updateMembers   []UpdateMemberArgs
+	createMembers   []api.ClusterMembersPost
 	createSnapshots []SnapshotArgs
 	deleteSnapshots []SnapshotArgs
 	deleteImages    []string
@@ -541,6 +547,9 @@ func (s *Server) GetCluster() (*api.Cluster, string, error) {
 // GetClusterMembers implements clusters.InstanceServer.
 func (s *Server) GetClusterMembers() ([]api.ClusterMember, error) {
 	s.record("GetClusterMembers")
+	if s.MembersFunc != nil {
+		return s.MembersFunc()
+	}
 	if s.MembersErr != nil {
 		return nil, s.MembersErr
 	}
@@ -1309,6 +1318,59 @@ func (s *Server) GetClusterMember(name string) (*api.ClusterMember, string, erro
 	}
 
 	return nil, "", api.StatusErrorf(http.StatusNotFound, "Cluster member %q not found", name)
+}
+
+// CreateClusterMember implements clusters.InstanceServer.
+func (s *Server) CreateClusterMember(member api.ClusterMembersPost) (incus.Operation, error) {
+	s.record("CreateClusterMember:" + member.ServerName)
+	s.mu.Lock()
+	s.createMembers = append(s.createMembers, member)
+	s.mu.Unlock()
+
+	if s.CreateMemberErr != nil {
+		return nil, s.CreateMemberErr
+	}
+
+	if s.JoinTokenMetadata != nil {
+		return &Operation{Metadata: s.JoinTokenMetadata}, nil
+	}
+
+	token := s.JoinToken
+	if token == nil {
+		token = &api.ClusterMemberJoinToken{
+			ServerName:  member.ServerName,
+			Fingerprint: "fleet-fingerprint",
+			Addresses:   []string{"192.0.2.10:8443"},
+			Secret:      "join-secret",
+			ExpiresAt:   time.Now().Add(time.Hour),
+		}
+	} else {
+		copied := *token
+		copied.ServerName = member.ServerName
+		token = &copied
+	}
+
+	addresses := make([]any, 0, len(token.Addresses))
+	for _, address := range token.Addresses {
+		addresses = append(addresses, address)
+	}
+
+	return &Operation{Metadata: map[string]any{
+		"serverName":  token.ServerName,
+		"secret":      token.Secret,
+		"fingerprint": token.Fingerprint,
+		"addresses":   addresses,
+		"expiresAt":   token.ExpiresAt.Format(time.RFC3339Nano),
+	}}, nil
+}
+
+// CreateMemberArgs returns the join-token requests recorded by
+// CreateClusterMember.
+func (s *Server) CreateMemberArgs() []api.ClusterMembersPost {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]api.ClusterMembersPost(nil), s.createMembers...)
 }
 
 // UpdateClusterMember implements clusters.InstanceServer.

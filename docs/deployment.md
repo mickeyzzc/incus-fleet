@@ -203,8 +203,9 @@ different deployment directory.
 
 ### Node network management (optional)
 
-The **Node Network** page manages the physical NICs, routes, nftables rules, and Wi-Fi of the
-host the app runs on. It needs a sudo whitelist and two unit hardening changes:
+Each cluster member has its own **Node network** page (Cluster → Nodes → Manage node). The local
+app host is managed through `sudo -n`; other members are reached over SSH. Both need the sudo
+whitelist:
 
 ```bash
 sudo install -m 0440 -o root -g root deploy/nodesudoers /etc/sudoers.d/incus-fleet-nodesudoers
@@ -216,25 +217,54 @@ sudo systemctl daemon-reload && sudo systemctl restart incus-fleet
 The whitelist covers `ip`, `nft`, `iw`, `dhcpcd`, `wpa_supplicant`, `hostname`, and `tee` limited
 to `/etc/network/interfaces.d/*` and `/etc/wpa_supplicant/fleet.conf` (interface names are
 validated before use). Binary paths differ by distribution; adjust the file if your host keeps
-them elsewhere (the runner passes the resolved absolute path to sudo).
+them elsewhere (the runner resolves the binary through the same PATH order and passes the absolute
+path to sudo).
+
+Remote members authenticate with a dedicated SSH identity. Generate the key on the app host as
+the service account and authorize its public key for the management user on every member:
+
+```bash
+sudo -u incus-fleet install -d -m 0700 /home/incus/.ssh
+sudo -u incus-fleet ssh-keygen -t ed25519 -N '' -f /home/incus/.ssh/id_ed25519
+# On each member (the management user must have the sudo whitelist above):
+ssh-copy-id -i /home/incus/.ssh/id_ed25519.pub node-admin@192.0.2.20
+```
+
+Configure the identity in `/home/incus/config.yaml`:
+
+```yaml
+node_access:
+  ssh_user: node-admin
+  ssh_key: /home/incus/.ssh/id_ed25519
+  ssh_port: 22
+  # Pin host keys in production:
+  # ssh_known_hosts: /home/incus/.ssh/known_hosts
+  ssh_insecure_ignore_host_key: true   # lab only; prefer known_hosts
+```
+
+The SSH account needs passwordless sudo for the whitelisted binaries. If the account already has
+passwordless sudo for everything, the whitelist is optional. The **Add node** workflow installs
+this whitelist automatically for the SSH account it uses.
 
 The sample unit sets `NoNewPrivileges=false` and `PrivateDevices=false` because sudo is a setuid
 binary and `ip`/`iw`/`nft` need the real device view; `ReadWritePaths` grants the two `/etc`
 directories above. Keep the remaining hardening. Wi-Fi scan/connect additionally needs
-`wpasupplicant` installed on the node (`apt-get install -y wpasupplicant`).
+`wpasupplicant` installed on each node (`apt-get install -y wpasupplicant`).
 
-Follow logs with:
+#### Adding a node from the UI
 
-```bash
-sudo journalctl -u incus-fleet -f
-```
+The **Add node** dialog can provision a bare host and join it to a cluster. It needs:
 
-Verify locally:
+- SSH connectivity to the target and an account that can run `sudo` (a one-time sudo password can
+  be entered in the dialog).
+- Network access from the target to the Incus apt repository used by the existing cluster. The
+  installed Incus version must match the cluster version.
+- A writable storage source path for the member's local storage pool (`/srv/incus` by default).
+- For VMs, the dialog can install `qemu`, `ovmf`, and `swtpm`.
 
-```bash
-curl -fsS http://127.0.0.1:8080/api/v1/healthz
-curl -fsS http://127.0.0.1:8080/api/v1/version
-```
+The dialog skips SSH host key verification by default for convenience on a new node; enable
+`ssh_known_hosts` and uncheck that option for production. SSH and sudo passwords are used only for
+the request and are never stored.
 
 ## 5. Configure Caddy
 

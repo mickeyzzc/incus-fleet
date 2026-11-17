@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
@@ -7,6 +7,11 @@ import { useI18n } from 'vue-i18n'
 import type { NodeNIC } from '@/api/types'
 import { api } from '@/api'
 import { errorMessage } from '@/utils/errors'
+
+const props = defineProps<{
+  cluster: string
+  member: string
+}>()
 
 const { t } = useI18n()
 
@@ -27,15 +32,21 @@ const wifiDialogOpen = ref(false)
 const wifiForm = reactive({ ssid: '', password: '' })
 
 const wifiDevice = computed(() => snapshot.value?.wifi_device ?? '')
+const displayHost = computed(() => snapshot.value?.host || props.member)
 
-onMounted(() => {
-  void refresh()
-})
+watch(
+  [() => props.cluster, () => props.member],
+  () => {
+    snapshot.value = null
+    void refresh()
+  },
+  { immediate: true },
+)
 
 async function refresh(): Promise<void> {
   loading.value = true
   try {
-    snapshot.value = await api.nodeSnapshot(wifiDevice.value || undefined)
+    snapshot.value = await api.nodeSnapshot(props.cluster, props.member, wifiDevice.value || undefined)
   } catch (err) {
     ElMessage.error(errorMessage(err))
   } finally {
@@ -67,7 +78,7 @@ async function toggleNIC(nic: NodeNIC): Promise<void> {
   }
 
   try {
-    await api.nodeNICState(nic.name, up)
+    await api.nodeNICState(props.cluster, props.member, nic.name, up)
     ElMessage.success(t('nodeActions.stateChanged', { name: nic.name }))
     await refresh()
   } catch (err) {
@@ -91,7 +102,7 @@ async function submitAddress(): Promise<void> {
   }
 
   try {
-    await api.nodeApplyAddress(target.name, {
+    await api.nodeApplyAddress(props.cluster, props.member, target.name, {
       dhcp: addressForm.dhcp,
       address: addressForm.dhcp ? undefined : addressForm.address.trim(),
       gateway: addressForm.dhcp ? undefined : addressForm.gateway.trim(),
@@ -107,7 +118,13 @@ async function submitAddress(): Promise<void> {
 
 async function submitRoute(): Promise<void> {
   try {
-    await api.nodeAddRoute(routeForm.destination.trim(), routeForm.gateway.trim(), routeForm.device.trim())
+    await api.nodeAddRoute(
+      props.cluster,
+      props.member,
+      routeForm.destination.trim(),
+      routeForm.gateway.trim(),
+      routeForm.device.trim(),
+    )
     ElMessage.success(t('nodeActions.routeAdded'))
     routeDialogOpen.value = false
     await refresh()
@@ -128,7 +145,7 @@ async function confirmDeleteRoute(destination: string): Promise<void> {
   }
 
   try {
-    await api.nodeDeleteRoute(destination)
+    await api.nodeDeleteRoute(props.cluster, props.member, destination)
     ElMessage.success(t('nodeActions.routeDeleted'))
     await refresh()
   } catch (err) {
@@ -138,7 +155,7 @@ async function confirmDeleteRoute(destination: string): Promise<void> {
 
 async function submitFirewall(): Promise<void> {
   try {
-    await api.nodeAddFirewallRule({
+    await api.nodeAddFirewallRule(props.cluster, props.member, {
       port: firewallForm.port,
       proto: firewallForm.proto,
       action: firewallForm.action,
@@ -164,7 +181,7 @@ async function confirmDeleteFirewall(handle: string): Promise<void> {
   }
 
   try {
-    await api.nodeDeleteFirewallRule(handle)
+    await api.nodeDeleteFirewallRule(props.cluster, props.member, handle)
     ElMessage.success(t('nodeActions.firewallRuleDeleted'))
     await refresh()
   } catch (err) {
@@ -174,7 +191,7 @@ async function confirmDeleteFirewall(handle: string): Promise<void> {
 
 async function connectWiFi(ssid: string): Promise<void> {
   try {
-    await api.nodeWifiConnect(wifiDevice.value, ssid, wifiForm.password)
+    await api.nodeWifiConnect(props.cluster, props.member, wifiDevice.value, ssid, wifiForm.password)
     ElMessage.success(t('nodeActions.wifiConnected', { ssid }))
     wifiDialogOpen.value = false
     wifiForm.password = ''
@@ -203,9 +220,9 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
   <div class="page">
     <div class="page-header">
       <div>
-        <h2>{{ t('nodePage.title') }}</h2>
+        <h3 class="section-title">{{ t('nodePage.title') }}</h3>
         <p class="subtitle">
-          {{ t('nodePage.subtitle', { host: snapshot?.host || '' }) }}
+          {{ t('nodePage.subtitle', { host: displayHost }) }}
         </p>
       </div>
       <div class="page-actions">
@@ -215,7 +232,13 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
       </div>
     </div>
 
-    <el-alert class="fleet-alert" type="warning" :closable="false" show-icon :title="t('nodePage.warning')" />
+    <el-alert
+      class="fleet-alert"
+      type="warning"
+      :closable="false"
+      show-icon
+      :title="t('nodePage.warning', { host: displayHost })"
+    />
 
     <section class="panel">
       <div class="panel-body">
@@ -386,10 +409,10 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         </el-form-item>
         <template v-if="!addressForm.dhcp">
           <el-form-item :label="t('nodePage.addressCidr')">
-            <el-input v-model="addressForm.address" placeholder="10.62.0.50" />
+            <el-input v-model="addressForm.address" placeholder="10.0.0.50" />
           </el-form-item>
           <el-form-item :label="t('network.networkGateway')">
-            <el-input v-model="addressForm.gateway" placeholder="10.62.0.1" />
+            <el-input v-model="addressForm.gateway" placeholder="10.0.0.1" />
           </el-form-item>
         </template>
         <el-form-item :label="t('nodePage.persist')">
@@ -406,13 +429,13 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
     <el-dialog v-model="routeDialogOpen" :title="t('nodePage.addRoute')" width="520px" destroy-on-close>
       <el-form label-position="top">
         <el-form-item :label="t('nodePage.destination')">
-          <el-input v-model="routeForm.destination" placeholder="10.63.0.0/24" />
+          <el-input v-model="routeForm.destination" placeholder="10.0.1.0/24" />
         </el-form-item>
         <el-form-item :label="t('network.networkGateway')">
-          <el-input v-model="routeForm.gateway" placeholder="10.62.0.1" />
+          <el-input v-model="routeForm.gateway" placeholder="10.0.0.1" />
         </el-form-item>
         <el-form-item :label="t('nodePage.device')">
-          <el-input v-model="routeForm.device" placeholder="enp1s0" />
+          <el-input v-model="routeForm.device" placeholder="eth0" />
         </el-form-item>
       </el-form>
       <template #footer>

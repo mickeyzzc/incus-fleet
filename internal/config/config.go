@@ -16,9 +16,22 @@ var clusterNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
 // Config is the top-level application configuration.
 type Config struct {
-	Server   Server    `yaml:"server"`
-	Database Database  `yaml:"database"`
-	Clusters []Cluster `yaml:"clusters"`
+	Server      Server     `yaml:"server"`
+	Database    Database   `yaml:"database"`
+	NodeAccess  NodeAccess `yaml:"node_access"`
+	LocalMember string     `yaml:"local_member"`
+	Clusters    []Cluster  `yaml:"clusters"`
+}
+
+// NodeAccess configures the SSH identity used to manage network settings on
+// cluster members other than the host incus-fleet runs on. The account must
+// have passwordless sudo; deploy/nodesudoers provides the minimal whitelist.
+type NodeAccess struct {
+	SSHUser                  string `yaml:"ssh_user"`
+	SSHKey                   string `yaml:"ssh_key"`
+	SSHPort                  int    `yaml:"ssh_port"`
+	SSHKnownHosts            string `yaml:"ssh_known_hosts"`
+	SSHInsecureIgnoreHostKey bool   `yaml:"ssh_insecure_ignore_host_key"`
 }
 
 // Server contains HTTP server settings.
@@ -99,6 +112,9 @@ func (c *Config) applyDefaults() {
 	if c.Database.Driver == "" {
 		c.Database.Driver = "sqlite"
 	}
+	if c.NodeAccess.SSHPort == 0 {
+		c.NodeAccess.SSHPort = 22
+	}
 
 	for i := range c.Clusters {
 		if c.Clusters[i].Project == "" {
@@ -134,6 +150,10 @@ func (c *Config) Validate() error {
 		return errors.New("config: database.dsn is required")
 	}
 
+	if err := c.NodeAccess.validate(); err != nil {
+		return err
+	}
+
 	if len(c.Clusters) == 0 {
 		return errors.New("config: at least one cluster is required")
 	}
@@ -163,6 +183,25 @@ func (c *Config) Validate() error {
 
 // ValidateFiles verifies that certificate files referenced by the config exist.
 func (c *Config) ValidateFiles() error {
+	for _, p := range []struct {
+		label string
+		path  string
+	}{
+		{"node_access.ssh_key", c.NodeAccess.SSHKey},
+		{"node_access.ssh_known_hosts", c.NodeAccess.SSHKnownHosts},
+	} {
+		if p.path == "" {
+			continue
+		}
+		info, err := os.Stat(p.path)
+		if err != nil {
+			return fmt.Errorf("config: %s: %w", p.label, err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("config: %s is a directory", p.label)
+		}
+	}
+
 	for i := range c.Clusters {
 		cl := &c.Clusters[i]
 		for _, p := range []struct {
@@ -198,4 +237,27 @@ func (c *Config) ClusterByName(name string) (Cluster, bool) {
 	}
 
 	return Cluster{}, false
+}
+
+func (n NodeAccess) validate() error {
+	user := strings.TrimSpace(n.SSHUser)
+	key := strings.TrimSpace(n.SSHKey)
+
+	if user == "" && key == "" {
+		return nil
+	}
+	if user == "" {
+		return errors.New("config: node_access.ssh_user is required with node_access.ssh_key")
+	}
+	if key == "" {
+		return errors.New("config: node_access.ssh_key is required with node_access.ssh_user")
+	}
+	if n.SSHPort < 1 || n.SSHPort > 65535 {
+		return fmt.Errorf("config: node_access.ssh_port %d is invalid", n.SSHPort)
+	}
+	if strings.TrimSpace(n.SSHKnownHosts) == "" && !n.SSHInsecureIgnoreHostKey {
+		return errors.New("config: node_access needs ssh_known_hosts or ssh_insecure_ignore_host_key=true")
+	}
+
+	return nil
 }

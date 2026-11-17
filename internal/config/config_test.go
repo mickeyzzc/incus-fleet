@@ -246,3 +246,80 @@ clusters:
 		t.Fatalf("cluster defaults = %#v", cfg.Clusters[0])
 	}
 }
+
+func minimalConfig() Config {
+	return Config{
+		Server:   Server{Listen: "127.0.0.1:8080", AuthToken: "token", LogLevel: "info"},
+		Database: Database{Driver: "sqlite", DSN: "/tmp/fleet.db"},
+		Clusters: []Cluster{{
+			Name:     "c1",
+			Endpoint: "https://192.0.2.10:8443",
+			TLSCert:  "cert",
+			TLSKey:   "key",
+		}},
+	}
+}
+
+func TestNodeAccessValidation(t *testing.T) {
+	cases := []struct {
+		name   string
+		access NodeAccess
+		err    bool
+	}{
+		{"disabled", NodeAccess{}, false},
+		{"user only", NodeAccess{SSHUser: "node-admin"}, true},
+		{"key only", NodeAccess{SSHKey: "/key"}, true},
+		{"bad port", NodeAccess{SSHUser: "node-admin", SSHKey: "/key", SSHPort: 70000, SSHInsecureIgnoreHostKey: true}, true},
+		{"no host policy", NodeAccess{SSHUser: "node-admin", SSHKey: "/key", SSHPort: 22}, true},
+		{"insecure", NodeAccess{SSHUser: "node-admin", SSHKey: "/key", SSHPort: 22, SSHInsecureIgnoreHostKey: true}, false},
+		{"known hosts", NodeAccess{SSHUser: "node-admin", SSHKey: "/key", SSHPort: 22, SSHKnownHosts: "/known"}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := minimalConfig()
+			cfg.NodeAccess = tc.access
+			err := cfg.Validate()
+			if tc.err && err == nil {
+				t.Fatalf("Validate() error = nil")
+			}
+			if !tc.err && err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestNodeAccessFilesAndDefaults(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.NodeAccess = NodeAccess{
+		SSHUser:                  "node-admin",
+		SSHKey:                   "/does/not/exist",
+		SSHInsecureIgnoreHostKey: true,
+	}
+	cfg.applyDefaults()
+	if cfg.NodeAccess.SSHPort != 22 {
+		t.Fatalf("SSHPort default = %d", cfg.NodeAccess.SSHPort)
+	}
+	if err := cfg.ValidateFiles(); err == nil || !strings.Contains(err.Error(), "node_access.ssh_key") {
+		t.Fatalf("ValidateFiles() error = %v", err)
+	}
+
+	dir := t.TempDir()
+	key := writeFile(t, dir, "id_ed25519", "key")
+	known := writeFile(t, dir, "known_hosts", "host key")
+	cert := writeFile(t, dir, "client.crt", "cert")
+	tlsKey := writeFile(t, dir, "client.key", "key")
+	cfg.NodeAccess.SSHKey = key
+	cfg.NodeAccess.SSHKnownHosts = known
+	cfg.Clusters[0].TLSCert = cert
+	cfg.Clusters[0].TLSKey = tlsKey
+	if err := cfg.ValidateFiles(); err != nil {
+		t.Fatalf("ValidateFiles() error = %v", err)
+	}
+
+	cfg.NodeAccess.SSHKnownHosts = filepath.Join(dir, "missing")
+	if err := cfg.ValidateFiles(); err == nil || !strings.Contains(err.Error(), "ssh_known_hosts") {
+		t.Fatalf("ValidateFiles(known_hosts) error = %v", err)
+	}
+}

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
 import { setLocale } from '@/i18n'
+import AddClusterMemberDialog from '@/components/AddClusterMemberDialog.vue'
 import MemberDialog from '@/components/MemberDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
@@ -36,6 +37,7 @@ function createTestRouter() {
     routes: [
       { path: '/', name: 'dashboard', component: Blank },
       { path: '/clusters/:cluster', name: 'cluster', component: Blank },
+      { path: '/clusters/:cluster/members/:member', name: 'node-detail', component: Blank },
     ],
   })
 }
@@ -121,7 +123,8 @@ describe('ClusterView', () => {
     setLocale('zh-CN')
     const { wrapper } = await mountCluster()
 
-    expect(wrapper.text()).toContain('node-1 · 在线')
+    expect(wrapper.text()).toContain('node-1')
+    expect(wrapper.text()).toContain('在线')
   })
 
   it('filters by instance type', async () => {
@@ -186,7 +189,10 @@ describe('ClusterView', () => {
       force: false,
     })
 
-    await buttonByText(wrapper, 'Edit').trigger('click')
+    const webRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('web') && row.text().includes('10.0.0.51'))
+    await webRow?.findAll('button').find((b) => b.text().includes('Edit'))?.trigger('click')
     await flushPromises()
     expect(api.getInstance).toHaveBeenCalledWith('c1', 'web')
     expect(wrapper.findComponent(InstanceFormDialog).props('mode')).toBe('edit')
@@ -333,10 +339,37 @@ describe('ClusterView', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('Profile default deleted.')
   })
 
-  it('opens the member dialog from a member tag and saves changes', async () => {
+  it('navigates from a member row to the node detail page', async () => {
+    const { wrapper, router } = await mountCluster()
+
+    const memberRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('database-leader'))
+    await memberRow?.findAll('button').find((b) => b.text().includes('Manage node'))?.trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.name).toBe('node-detail')
+    expect(router.currentRoute.value.params).toMatchObject({ cluster: 'c1', member: 'node-1' })
+  })
+
+  it('opens the add-node dialog', async () => {
     const { wrapper } = await mountCluster()
 
-    await wrapper.find('.member-tag').trigger('click')
+    await buttonByText(wrapper, 'Add node').trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(AddClusterMemberDialog)
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('cluster')).toBe('c1')
+  })
+
+  it('opens the member dialog from the nodes table and saves changes', async () => {
+    const { wrapper } = await mountCluster()
+
+    const memberRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('database-leader'))
+    await memberRow?.findAll('button').find((b) => b.text().includes('Edit'))?.trigger('click')
     await flushPromises()
 
     const dialog = wrapper.findComponent(MemberDialog)
