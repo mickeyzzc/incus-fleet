@@ -597,8 +597,8 @@ pacman，并拒绝添加未验证的 `repo_url`。新集群使用 `"mode":"init"
 agent-first 加入步骤：
 
 1. 填写精确的成员名称和集群地址。
-2. 点击 **创建注册 token**。对话框显示一次性 token 和 `incus-fleet-agent enroll` 命令；在节点上
-   执行后，对话框会轮询 agent 上线状态。
+2. 点击 **创建注册 token**。对话框显示一次性 token 和一条安装命令；该命令会下载 agent、安装
+   systemd unit 和 sudoers 白名单、完成注册并启动服务。以 root 执行后，对话框会轮询 agent 上线状态。
 3. agent 上线后点击 **通过 agent 引导**。中心签发 join spec，agent helper 安装 Incus（仅在勾选
    **通过包管理器安装 Incus** 时）、执行 preseed 加入集群，并返回完成的步骤。
 
