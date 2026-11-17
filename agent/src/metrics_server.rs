@@ -69,12 +69,21 @@ fn authorized(header: &str, token: &str) -> bool {
     if token.is_empty() {
         return false;
     }
-    let lowered = header.to_ascii_lowercase();
-    let Some(value) = lowered.strip_prefix("authorization:").map(str::trim) else {
+    let Some((name, value)) = header.split_once(':') else {
         return false;
     };
-    let expected = format!("bearer {token}");
-    value.len() == expected.len() && value.as_bytes().ct_eq(expected.as_bytes()).into()
+    if !name.eq_ignore_ascii_case("authorization") {
+        return false;
+    }
+    let value = value.trim();
+    let Some((scheme, provided)) = value.split_once(' ') else {
+        return false;
+    };
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return false;
+    }
+    let provided = provided.trim();
+    provided.len() == token.len() && provided.as_bytes().ct_eq(token.as_bytes()).into()
 }
 
 async fn respond(stream: &mut TcpStream, status: u16, body: &str) -> std::io::Result<()> {
@@ -144,9 +153,11 @@ mod tests {
     fn checks_bearer_token() {
         assert!(authorized("Authorization: Bearer secret", "secret"));
         assert!(authorized("authorization: bearer secret", "secret"));
+        assert!(authorized("Authorization: Bearer SecretCase", "SecretCase"));
         assert!(!authorized("Authorization: Bearer other", "secret"));
         assert!(!authorized("Authorization: Bearer secret", ""));
         assert!(!authorized("X-Other: value", "secret"));
+        assert!(!authorized("Authorization: Basic secret", "secret"));
     }
 
     #[test]

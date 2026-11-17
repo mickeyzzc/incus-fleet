@@ -83,6 +83,19 @@ enum Command {
         #[arg(long)]
         no_restart: bool,
     },
+    /// Run only the direct Prometheus listener without connecting to a center.
+    MetricsServe {
+        #[arg(long, default_value = "127.0.0.1:19100")]
+        listen: String,
+        #[arg(long, default_value = "")]
+        advertise: String,
+        #[arg(long)]
+        token_file: Option<PathBuf>,
+        #[arg(long, default_value_t = 10)]
+        interval_secs: u64,
+        #[arg(long)]
+        ebpf_object: Option<PathBuf>,
+    },
     /// Load the eBPF object once and print the collected host counters.
     EbpfSelfTest {
         #[arg(long)]
@@ -167,6 +180,45 @@ async fn main() -> Result<()> {
             println!("installed {}", target.display());
             if !no_restart {
                 upgrade::restart_service();
+            }
+        }
+        Command::MetricsServe {
+            listen,
+            advertise,
+            token_file,
+            interval_secs,
+            ebpf_object,
+        } => {
+            let token = match token_file {
+                Some(path) => std::fs::read_to_string(path)?,
+                None => std::env::var("INCUS_FLEET_METRICS_TOKEN").unwrap_or_default(),
+            };
+            if token.trim().is_empty() {
+                bail!("metrics token is required for metrics-serve");
+            }
+            let advertise = if advertise.trim().is_empty() {
+                listen.clone()
+            } else {
+                advertise
+            };
+            let latest = std::sync::Arc::new(std::sync::Mutex::new(None));
+            tokio::spawn(metrics_server::serve(
+                metrics_server::ServeConfig {
+                    listen: listen.clone(),
+                    advertise: advertise.clone(),
+                    token: token.trim().to_string(),
+                },
+                latest.clone(),
+            ));
+            let mut collector = metrics::Collector::with_ebpf(ebpf_object.as_deref());
+            let mut ticker =
+                tokio::time::interval(std::time::Duration::from_secs(interval_secs.max(1)));
+            loop {
+                ticker.tick().await;
+                let batch = collector.collect("metrics-serve");
+                if let Ok(mut guard) = latest.lock() {
+                    *guard = Some(batch);
+                }
             }
         }
         Command::EbpfSelfTest {
