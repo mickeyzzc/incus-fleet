@@ -493,12 +493,12 @@ func TestRouteRunnerFailures(t *testing.T) {
 }
 
 func TestFleetRouteOwnership(t *testing.T) {
-	runner := &fakeRunner{outputs: map[string]string{}}
+	runner := &fakeRunner{outputs: map[string]string{"ip -j route show": "[]"}}
 	service := NewService(runner)
 	if err := service.AddFleetRoute("10.0.1.0/24", "10.0.0.1", "eth0"); err != nil {
 		t.Fatalf("AddFleetRoute() error = %v", err)
 	}
-	if len(runner.calls) != 1 || !strings.Contains(runner.calls[0], "proto 99") {
+	if len(runner.calls) < 1 || !strings.Contains(runner.calls[len(runner.calls)-1], "proto 99") {
 		t.Fatalf("AddFleetRoute calls = %#v", runner.calls)
 	}
 	if err := service.DeleteFleetRoute("10.0.1.0/24"); err != nil {
@@ -532,5 +532,15 @@ func TestResolveBinaryFallbackAndDeleteRouteValidation(t *testing.T) {
 	service := NewService(&fakeRunner{})
 	if err := service.DeleteFleetRoute("not-a-destination"); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("DeleteFleetRoute(bad) error = %v", err)
+	}
+}
+
+func TestFleetRouteRejectsForeignOwnership(t *testing.T) {
+	runner := &fakeRunner{outputs: map[string]string{
+		"ip -j route show": `[{"dst":"10.0.1.0/24","dev":"eth0","protocol":"16"}]`,
+	}}
+	service := NewService(runner)
+	if err := service.AddFleetRoute("10.0.1.0/24", "10.0.0.1", "eth0"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("AddFleetRoute(foreign) error = %v", err)
 	}
 }

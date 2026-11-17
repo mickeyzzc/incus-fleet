@@ -181,6 +181,7 @@ type Route struct {
 	Gateway     string `json:"gateway,omitempty"`
 	Device      string `json:"device,omitempty"`
 	Metric      string `json:"metric,omitempty"`
+	Protocol    string `json:"protocol,omitempty"`
 }
 
 // FirewallRule is one nftables rule managed by fleet.
@@ -515,6 +516,7 @@ func (s *Service) ListRoutes() ([]Route, error) {
 			Destination: item.Dst,
 			Gateway:     item.Gateway,
 			Device:      item.Dev,
+			Protocol:    item.Protocol,
 		}
 		if item.Metric > 0 {
 			route.Metric = strconv.Itoa(item.Metric)
@@ -776,7 +778,16 @@ func (s *Service) AddFleetRoute(destination, gateway, device string) error {
 			return err
 		}
 	}
-	args := []string{"route", "add", destination}
+	if routes, err := s.ListRoutes(); err == nil {
+		for _, route := range routes {
+			if route.Destination == destination && route.Protocol != "" && route.Protocol != "99" {
+				return fmt.Errorf("%w: route %s is owned by protocol %s", ErrInvalidRequest, destination, route.Protocol)
+			}
+		}
+	} else {
+		return err
+	}
+	args := []string{"route", "replace", destination}
 	if gateway != "" {
 		if net.ParseIP(gateway) == nil {
 			return fmt.Errorf("%w: gateway %q is invalid", ErrInvalidRequest, gateway)
