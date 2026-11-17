@@ -15,7 +15,7 @@
 - 类型化主机操作路由（`hostops`），支持 `node_access.mode`（`auto`、`agent`、`ssh`、`local`）
   并显式报告后端。
 - 持久化 host task 与审计记录，提供 `GET /api/v1/tasks`、`GET /api/v1/tasks/{id}` 和
-  `GET /api/v1/audit`。
+  `GET /api/v1/audit`，节点网络页提供 **History** 对话框。
 - schema 迁移版本跟踪，以及 host task、审计、agent、注册 token 和证书表。
 - Wi-Fi 与节点网络任务计划已脱敏；密码和 join token 不会持久化。
 

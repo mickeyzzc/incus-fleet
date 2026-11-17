@@ -5,8 +5,11 @@ import type {
   ClusterRegisterRequest,
   ClusterTraffic,
   NodeAddressRequest,
+  NodeAudit,
   NodeFirewallRequest,
   NodeSnapshot,
+  NodeTask,
+  NodeTaskEvent,
   BatchKeysRequest,
   BatchPowerRequest,
   BatchScriptsRequest,
@@ -866,6 +869,29 @@ export class ApiClient {
       'DELETE',
       `${this.nodePath(cluster, member)}/firewall/${encodeURIComponent(handle)}`,
     )
+  }
+
+  /** Lists recent host tasks for one cluster member. */
+  async nodeTasks(cluster: string, member: string, limit = 50): Promise<NodeTask[]> {
+    const query = new URLSearchParams({ cluster, member, limit: String(limit) })
+    const data = await this.request<{ tasks: NodeTask[] }>('GET', `/api/v1/tasks?${query.toString()}`)
+    return data.tasks ?? []
+  }
+
+  /** Loads one host task and its event timeline. */
+  async nodeTask(id: string): Promise<{ task: NodeTask; events: NodeTaskEvent[] }> {
+    const data = await this.request<{ task: NodeTask; events: NodeTaskEvent[] }>(
+      'GET',
+      `/api/v1/tasks/${encodeURIComponent(id)}`,
+    )
+    return { task: data.task, events: data.events ?? [] }
+  }
+
+  /** Lists host audit records for one cluster member. */
+  async nodeAudit(cluster: string, member: string, limit = 50): Promise<NodeAudit[]> {
+    const query = new URLSearchParams({ cluster, member, limit: String(limit) })
+    const data = await this.request<{ audit: NodeAudit[] }>('GET', `/api/v1/audit?${query.toString()}`)
+    return data.audit ?? []
   }
 
   /** Provisions a new host and joins it to a cluster. */

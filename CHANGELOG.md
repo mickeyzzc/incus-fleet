@@ -16,7 +16,7 @@ All notable changes to this project are documented here. The format follows
 - Typed host operation routing (`hostops`) with `node_access.mode` (`auto`, `agent`, `ssh`,
   `local`) and explicit backend reporting.
 - Durable host task and audit records with `GET /api/v1/tasks`, `GET /api/v1/tasks/{id}`, and
-  `GET /api/v1/audit`.
+  `GET /api/v1/audit`, plus a **History** dialog on the node network page.
 - Schema migration tracking and host task, audit, agent, enrollment, and certificate tables.
 - Wi-Fi and node network task plans are redacted; passwords and join tokens are never persisted.
 

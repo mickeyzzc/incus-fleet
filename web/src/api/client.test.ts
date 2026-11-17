@@ -722,6 +722,29 @@ describe('ApiClient node network and cluster registration endpoints', () => {
     expect(methods).toContain('DELETE')
   })
 
+  it('loads host tasks and audit records', async () => {
+    const { client, fetchImpl } = clientWith(
+      mockResponse({
+        tasks: [{ id: 'task-1' }],
+        audit: [{ id: 'audit-1' }],
+        task: { id: 'task-1' },
+        events: [{ id: 'event-1' }],
+      }),
+    )
+
+    expect(await client.nodeTasks('c1', 'n1')).toHaveLength(1)
+    expect(await client.nodeAudit('c1', 'n1')).toHaveLength(1)
+    expect(await client.nodeTask('task-1')).toEqual({
+      task: { id: 'task-1' },
+      events: [{ id: 'event-1' }],
+    })
+
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0]))
+    expect(urls).toContain('https://fleet.local/api/v1/tasks?cluster=c1&member=n1&limit=50')
+    expect(urls).toContain('https://fleet.local/api/v1/audit?cluster=c1&member=n1&limit=50')
+    expect(urls).toContain('https://fleet.local/api/v1/tasks/task-1')
+  })
+
   it('provisions a new cluster member', async () => {
     const { client, fetchImpl } = clientWith(mockResponse({ member: { name: 'n2' }, steps: [] }))
 

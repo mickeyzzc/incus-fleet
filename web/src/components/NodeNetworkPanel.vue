@@ -4,9 +4,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
-import type { NodeNIC } from '@/api/types'
+import type { NodeAudit, NodeNIC, NodeTask } from '@/api/types'
 import { api } from '@/api'
 import { errorMessage } from '@/utils/errors'
+import { formatDateTime } from '@/utils/format'
 
 const props = defineProps<{
   cluster: string
@@ -17,6 +18,11 @@ const { t } = useI18n()
 
 const loading = ref(false)
 const snapshot = ref<{ host: string; nics: NodeNIC[]; routes: { destination: string; gateway?: string; device?: string; metric?: string }[]; firewall: { handle: string; rule: string }[]; wifi_scan?: { ssid: string; signal: number; secure: boolean; frequency: number }[]; wifi_device?: string; backend?: string } | null>(null)
+
+const historyOpen = ref(false)
+const historyLoading = ref(false)
+const historyTasks = ref<NodeTask[]>([])
+const historyAudit = ref<NodeAudit[]>([])
 
 const addressDialogOpen = ref(false)
 const addressTarget = ref<NodeNIC | null>(null)
@@ -51,6 +57,23 @@ async function refresh(): Promise<void> {
     ElMessage.error(errorMessage(err))
   } finally {
     loading.value = false
+  }
+}
+
+async function openHistory(): Promise<void> {
+  historyOpen.value = true
+  historyLoading.value = true
+  try {
+    const [tasks, audit] = await Promise.all([
+      api.nodeTasks(props.cluster, props.member, 50),
+      api.nodeAudit(props.cluster, props.member, 50),
+    ])
+    historyTasks.value = tasks
+    historyAudit.value = audit
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  } finally {
+    historyLoading.value = false
   }
 }
 
@@ -229,6 +252,9 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         </el-tag>
       </div>
       <div class="page-actions">
+        <el-button :loading="historyLoading" @click="openHistory">
+          {{ t('nodePage.history') }}
+        </el-button>
         <el-button :icon="Refresh" :loading="loading" @click="refresh">
           {{ t('common.refresh') }}
         </el-button>
@@ -485,6 +511,39 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         <el-button type="primary" @click="connectWiFi(wifiForm.ssid)">{{ t('nodeActions.wifiConnect') }}</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="historyOpen" :title="t('nodePage.historyTitle', { host: displayHost })" width="860px">
+      <div v-loading="historyLoading">
+        <h4 class="section-title">{{ t('nodePage.tasks') }}</h4>
+        <el-table :data="historyTasks" size="small" stripe :empty-text="t('common.none')">
+          <el-table-column :label="t('nodePage.taskType')" min-width="170">
+            <template #default="{ row }">{{ row.type }}</template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.state')" width="120">
+            <template #default="{ row }">{{ row.state }}</template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.time')" min-width="180">
+            <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+          </el-table-column>
+        </el-table>
+
+        <h4 class="section-title history-heading">{{ t('nodePage.audit') }}</h4>
+        <el-table :data="historyAudit" size="small" stripe :empty-text="t('common.none')">
+          <el-table-column :label="t('nodePage.action')" min-width="170">
+            <template #default="{ row }">{{ row.action }}</template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.backendLabel')" width="110">
+            <template #default="{ row }">{{ row.backend }}</template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.result')" width="120">
+            <template #default="{ row }">{{ row.result }}</template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.time')" min-width="180">
+            <template #default="{ row }">{{ formatDateTime(row.at) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -497,5 +556,9 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
   margin-left: 10px;
   color: var(--fleet-ink-soft, var(--el-text-color-secondary));
   font-size: 12px;
+}
+
+.history-heading {
+  margin-top: 20px;
 }
 </style>

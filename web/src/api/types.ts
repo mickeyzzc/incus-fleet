@@ -584,6 +584,43 @@ export interface NodeSnapshot {
   backend?: string
 }
 
+export interface NodeTask {
+  id: string
+  cluster: string
+  member: string
+  type: string
+  state: string
+  progress?: string
+  result?: string
+  error?: string
+  plan?: string
+  created_at: string
+  started_at?: string
+  finished_at?: string
+}
+
+export interface NodeTaskEvent {
+  id: string
+  task_id: string
+  at: string
+  state: string
+  message?: string
+}
+
+export interface NodeAudit {
+  id: string
+  at: string
+  actor?: string
+  source_ip?: string
+  backend: string
+  cluster: string
+  member: string
+  action: string
+  task_id?: string
+  result: string
+  detail?: string
+}
+
 export interface NodeAddressRequest {
   dhcp: boolean
   address?: string

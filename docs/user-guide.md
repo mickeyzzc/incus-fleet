@@ -411,6 +411,18 @@ The cluster detail page provides:
 - **Profiles**: create, update, and delete configuration templates; select them when creating
   instances.
 
+## Node network and operation history
+
+Each cluster member has a **Node network** page (Cluster → Nodes → Manage node). The page shows
+the selected `backend` (`local` or `ssh`; the agent backend is added in a later release) and lets
+you manage NIC state, addresses, routes, the fleet-managed firewall table, and Wi-Fi.
+
+Every mutating operation is recorded. **History** opens the task and audit timeline for that
+member, including the action, backend, result, state transitions, and timestamps. Wi-Fi passwords,
+SSH/sudo passwords, and join tokens are never shown in history. The server-side `node_access.mode`
+and `ssh_write_fallback` settings control which backend is allowed; see
+[Deployment](deployment.md#node-network-management-optional).
+
 ## FAQ
 
 - **Image upload returns 413 or fails?** The per-image limit is 8 GiB; compress the root

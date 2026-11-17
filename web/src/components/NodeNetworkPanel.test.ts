@@ -251,6 +251,27 @@ describe('NodeView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     ;(api.nodeSnapshot as any).mockResolvedValue(mockSnapshot)
+    ;(api.nodeTasks as any).mockResolvedValue([
+      {
+        id: 'task-1',
+        cluster: 'c1',
+        member: 'n1',
+        type: 'node.route.add',
+        state: 'succeeded',
+        created_at: '2026-11-18T00:00:00Z',
+      },
+    ])
+    ;(api.nodeAudit as any).mockResolvedValue([
+      {
+        id: 'audit-1',
+        at: '2026-11-18T00:00:01Z',
+        backend: 'local',
+        cluster: 'c1',
+        member: 'n1',
+        action: 'node.route.add',
+        result: 'succeeded',
+      },
+    ])
     ;(ElMessageBox.confirm as any).mockResolvedValue('confirm')
   })
 
@@ -261,6 +282,21 @@ describe('NodeView', () => {
     await nextTick()
     expect(api.nodeSnapshot).toHaveBeenCalledWith('c1', 'n1', undefined)
     expect(wrapper.text()).toContain('Backend: local')
+  })
+
+  it('opens host history and renders tasks and audit', async () => {
+    const wrapper = mountView()
+    await nextTick()
+    await vi.dynamicImportSettled?.()
+    await nextTick()
+
+    await vmOf(wrapper).openHistory()
+    await nextTick()
+
+    expect(api.nodeTasks).toHaveBeenCalledWith('c1', 'n1', 50)
+    expect(api.nodeAudit).toHaveBeenCalledWith('c1', 'n1', 50)
+    expect(wrapper.text()).toContain('node.route.add')
+    expect(wrapper.text()).toContain('succeeded')
   })
 
   it('stateTag returns correct tag types', async () => {
@@ -568,6 +604,27 @@ describe('NodeView template interactions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     ;(api.nodeSnapshot as any).mockResolvedValue(mockSnapshot)
+    ;(api.nodeTasks as any).mockResolvedValue([
+      {
+        id: 'task-1',
+        cluster: 'c1',
+        member: 'n1',
+        type: 'node.route.add',
+        state: 'succeeded',
+        created_at: '2026-11-18T00:00:00Z',
+      },
+    ])
+    ;(api.nodeAudit as any).mockResolvedValue([
+      {
+        id: 'audit-1',
+        at: '2026-11-18T00:00:01Z',
+        backend: 'local',
+        cluster: 'c1',
+        member: 'n1',
+        action: 'node.route.add',
+        result: 'succeeded',
+      },
+    ])
     ;(ElMessageBox.confirm as any).mockResolvedValue('confirm')
   })
 

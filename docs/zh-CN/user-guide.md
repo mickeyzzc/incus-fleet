@@ -372,6 +372,17 @@ Incus 状态接口已覆盖常规运维所需的核心指标。
   实例创建时的设备定义,不单独建网络)。
 - **Profile**:配置模板的增删改,创建实例时可选择应用。
 
+## 节点网络与操作历史
+
+每个集群成员都有 **Node network** 页面（Cluster → Nodes → Manage node）。页面会显示当前
+`backend`（`local` 或 `ssh`；agent 后端在后续版本加入），并可管理网卡状态、地址、路由、
+fleet 管理的防火墙表和 Wi-Fi。
+
+每个变更操作都会被记录。点击 **History** 可以查看该成员的任务与审计时间线，包括操作、
+后端、结果、状态变化和时间戳。Wi-Fi 密码、SSH/sudo 密码和 join token 不会出现在历史记录中。
+服务端的 `node_access.mode` 和 `ssh_write_fallback` 控制允许使用哪些后端；参见
+[部署文档](deployment.md#节点网络管理可选)。
+
 ## 常见问题
 
 - **上传镜像 413/失败?** 单镜像上限 8 GiB;超大镜像建议先压缩根文件系统。
