@@ -114,42 +114,6 @@ func Open(ctx context.Context, driver, dsn string) (*SQLStore, error) {
 	return s, nil
 }
 
-func (s *SQLStore) migrate(ctx context.Context) error {
-	const schema = `
-CREATE TABLE IF NOT EXISTS migrations (
-	id TEXT PRIMARY KEY,
-	source_cluster TEXT NOT NULL,
-	target_cluster TEXT NOT NULL,
-	instance TEXT NOT NULL,
-	instance_type TEXT NOT NULL,
-	mode TEXT NOT NULL,
-	live INTEGER NOT NULL,
-	status TEXT NOT NULL,
-	progress TEXT NOT NULL DEFAULT '',
-	error TEXT NOT NULL DEFAULT '',
-	created_at BIGINT NOT NULL,
-	updated_at BIGINT NOT NULL
-)`
-
-	if _, err := s.db.ExecContext(ctx, schema); err != nil {
-		return fmt.Errorf("store: create schema: %w", err)
-	}
-
-	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_migrations_created_at ON migrations(created_at DESC)`); err != nil {
-		return fmt.Errorf("store: create index: %w", err)
-	}
-
-	if _, err := s.db.ExecContext(ctx, assetSchema()); err != nil {
-		return fmt.Errorf("store: create asset schema: %w", err)
-	}
-
-	if err := s.migrateClusters(ctx); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func (s *SQLStore) rebind(query string) string {
 	if s.driver != "postgres" {
 		return query

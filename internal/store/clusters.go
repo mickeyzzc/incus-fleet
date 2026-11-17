@@ -32,14 +32,6 @@ CREATE TABLE IF NOT EXISTS registered_clusters (
 	created_at BIGINT NOT NULL
 )`
 
-func (s *SQLStore) migrateClusters(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, clusterSchema); err != nil {
-		return fmt.Errorf("store: create cluster schema: %w", err)
-	}
-
-	return nil
-}
-
 // InsertCluster persists one dynamically registered cluster.
 func (s *SQLStore) InsertCluster(ctx context.Context, cluster *RegisteredCluster) error {
 	cluster.CreatedAt = time.Now().UTC()
