@@ -842,6 +842,7 @@ dependencies = [
  "clap",
  "ed25519-dalek",
  "futures-util",
+ "libc",
  "prost",
  "prost-build",
  "rcgen",

@@ -132,6 +132,47 @@ fn counter(name: &str, labels: HashMap<String, String>, at: i64, value: f64) -> 
     }
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn instance_name(dir: &str) -> Option<(String, &'static str)> {
+    for (prefix, kind) in [
+        ("lxc.payload.", "container"),
+        ("lxc.monitor.", "vm"),
+        ("lxc.", "container"),
+    ] {
+        if let Some(name) = dir.strip_prefix(prefix)
+            && !name.is_empty()
+        {
+            return Some((name.to_string(), kind));
+        }
+    }
+    None
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn instance_from_cgroup_content(content: &str) -> Option<(String, &'static str)> {
+    for line in content.lines() {
+        let Some((_, path)) = line.split_once("::") else {
+            continue;
+        };
+        for segment in path.split('/') {
+            if let Some(found) = instance_name(segment) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_oom_event(data: &[u8]) -> Option<(u32, u64)> {
+    if data.len() < 24 {
+        return None;
+    }
+    let pid = u32::from_ne_bytes(data.get(8..12)?.try_into().ok()?);
+    let cgroup_id = u64::from_ne_bytes(data.get(16..24)?.try_into().ok()?);
+    Some((pid, cgroup_id))
+}
+
 /// Whether the platform and object can support eBPF collection.
 pub fn available(object: Option<&Path>) -> bool {
     #[cfg(target_os = "linux")]
@@ -149,14 +190,20 @@ pub fn available(object: Option<&Path>) -> bool {
 mod platform {
     use std::collections::BTreeMap;
     use std::ffi::CString;
+    use std::os::fd::{AsFd, AsRawFd, OwnedFd};
     use std::os::raw::{c_char, c_int};
     use std::path::Path;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
-    use aya::maps::{HashMap as AyaHashMap, MapData};
-    use aya::programs::{CgroupAttachMode, RawTracePoint, SockOps, TracePoint};
+    use aya::maps::{HashMap as AyaHashMap, MapData, RingBuf};
+    use aya::programs::{RawTracePoint, SockOps, TracePoint};
     use aya::{Ebpf, Pod};
 
-    use super::{BLOCK_BUCKETS, BlockHistogram, InstanceSnapshot, Snapshot};
+    use super::{
+        BLOCK_BUCKETS, BlockHistogram, InstanceSnapshot, Snapshot, instance_from_cgroup_content,
+        instance_name, parse_oom_event,
+    };
 
     #[repr(C)]
     #[derive(Clone, Copy, Debug)]
@@ -192,20 +239,28 @@ mod platform {
         block_latency: AyaHashMap<MapData, BlockKey, u64>,
         block_sum_ns: AyaHashMap<MapData, u64, u64>,
         socket_cgroups: AyaHashMap<MapData, FlowKey, u64>,
+        oom_extra: Arc<Mutex<BTreeMap<(String, String), u64>>>,
+        _sockops: Option<SockOpsLink>,
     }
 
     impl Collector {
         pub fn open(path: &Path) -> Result<Self, String> {
             let mut ebpf =
                 Ebpf::load_file(path).map_err(|err| format!("load eBPF object: {err}"))?;
-            if let Err(err) =
-                attach_sockops(&mut ebpf, "fleet_sockops", Path::new("/sys/fs/cgroup"))
-            {
-                tracing::warn!(
-                    error = %err,
-                    "sockops attach failed; TCP cgroup attribution falls back to the current task"
-                );
-            }
+            let sockops = match attach_sockops(
+                &mut ebpf,
+                "fleet_sockops",
+                Path::new("/sys/fs/cgroup"),
+            ) {
+                Ok(link) => link,
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "sockops attach failed; TCP cgroup attribution falls back to the current task"
+                    );
+                    None
+                }
+            };
             attach_tracepoint(&mut ebpf, "tcp_retransmit", "tcp", "tcp_retransmit_skb")?;
             attach_tracepoint(&mut ebpf, "oom_mark", "oom", "mark_victim")?;
             attach_raw_tracepoint(&mut ebpf, "block_issue", "block_rq_issue")?;
@@ -246,6 +301,14 @@ mod platform {
                     .ok_or_else(|| "missing SOCKET_CGROUPS map".to_string())?,
             )
             .map_err(|err| format!("open SOCKET_CGROUPS: {err}"))?;
+            let oom_extra: Arc<Mutex<BTreeMap<(String, String), u64>>> =
+                Arc::new(Mutex::new(BTreeMap::new()));
+            if let Some(map) = ebpf.take_map("OOM_EVENTS") {
+                let ring =
+                    RingBuf::try_from(map).map_err(|err| format!("open OOM_EVENTS: {err}"))?;
+                let extra = oom_extra.clone();
+                std::thread::spawn(move || read_oom_events(ring, extra));
+            }
 
             Ok(Self {
                 _ebpf: ebpf,
@@ -256,6 +319,8 @@ mod platform {
                 block_latency,
                 block_sum_ns,
                 socket_cgroups,
+                oom_extra,
+                _sockops: sockops,
             })
         }
 
@@ -360,6 +425,19 @@ mod platform {
                 }
             }
 
+            if let Ok(extra) = self.oom_extra.lock() {
+                for ((name, kind), count) in extra.iter() {
+                    let item = instances
+                        .entry((name.clone(), kind.clone()))
+                        .or_insert_with(|| InstanceSnapshot {
+                            instance: name.clone(),
+                            kind: kind.clone(),
+                            ..Default::default()
+                        });
+                    item.oom_kills += *count;
+                }
+            }
+
             let mut instances: Vec<_> = instances.into_values().collect();
             instances.sort_by(|a, b| {
                 a.instance
@@ -442,22 +520,101 @@ mod platform {
         Some(u64::from_le_bytes(handle.f_handle))
     }
 
-    fn instance_name(dir: &str) -> Option<(String, &'static str)> {
-        for (prefix, kind) in [
-            ("lxc.payload.", "container"),
-            ("lxc.monitor.", "vm"),
-            ("lxc.", "container"),
-        ] {
-            if let Some(name) = dir.strip_prefix(prefix)
-                && !name.is_empty()
-            {
-                return Some((name.to_string(), kind));
+    fn read_oom_events(
+        mut ring: RingBuf<MapData>,
+        extra: Arc<Mutex<BTreeMap<(String, String), u64>>>,
+    ) {
+        loop {
+            while let Some(item) = ring.next() {
+                let Some((pid, cgroup_id)) = parse_oom_event(&item) else {
+                    continue;
+                };
+                let table = cgroup_table();
+                if table.contains_key(&cgroup_id) {
+                    // The BPF map already attributed this event to an instance.
+                    continue;
+                }
+                if let Some((name, kind)) = instance_from_proc(pid) {
+                    if let Ok(mut counts) = extra.lock() {
+                        *counts.entry((name, kind.to_string())).or_insert(0) += 1;
+                    }
+                }
             }
+            std::thread::sleep(Duration::from_millis(500));
         }
-        None
     }
 
-    fn attach_sockops(ebpf: &mut Ebpf, name: &str, cgroup_path: &Path) -> Result<(), String> {
+    fn instance_from_proc(pid: u32) -> Option<(String, &'static str)> {
+        let content = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+        instance_from_cgroup_content(&content)
+    }
+
+    struct SockOpsLink {
+        prog_fd: OwnedFd,
+        target_fd: OwnedFd,
+    }
+
+    impl Drop for SockOpsLink {
+        fn drop(&mut self) {
+            let _ = legacy_prog_attach(
+                self.prog_fd.as_raw_fd(),
+                self.target_fd.as_raw_fd(),
+                BPF_PROG_DETACH,
+                0,
+            );
+        }
+    }
+
+    #[repr(C)]
+    struct ProgAttachAttr {
+        target_fd: u32,
+        attach_bpf_fd: u32,
+        attach_type: u32,
+        attach_flags: u32,
+        replace_bpf_fd: u32,
+        relative_fd: u32,
+        expected_revision: u64,
+    }
+
+    const BPF_PROG_ATTACH: u32 = 8;
+    const BPF_PROG_DETACH: u32 = 9;
+    const BPF_CGROUP_SOCK_OPS: u32 = 3;
+    const BPF_F_ALLOW_MULTI: u32 = 1 << 1;
+
+    fn legacy_prog_attach(
+        prog_fd: i32,
+        target_fd: i32,
+        command: u32,
+        flags: u32,
+    ) -> std::io::Result<()> {
+        let attr = ProgAttachAttr {
+            target_fd: target_fd as u32,
+            attach_bpf_fd: prog_fd as u32,
+            attach_type: BPF_CGROUP_SOCK_OPS,
+            attach_flags: flags,
+            replace_bpf_fd: 0,
+            relative_fd: 0,
+            expected_revision: 0,
+        };
+        let result = unsafe {
+            libc::syscall(
+                libc::SYS_bpf,
+                command as libc::c_long,
+                &attr as *const ProgAttachAttr,
+                std::mem::size_of::<ProgAttachAttr>() as libc::c_long,
+            )
+        };
+        if result < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    fn attach_sockops(
+        ebpf: &mut Ebpf,
+        name: &str,
+        cgroup_path: &Path,
+    ) -> Result<Option<SockOpsLink>, String> {
         let program: &mut SockOps = ebpf
             .program_mut(name)
             .ok_or_else(|| format!("missing eBPF program {name}"))?
@@ -468,10 +625,31 @@ mod platform {
             .map_err(|err| format!("load {name}: {err}"))?;
         let cgroup = std::fs::File::open(cgroup_path)
             .map_err(|err| format!("open {}: {err}", cgroup_path.display()))?;
-        program
-            .attach(&cgroup, CgroupAttachMode::Single)
-            .map_err(|err| format!("attach {name}: {err}"))?;
-        Ok(())
+        let prog_fd = program
+            .fd()
+            .map_err(|err| format!("program fd {name}: {err}"))?
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(|err| format!("clone {name} fd: {err}"))?;
+        let target_fd = cgroup
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(|err| format!("clone cgroup fd: {err}"))?;
+        if legacy_prog_attach(
+            prog_fd.as_raw_fd(),
+            target_fd.as_raw_fd(),
+            BPF_PROG_ATTACH,
+            BPF_F_ALLOW_MULTI,
+        )
+        .is_ok()
+        {
+            return Ok(Some(SockOpsLink { prog_fd, target_fd }));
+        }
+
+        tracing::warn!(
+            "BPF_F_ALLOW_MULTI sockops attach failed; skipping sockops instead of replacing another program"
+        );
+        return Ok(None);
     }
 
     fn attach_tracepoint(
@@ -552,6 +730,24 @@ pub use platform::Collector;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_instance_from_cgroup_path() {
+        let content = "0::/lxc.payload.demo/system.slice/worker.service\n";
+        let found = instance_from_cgroup_content(content).expect("instance");
+        assert_eq!(found.0, "demo");
+        assert_eq!(found.1, "container");
+        assert!(instance_from_cgroup_content("0::/system.slice/foo").is_none());
+    }
+
+    #[test]
+    fn parses_oom_event() {
+        let mut data = [0u8; 24];
+        data[8..12].copy_from_slice(&1234u32.to_ne_bytes());
+        data[16..24].copy_from_slice(&5678u64.to_ne_bytes());
+        assert_eq!(parse_oom_event(&data), Some((1234, 5678)));
+        assert_eq!(parse_oom_event(&data[..10]), None);
+    }
 
     #[test]
     fn unavailable_without_object() {

@@ -57,6 +57,18 @@ struct {
     __type(value, __u64);
 } CGROUP_OOM_KILLS SEC(".maps");
 
+struct oom_event {
+    __u64 ts;
+    __u32 pid;
+    __u32 pad;
+    __u64 cgroup_id;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 4096);
+} OOM_EVENTS SEC(".maps");
+
 struct block_start_value {
     __u64 ts;
     __u64 cgroup_id;
@@ -181,12 +193,29 @@ int tcp_retransmit(void *raw_ctx)
     return 0;
 }
 
+struct oom_mark_ctx {
+    __u64 common;
+    int pid;
+};
+
 SEC("tracepoint/oom/mark_victim")
-int oom_mark(void *ctx)
+int oom_mark(void *raw_ctx)
 {
     __u64 cgroup_id = bpf_get_current_cgroup_id();
     bump_host(&OOM_KILLS);
     bump_cgroup(&CGROUP_OOM_KILLS, cgroup_id);
+
+    // Userspace resolves this pid's cgroup when the OOM context is the root
+    // cgroup (for example a host-triggered global OOM that kills a container
+    // task). The BPF map above already covers container-memcg OOM exactly.
+    struct oom_mark_ctx *ctx = raw_ctx;
+    struct oom_event *event = bpf_ringbuf_reserve(&OOM_EVENTS, sizeof(*event), 0);
+    if (event) {
+        event->ts = bpf_ktime_get_ns();
+        event->pid = ctx->pid;
+        event->cgroup_id = cgroup_id;
+        bpf_ringbuf_submit(event, 0);
+    }
     return 0;
 }
 
