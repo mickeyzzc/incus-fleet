@@ -21,8 +21,12 @@ All notable changes to this project are documented here. The format follows
 - Wi-Fi and node network task plans are redacted; passwords and join tokens are never persisted.
 - Rust host agent MVP: protobuf `incusfleet.agent.v1` contract, one-time enrollment tokens,
   center mTLS WebSocket gateway, facts/heartbeat reporting, and read-only network snapshots.
-- Admin endpoints `POST /api/v1/agents/enrollment-tokens`, `GET /api/v1/agents`, and
-  `GET /api/v1/agents/{id}/snapshot`.
+- Admin endpoints `POST /api/v1/agents/enrollment-tokens`, `GET /api/v1/agents`,
+  `GET /api/v1/agents/{id}/snapshot`, and `POST /api/v1/agents/{id}/network`.
+- Privileged network helper and agent dispatch for link, address, route, firewall, and Wi-Fi
+  changes, with protocol-99 fleet routes and per-task rollback snapshots.
+- Persistence adapters for ifupdown/ifupdown-ng, systemd-networkd, netplan, wicked, and
+  NetworkManager; confirm/rollback actions restore the captured state.
 
 ### Fixed
 

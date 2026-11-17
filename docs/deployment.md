@@ -301,7 +301,12 @@ Create a one-time token from the UI/API (it is shown once), then build and enrol
 
 ```bash
 cargo build --manifest-path agent/Cargo.toml --release
+go build -o bin/incus-fleet-helper ./cmd/incus-fleet-helper
 sudo install -m 0755 agent/target/release/incus-fleet-agent /usr/local/bin/incus-fleet-agent
+sudo install -m 0755 bin/incus-fleet-helper /usr/libexec/incus-fleet-helper
+sudo install -m 0440 -o root -g root deploy/agent-sudoers \
+  /etc/sudoers.d/incus-fleet-agent
+sudo visudo -cf /etc/sudoers.d/incus-fleet-agent
 sudo useradd --system --home /var/lib/incus-fleet-agent \
   --shell /usr/sbin/nologin incus-fleet-agent
 sudo install -d -m 0700 -o incus-fleet-agent -g incus-fleet-agent /var/lib/incus-fleet-agent
@@ -319,10 +324,11 @@ printf '%s' "$AGENT_TOKEN" | sudo -u incus-fleet-agent \
 sudo systemctl enable --now incus-fleet-agent
 ```
 
-The agent currently performs read-only facts and network snapshots as an unprivileged service;
-write operations, eBPF, and Incus bootstrap are later phases. The sample unit runs with
-`NoNewPrivileges=yes`, `ProtectSystem=strict`, `MemoryMax=64M`, and `CPUQuota=5%`, so verify the
-resource targets on the lowest-spec node before widening use.
+The agent reports facts/heartbeats and read-only snapshots, and can apply allowlisted network
+mutations through the helper. eBPF, Incus bootstrap, and telemetry storage are later phases. The
+sample unit runs with `NoNewPrivileges=false` (sudo needs the setuid transition),
+`ProtectSystem=strict`, `MemoryMax=128M`, and `CPUQuota=25%`; verify the resource targets on the
+lowest-spec node before widening use.
 
 #### Adding a node from the UI
 

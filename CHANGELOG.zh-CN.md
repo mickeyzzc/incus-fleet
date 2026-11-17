@@ -20,8 +20,12 @@
 - Wi-Fi 与节点网络任务计划已脱敏；密码和 join token 不会持久化。
 - Rust 主机 agent MVP：protobuf `incusfleet.agent.v1` 契约、一次性注册 token、中心 mTLS
   WebSocket gateway、facts/心跳上报和只读网络快照。
-- 管理端点 `POST /api/v1/agents/enrollment-tokens`、`GET /api/v1/agents` 和
-  `GET /api/v1/agents/{id}/snapshot`。
+- 管理端点 `POST /api/v1/agents/enrollment-tokens`、`GET /api/v1/agents`、
+  `GET /api/v1/agents/{id}/snapshot` 和 `POST /api/v1/agents/{id}/network`。
+- 特权网络 helper 与 agent 派发：链路、地址、路由、防火墙和 Wi-Fi 变更，fleet 路由使用
+  protocol 99，并按任务保存回滚快照。
+- ifupdown/ifupdown-ng、systemd-networkd、netplan、wicked 和 NetworkManager 持久化适配器；
+  confirm/rollback 恢复捕获的状态。
 
 ### 修复
 

@@ -163,8 +163,11 @@ tokens and dispatches read-only `nodenet.snapshot` tasks through `GET /api/v1/ag
 
 The protocol is protobuf `incusfleet.agent.v1` (`api/agent/v1/agent.proto`), with generated Go and
 Rust types. The agent sends Hello, Facts, and Heartbeat frames; the center sends task dispatches
-and heartbeat acknowledgements. The current MVP is read-only: facts collection and `ip -j` based
-network snapshots. Network writes, Incus bootstrap, telemetry, and eBPF remain later phases.
+and heartbeat acknowledgements. The agent reports facts and `ip -j` based network snapshots, and
+can apply allowlisted link/address/route/firewall/Wi-Fi changes through a short-lived privileged
+helper. The helper validates the JSON contract, records a rollback snapshot keyed by task ID, and
+persists addresses through the detected manager (ifupdown, systemd-networkd, netplan, wicked, or
+NetworkManager). Incus bootstrap, telemetry, and eBPF remain later phases.
 
 ## Shared assets and batch operations
 

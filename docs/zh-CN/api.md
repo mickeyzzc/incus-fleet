@@ -336,6 +336,25 @@ token 只返回一次；数据库只存它的 SHA-256。注册请求本身是 ag
 `503 agent_offline` 表示 agent 没有在线 WebSocket；`504 agent_timeout` 表示派发超时前没有响应；
 `502 agent_error` 表示 agent 拒绝或执行任务失败。
 
+`POST /api/v1/agents/{id}/network` 通过特权 helper 派发一个允许列表内的网络变更。支持的 action
+为 `link-state`、`address`、`route-add`、`route-delete`、`firewall-add`、`firewall-delete`、
+`wifi-connect`、`confirm` 和 `rollback`。
+
+```json
+// 关闭 eth0
+{"action": "link-state", "interface": "eth0", "up": false}
+// 配置静态地址并按检测到的管理器持久化
+{"action": "address", "interface": "eth0", "address": "10.0.0.50/24",
+ "gateway": "10.0.0.1", "persist": true, "task_id": "task-1"}
+// 确认或回滚之前的操作
+{"action": "confirm", "task_id": "task-1"}
+```
+
+响应为 `{"result": {"ok": true, "action": "...", "task_id": "...", "backend": "helper",
+"persistence": "ifupdown"}}`。`confirm` 删除回滚快照；`rollback` 恢复该接口捕获的地址、路由、
+链路状态和持久化文件。任务走允许列表；helper 会拒绝未知 action、接口名、地址和 task ID。
+Wi-Fi 密码只传给 helper，不会写入任务/审计记录。
+
 ## 主机任务与审计
 
 每个变更型节点操作都会记录为一个 host task 和一条不可变审计记录。任务和审计与迁移历史

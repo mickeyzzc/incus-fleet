@@ -388,6 +388,26 @@ to `GET /api/v1/agent/connect` with mTLS and sends protobuf `Envelope` frames ov
 `503 agent_offline` means the agent has no live WebSocket; `504 agent_timeout` means it did not
 answer before the dispatch timeout; `502 agent_error` means the agent rejected or failed the task.
 
+`POST /api/v1/agents/{id}/network` dispatches one allowlisted network mutation through the
+privileged helper. Supported actions are `link-state`, `address`, `route-add`, `route-delete`,
+`firewall-add`, `firewall-delete`, `wifi-connect`, `confirm`, and `rollback`.
+
+```json
+// bring eth0 down
+{"action": "link-state", "interface": "eth0", "up": false}
+// apply a static address and persist through the detected manager
+{"action": "address", "interface": "eth0", "address": "10.0.0.50/24",
+ "gateway": "10.0.0.1", "persist": true, "task_id": "task-1"}
+// confirm or roll back a previous operation
+{"action": "confirm", "task_id": "task-1"}
+```
+
+The response is `{"result": {"ok": true, "action": "...", "task_id": "...", "backend": "helper",
+"persistence": "ifupdown"}}`. `confirm` removes the rollback snapshot; `rollback` restores the
+captured addresses, routes, link state, and persistence file for that interface. Tasks are
+allowlisted; the helper rejects unknown actions, interface names, addresses, and task IDs. Wi-Fi
+passwords are passed only to the helper and are never stored in task/audit records.
+
 ## Host tasks and audit
 
 Every mutating node operation is recorded as a host task plus an immutable audit entry. Tasks and

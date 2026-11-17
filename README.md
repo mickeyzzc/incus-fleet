@@ -28,7 +28,7 @@ from the language switcher.*
 - Admin-token login with HttpOnly sessions; bearer tokens for automation
 - Cluster connections pinned to per-deployment client certificates
 - Optional Rust host agent (alpha): one-time enrollment, mTLS WebSocket, facts/heartbeats, and
-  read-only node network snapshots
+  allowlisted host network changes through a short-lived privileged helper
 
 > Live migration preserves guest network state. When clusters use different subnets,
 > renew DHCP inside the guest after the move (or use matching subnets).

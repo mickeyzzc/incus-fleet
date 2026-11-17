@@ -298,7 +298,12 @@ agent:
 
 ```bash
 cargo build --manifest-path agent/Cargo.toml --release
+go build -o bin/incus-fleet-helper ./cmd/incus-fleet-helper
 sudo install -m 0755 agent/target/release/incus-fleet-agent /usr/local/bin/incus-fleet-agent
+sudo install -m 0755 bin/incus-fleet-helper /usr/libexec/incus-fleet-helper
+sudo install -m 0440 -o root -g root deploy/agent-sudoers \
+  /etc/sudoers.d/incus-fleet-agent
+sudo visudo -cf /etc/sudoers.d/incus-fleet-agent
 sudo useradd --system --home /var/lib/incus-fleet-agent \
   --shell /usr/sbin/nologin incus-fleet-agent
 sudo install -d -m 0700 -o incus-fleet-agent -g incus-fleet-agent /var/lib/incus-fleet-agent
@@ -316,9 +321,10 @@ printf '%s' "$AGENT_TOKEN" | sudo -u incus-fleet-agent \
 sudo systemctl enable --now incus-fleet-agent
 ```
 
-当前 agent 以非特权服务运行，只做只读 facts 和网络快照；写操作、eBPF 和 Incus bootstrap 在
-后续阶段。示例单元启用 `NoNewPrivileges=yes`、`ProtectSystem=strict`、`MemoryMax=64M` 和
-`CPUQuota=5%`；在最低配节点上验证资源目标后再扩大使用范围。
+agent 上报 facts/心跳、只读快照，并可经 helper 执行允许列表内的网络变更。eBPF、Incus
+bootstrap 和指标持久化仍在后续阶段。示例单元使用 `NoNewPrivileges=false`（sudo 需要 setuid
+转换）、`ProtectSystem=strict`、`MemoryMax=128M` 和 `CPUQuota=25%`；在最低配节点上验证资源
+目标后再扩大使用范围。
 
 #### 从 UI 添加节点
 

@@ -132,8 +132,11 @@ WebSocket。浏览器 API 负责创建注册 token，并通过 `GET /api/v1/agen
 `nodenet.snapshot` 任务。
 
 协议是 protobuf `incusfleet.agent.v1`（`api/agent/v1/agent.proto`），同时生成 Go 和 Rust 类型。
-agent 发送 Hello、Facts 和 Heartbeat；中心发送任务和心跳确认。当前 MVP 只读：facts 采集和基于
-`ip -j` 的网络快照。网络写入、Incus bootstrap、指标和 eBPF 仍在后续阶段。
+agent 发送 Hello、Facts 和 Heartbeat；中心发送任务和心跳确认。agent 上报 facts 和基于
+`ip -j` 的网络快照，并可经短生命周期特权 helper 执行允许列表内的链路/地址/路由/防火墙/Wi-Fi
+变更。helper 校验 JSON 契约，按 task ID 记录回滚快照，并通过检测到的管理器（ifupdown、
+systemd-networkd、netplan、wicked 或 NetworkManager）持久化地址。Incus bootstrap、指标和
+eBPF 仍在后续阶段。
 
 ## 共享资产与批量操作
 
