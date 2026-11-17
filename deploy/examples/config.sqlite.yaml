@@ -43,6 +43,7 @@ database:
 #     url: https://prometheus.example/api/v1/write
 #     bearer_token_file: /etc/incus-fleet/prom.token
 #     spool_dir: /home/incus/data/remote-write   # durable replay after restart
+#     spool_partition: app-a                     # unique per center instance
 #     max_bytes: 67108864
 #   query:
 #     enabled: false

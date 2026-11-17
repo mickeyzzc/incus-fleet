@@ -69,6 +69,7 @@ type RemoteWriteConfig struct {
 	QueueSize       int    `yaml:"queue_size"`
 	BatchSize       int    `yaml:"batch_size"`
 	SpoolDir        string `yaml:"spool_dir"`
+	SpoolPartition  string `yaml:"spool_partition"`
 	MaxBytes        int64  `yaml:"max_bytes"`
 }
 
@@ -206,6 +207,9 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("INCUS_FLEET_METRICS_REMOTE_WRITE_SPOOL_DIR"); v != "" {
 		c.Metrics.RemoteWrite.SpoolDir = v
+	}
+	if v := os.Getenv("INCUS_FLEET_METRICS_REMOTE_WRITE_SPOOL_PARTITION"); v != "" {
+		c.Metrics.RemoteWrite.SpoolPartition = v
 	}
 	if v := os.Getenv("INCUS_FLEET_METRICS_QUERY_URL"); v != "" {
 		c.Metrics.Query.URL = v

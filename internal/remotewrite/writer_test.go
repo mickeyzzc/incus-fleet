@@ -2,6 +2,7 @@ package remotewrite
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,9 @@ func newWriter(t *testing.T, cfg Config) *Writer {
 	t.Helper()
 	if cfg.SpoolDir == "" {
 		cfg.SpoolDir = t.TempDir()
+	}
+	if cfg.SpoolPartition == "" {
+		cfg.SpoolPartition = "test"
 	}
 	writer, err := New(cfg)
 	if err != nil {
@@ -241,7 +245,7 @@ func TestWriterRetainsSpoolOnServerFailure(t *testing.T) {
 }
 
 func TestSpoolBoundedRetention(t *testing.T) {
-	sp, err := openSpool(t.TempDir(), 2, 200)
+	sp, err := openSpool(t.TempDir(), "test", 2, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,22 +302,22 @@ func TestWriterRetriesPendingBatch(t *testing.T) {
 }
 
 func TestSpoolValidationAndCorruption(t *testing.T) {
-	if defaults, err := openSpool(t.TempDir(), 0, 0); err != nil || defaults.maxEntries != 10000 ||
+	if defaults, err := openSpool(t.TempDir(), "test", 0, 0); err != nil || defaults.maxEntries != 10000 ||
 		defaults.maxBytes != DefaultMaxBytes {
 		t.Fatalf("openSpool(defaults) = %#v, %v", defaults, err)
 	}
-	if _, err := openSpool("", 1, 1); err == nil {
+	if _, err := openSpool("", "test", 1, 1); err == nil {
 		t.Fatal("openSpool(empty) expected error")
 	}
 	dir := t.TempDir()
-	sp, err := openSpool(dir, 2, 1024)
+	sp, err := openSpool(dir, "test", 2, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sp.append(nil); err == nil {
 		t.Fatal("append(empty) expected error")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "00000000000000000001-000001.json"), []byte("not-json"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(sp.dir, "00000000000000000001-000001.json"), []byte("not-json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := sp.load()
@@ -386,11 +390,11 @@ func TestWriterCloseWithQueuedBatch(t *testing.T) {
 
 func TestSpoolEdgeCases(t *testing.T) {
 	dir := t.TempDir()
-	sp, err := openSpool(dir, 2, 1024)
+	sp, err := openSpool(dir, "test", 2, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sp.remove(spoolEntry{path: filepath.Join(dir, "missing.json"), size: 10})
+	sp.remove(spoolEntry{path: filepath.Join(sp.dir, "missing.json"), size: 10})
 	if sp.count() != 0 || sp.bytes() != 0 {
 		t.Fatalf("empty spool count=%d bytes=%d", sp.count(), sp.bytes())
 	}
@@ -405,18 +409,18 @@ func TestSpoolEdgeCases(t *testing.T) {
 
 func TestSpoolLoadUnreadableFile(t *testing.T) {
 	dir := t.TempDir()
-	sp, err := openSpool(dir, 2, 1024)
+	sp, err := openSpool(dir, "test", 2, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sp.append([]telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}}); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(sp.dir)
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("spool files = %d, %v", len(entries), err)
 	}
-	path := filepath.Join(dir, entries[0].Name())
+	path := filepath.Join(sp.dir, entries[0].Name())
 	if err := os.Chmod(path, 0o000); err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +434,7 @@ func TestSpoolLoadUnreadableFile(t *testing.T) {
 
 func TestSpoolLoadAppliesRetention(t *testing.T) {
 	dir := t.TempDir()
-	sp, err := openSpool(dir, 5, 1<<20)
+	sp, err := openSpool(dir, "test", 5, 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +443,7 @@ func TestSpoolLoadAppliesRetention(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	tight, err := openSpool(dir, 1, 1<<20)
+	tight, err := openSpool(dir, "test", 1, 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,4 +491,125 @@ func TestRunWithCanceledContext(t *testing.T) {
 	writer.Enqueue([]telemetry.Series{{Name: "x"}})
 	time.Sleep(20 * time.Millisecond)
 	writer.Close()
+}
+
+func TestSpoolPartitionsAreIsolated(t *testing.T) {
+	root := t.TempDir()
+	first := newWriter(t, Config{URL: "", SpoolDir: root, SpoolPartition: "app-a", QueueSize: 2})
+	second := newWriter(t, Config{URL: "", SpoolDir: root, SpoolPartition: "app-b", QueueSize: 2})
+	first.Enqueue([]telemetry.Series{{Name: "a"}})
+	second.Enqueue([]telemetry.Series{{Name: "b"}})
+
+	if first.spool.count() != 1 || second.spool.count() != 1 {
+		t.Fatalf("partition counts = %d, %d", first.spool.count(), second.spool.count())
+	}
+	if first.spool.dir != filepath.Join(root, "app-a") || second.spool.dir != filepath.Join(root, "app-b") {
+		t.Fatalf("partition dirs = %q, %q", first.spool.dir, second.spool.dir)
+	}
+	first.Close()
+	second.Close()
+}
+
+func TestSpoolLegacyRootMigration(t *testing.T) {
+	root := t.TempDir()
+	data, err := json.Marshal([]telemetry.Series{{Name: "legacy"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "00000000000000000001-000001.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writer := newWriter(t, Config{URL: "", SpoolDir: root, SpoolPartition: "app-a", QueueSize: 2})
+	if writer.spool.count() != 1 {
+		t.Fatalf("legacy batch not migrated: %d", writer.spool.count())
+	}
+	if _, err := os.Stat(filepath.Join(root, "00000000000000000001-000001.json")); !os.IsNotExist(err) {
+		t.Fatalf("legacy file still in root: %v", err)
+	}
+	writer.Close()
+}
+
+func TestSpoolPartitionDoesNotReplayOtherInstance(t *testing.T) {
+	root := t.TempDir()
+	first := newWriter(t, Config{URL: "", SpoolDir: root, SpoolPartition: "app-a", QueueSize: 2})
+	first.Enqueue([]telemetry.Series{{Name: "a"}})
+	first.Close()
+
+	received := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case received <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	other := newWriter(t, Config{URL: server.URL, SpoolDir: root, SpoolPartition: "app-b", QueueSize: 2})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	other.Start(ctx)
+	select {
+	case <-received:
+		t.Fatal("other partition replayed app-a data")
+	case <-time.After(200 * time.Millisecond):
+	}
+	other.Close()
+
+	owner := newWriter(t, Config{URL: server.URL, SpoolDir: root, SpoolPartition: "app-a", QueueSize: 2})
+	owner.Start(ctx)
+	select {
+	case <-received:
+	case <-time.After(3 * time.Second):
+		t.Fatal("owning partition did not replay its data")
+	}
+	owner.Close()
+}
+
+func TestSanitizePartition(t *testing.T) {
+	cases := map[string]string{
+		"app-a":   "app-a",
+		"app b/c": "app-b-c",
+		"...":     "default",
+		"":        "default",
+	}
+	for input, want := range cases {
+		if got := sanitizePartition(input); got != want {
+			t.Fatalf("sanitizePartition(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestOpenSpoolLegacyMigrationFailure(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "app"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o000); err != nil { //nolint:gosec // test permissions
+		t.Fatal(err)
+	}
+	_, err := openSpool(root, "app", 1, 1)
+	_ = os.Chmod(root, 0o700) //nolint:gosec // restore test directory
+	if err == nil {
+		t.Fatal("openSpool(unreadable root) expected error")
+	}
+}
+
+func TestOpenSpoolLegacyMigrationRenameFailure(t *testing.T) {
+	root := t.TempDir()
+	partition := filepath.Join(root, "app")
+	if err := os.MkdirAll(partition, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "00000000000000000001-000001.json"), []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(partition, 0o500); err != nil { //nolint:gosec // test permissions
+		t.Fatal(err)
+	}
+	_, err := openSpool(root, "app", 1, 1)
+	_ = os.Chmod(partition, 0o700) //nolint:gosec // restore test directory
+	if err == nil {
+		t.Fatal("openSpool(read-only partition) expected migration error")
+	}
 }

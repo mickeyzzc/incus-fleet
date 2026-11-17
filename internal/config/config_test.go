@@ -468,6 +468,7 @@ func TestApplyEnvAgentAndMetrics(t *testing.T) {
 	t.Setenv("INCUS_FLEET_METRICS_RETENTION", "30m")
 	t.Setenv("INCUS_FLEET_METRICS_INTERVAL", "30s")
 	t.Setenv("INCUS_FLEET_METRICS_REMOTE_WRITE_SPOOL_DIR", "/tmp/fleet-spool-test")
+	t.Setenv("INCUS_FLEET_METRICS_REMOTE_WRITE_SPOOL_PARTITION", "app-test")
 
 	cfg := minimalConfig()
 	cfg.applyEnv()
@@ -478,7 +479,8 @@ func TestApplyEnvAgentAndMetrics(t *testing.T) {
 		t.Fatalf("agent env = %#v", cfg.Agent)
 	}
 	if !cfg.Metrics.Enabled || cfg.Metrics.Retention != "30m" || cfg.Metrics.Interval != "30s" ||
-		cfg.Metrics.RemoteWrite.SpoolDir != "/tmp/fleet-spool-test" {
+		cfg.Metrics.RemoteWrite.SpoolDir != "/tmp/fleet-spool-test" ||
+		cfg.Metrics.RemoteWrite.SpoolPartition != "app-test" {
 		t.Fatalf("metrics env = %#v", cfg.Metrics)
 	}
 }

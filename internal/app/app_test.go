@@ -314,6 +314,7 @@ func TestNewWithExternalMetrics(t *testing.T) {
 		Enabled: true,
 		RemoteWrite: config.RemoteWriteConfig{
 			Enabled: true, URL: backend.URL, Timeout: "1s", QueueSize: 10, BatchSize: 10,
+			SpoolDir: t.TempDir(), SpoolPartition: "app-a",
 		},
 		Query: config.MetricsQueryConfig{
 			Enabled: true, URL: backend.URL, Type: "prometheus", Timeout: "1s",
@@ -330,6 +331,9 @@ func TestNewWithExternalMetrics(t *testing.T) {
 	t.Cleanup(func() { _ = application.Close() })
 	if application.remoteWrite == nil || application.metricsQuery == nil {
 		t.Fatal("external metrics not wired")
+	}
+	if _, err := os.Stat(filepath.Join(cfg.Metrics.RemoteWrite.SpoolDir, "app-a")); err != nil {
+		t.Fatalf("spool partition not created: %v", err)
 	}
 }
 

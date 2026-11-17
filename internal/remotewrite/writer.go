@@ -21,13 +21,14 @@ import (
 
 // Config controls one remote write target.
 type Config struct {
-	URL         string
-	BearerToken string
-	Timeout     time.Duration
-	QueueSize   int
-	BatchSize   int
-	SpoolDir    string
-	MaxBytes    int64
+	URL            string
+	BearerToken    string
+	Timeout        time.Duration
+	QueueSize      int
+	BatchSize      int
+	SpoolDir       string
+	SpoolPartition string
+	MaxBytes       int64
 }
 
 // Writer queues telemetry on disk and sends it in batches. Spool files are
@@ -53,7 +54,7 @@ func New(cfg Config) (*Writer, error) {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 10 * time.Second
 	}
-	sp, err := openSpool(cfg.SpoolDir, cfg.QueueSize, cfg.MaxBytes)
+	sp, err := openSpool(cfg.SpoolDir, cfg.SpoolPartition, cfg.QueueSize, cfg.MaxBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -282,5 +283,8 @@ func (w *Writer) flush(ctx context.Context, batch []spoolEntry) (bool, bool) {
 
 // String returns a safe description without credentials.
 func (c Config) String() string {
-	return fmt.Sprintf("remote-write(%s, queue=%d, batch=%d, spool=%s)", c.URL, c.QueueSize, c.BatchSize, c.SpoolDir)
+	return fmt.Sprintf(
+		"remote-write(%s, queue=%d, batch=%d, spool=%s/%s)",
+		c.URL, c.QueueSize, c.BatchSize, c.SpoolDir, c.SpoolPartition,
+	)
 }

@@ -142,14 +142,22 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 			if spoolDir == "" {
 				spoolDir = filepath.Join(os.TempDir(), "incus-fleet-remote-write")
 			}
+			partition := strings.TrimSpace(cfg.Metrics.RemoteWrite.SpoolPartition)
+			if partition == "" {
+				partition = strings.TrimSpace(cfg.HA.WorkerID)
+			}
+			if partition == "" {
+				partition, _ = os.Hostname()
+			}
 			remoteWriter, err = remotewrite.New(remotewrite.Config{
-				URL:         cfg.Metrics.RemoteWrite.URL,
-				BearerToken: remoteToken,
-				Timeout:     parseDuration(cfg.Metrics.RemoteWrite.Timeout, 10*time.Second),
-				QueueSize:   cfg.Metrics.RemoteWrite.QueueSize,
-				BatchSize:   cfg.Metrics.RemoteWrite.BatchSize,
-				SpoolDir:    spoolDir,
-				MaxBytes:    cfg.Metrics.RemoteWrite.MaxBytes,
+				URL:            cfg.Metrics.RemoteWrite.URL,
+				BearerToken:    remoteToken,
+				Timeout:        parseDuration(cfg.Metrics.RemoteWrite.Timeout, 10*time.Second),
+				QueueSize:      cfg.Metrics.RemoteWrite.QueueSize,
+				BatchSize:      cfg.Metrics.RemoteWrite.BatchSize,
+				SpoolDir:       spoolDir,
+				SpoolPartition: partition,
+				MaxBytes:       cfg.Metrics.RemoteWrite.MaxBytes,
 			})
 			if err != nil {
 				manager.Close()

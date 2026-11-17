@@ -29,6 +29,8 @@ type spoolEntry struct {
 // spool is an append-only directory of JSON batches. Filenames are sortable
 // timestamps; the oldest files are removed first when retention is exceeded.
 type spool struct {
+	root       string
+	partition  string
 	dir        string
 	maxEntries int
 	maxBytes   int64
@@ -39,20 +41,78 @@ type spool struct {
 	sizeBytes int64
 }
 
-func openSpool(dir string, maxEntries int, maxBytes int64) (*spool, error) {
-	if strings.TrimSpace(dir) == "" {
+func openSpool(root, partition string, maxEntries int, maxBytes int64) (*spool, error) {
+	if strings.TrimSpace(root) == "" {
 		return nil, fmt.Errorf("remotewrite: spool directory is required")
 	}
+	partition = sanitizePartition(partition)
 	if maxEntries <= 0 {
 		maxEntries = 10000
 	}
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxBytes
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("remotewrite: create spool: %w", err)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, fmt.Errorf("remotewrite: create spool root: %w", err)
 	}
-	return &spool{dir: dir, maxEntries: maxEntries, maxBytes: maxBytes}, nil
+	dir := filepath.Join(root, partition)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("remotewrite: create spool partition: %w", err)
+	}
+	if err := migrateLegacyRoot(root, dir); err != nil {
+		return nil, err
+	}
+
+	return &spool{
+		root: root, partition: partition, dir: dir,
+		maxEntries: maxEntries, maxBytes: maxBytes,
+	}, nil
+}
+
+func sanitizePartition(value string) string {
+	value = strings.TrimSpace(value)
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), ".-")
+	if out == "" || out == "." || out == ".." {
+		return "default"
+	}
+	return out
+}
+
+// migrateLegacyRoot moves batches written by the pre-partition layout into the
+// caller's partition so upgrades keep replaying old data.
+func migrateLegacyRoot(root, partitionDir string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("remotewrite: read spool root: %w", err)
+	}
+	seq := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), spoolSuffix) {
+			continue
+		}
+		seq++
+		target := filepath.Join(
+			partitionDir,
+			fmt.Sprintf("legacy-%020d-%06d%s", time.Now().UTC().UnixNano(), seq, spoolSuffix),
+		)
+		if err := os.Rename(filepath.Join(root, entry.Name()), target); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("remotewrite: migrate legacy spool batch: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *spool) append(series []telemetry.Series) (spoolEntry, error) {
