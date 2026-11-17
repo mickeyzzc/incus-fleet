@@ -859,6 +859,31 @@ func TestEndpointAddress(t *testing.T) {
 	}
 }
 
+func TestClusterCertificateInlinePEM(t *testing.T) {
+	cfgs := []config.Cluster{{
+		Name:          "c2",
+		Endpoint:      "https://198.51.100.10:8443",
+		TLSServerCert: testCertPEM,
+	}}
+	dial := func(context.Context, config.Cluster) (clusters.InstanceServer, error) {
+		return &incusfake.Server{}, nil
+	}
+	manager, err := clusters.NewWithDialer(context.Background(), cfgs, dial, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+
+	conn, err := manager.Connection("c2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemBytes, err := clusterCertificate(conn)
+	if err != nil || strings.TrimSpace(string(pemBytes)) != strings.TrimSpace(testCertPEM) {
+		t.Fatalf("clusterCertificate(inline) = %q, %v", pemBytes, err)
+	}
+}
+
 func TestClusterCertificate(t *testing.T) {
 	f := newJoinFixture(t, nil)
 	conn, err := f.manager.Connection("c2")

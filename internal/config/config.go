@@ -181,6 +181,24 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// ReadPEMOrFile returns PEM bytes from either an inline PEM document or a
+// file path. Inline values are detected by a PEM BEGIN marker so dynamically
+// registered clusters can store certificate bodies while YAML configs keep
+// using paths.
+func ReadPEMOrFile(value string) ([]byte, error) {
+	trimmed := strings.TrimSpace(value)
+	if strings.Contains(trimmed, "-----BEGIN ") {
+		return []byte(trimmed), nil
+	}
+
+	data, err := os.ReadFile(value)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
 // ValidateFiles verifies that certificate files referenced by the config exist.
 func (c *Config) ValidateFiles() error {
 	for _, p := range []struct {
@@ -212,7 +230,7 @@ func (c *Config) ValidateFiles() error {
 			{"tls_key", cl.TLSKey},
 			{"tls_server_cert", cl.TLSServerCert},
 		} {
-			if p.path == "" {
+			if p.path == "" || strings.Contains(p.path, "-----BEGIN ") {
 				continue
 			}
 			info, err := os.Stat(p.path)

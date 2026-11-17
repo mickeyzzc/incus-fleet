@@ -278,39 +278,50 @@ func NewWithDialer(ctx context.Context, cfgs []config.Cluster, dial DialFunc, lo
 }
 
 // DefaultDial connects to an Incus HTTPS endpoint using pinned client
-// certificates. Certificate arguments are PEM contents, not paths.
+// certificates. Certificate arguments may be PEM contents or file paths.
 func DefaultDial(_ context.Context, cfg config.Cluster) (InstanceServer, error) {
-	certPEM, err := os.ReadFile(cfg.TLSCert)
+	args, err := connectionArgs(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	srv, err := incus.ConnectIncus(cfg.Endpoint, args)
+	if err != nil {
+		return nil, fmt.Errorf("connect: %w", err)
+	}
+
+	return &augmentedClient{InstanceServer: srv}, nil
+}
+
+// connectionArgs turns a cluster config into Incus connection arguments.
+// Certificate fields may be inline PEM documents or paths on disk.
+func connectionArgs(cfg config.Cluster) (*incus.ConnectionArgs, error) {
+	certPEM, err := config.ReadPEMOrFile(cfg.TLSCert)
 	if err != nil {
 		return nil, fmt.Errorf("read client certificate: %w", err)
 	}
-	keyPEM, err := os.ReadFile(cfg.TLSKey)
+	keyPEM, err := config.ReadPEMOrFile(cfg.TLSKey)
 	if err != nil {
 		return nil, fmt.Errorf("read client key: %w", err)
 	}
 
 	var serverCert string
 	if cfg.TLSServerCert != "" {
-		serverPEM, err := os.ReadFile(cfg.TLSServerCert)
+		serverPEM, err := config.ReadPEMOrFile(cfg.TLSServerCert)
 		if err != nil {
 			return nil, fmt.Errorf("read server certificate: %w", err)
 		}
 		serverCert = string(serverPEM)
 	}
 
-	srv, err := incus.ConnectIncus(cfg.Endpoint, &incus.ConnectionArgs{
+	return &incus.ConnectionArgs{
 		TLSClientCert: string(certPEM),
 		TLSClientKey:  string(keyPEM),
 		TLSServerCert: serverCert,
 		UserAgent:     "incus-fleet/" + version.String(),
 		SkipGetEvents: true,
 		AuthType:      "tls",
-	})
-	if err != nil {
-		return nil, fmt.Errorf("connect: %w", err)
-	}
-
-	return &augmentedClient{InstanceServer: srv}, nil
+	}, nil
 }
 
 // augmentedClient layers SFTP-backed directory helpers onto a raw SDK client.

@@ -194,6 +194,43 @@ func TestValidateFiles(t *testing.T) {
 	}
 }
 
+func TestReadPEMOrFile(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "inline.pem", "from-file")
+
+	got, err := ReadPEMOrFile("-----BEGIN CERTIFICATE-----\nYQ==\n-----END CERTIFICATE-----\n")
+	if err != nil {
+		t.Fatalf("ReadPEMOrFile(inline) error = %v", err)
+	}
+	if !strings.Contains(string(got), "BEGIN CERTIFICATE") {
+		t.Fatalf("ReadPEMOrFile(inline) = %q", got)
+	}
+
+	got, err = ReadPEMOrFile(path)
+	if err != nil {
+		t.Fatalf("ReadPEMOrFile(path) error = %v", err)
+	}
+	if string(got) != "from-file" {
+		t.Fatalf("ReadPEMOrFile(path) = %q", got)
+	}
+
+	if _, err := ReadPEMOrFile(filepath.Join(dir, "missing.pem")); err == nil {
+		t.Fatal("ReadPEMOrFile(missing) expected error")
+	}
+}
+
+func TestValidateFilesSkipsInlinePEM(t *testing.T) {
+	cfg := Config{Clusters: []Cluster{{
+		Name:     "c1",
+		Endpoint: "https://192.0.2.10:8443",
+		TLSCert:  "-----BEGIN CERTIFICATE-----\nYQ==\n-----END CERTIFICATE-----\n",
+		TLSKey:   "-----BEGIN PRIVATE KEY-----\nYQ==\n-----END PRIVATE KEY-----\n",
+	}}}
+	if err := cfg.ValidateFiles(); err != nil {
+		t.Fatalf("ValidateFiles(inline PEM) error = %v", err)
+	}
+}
+
 func TestClusterByName(t *testing.T) {
 	cfg := Config{Clusters: []Cluster{{Name: "c1"}, {Name: "c2"}}}
 	if cl, ok := cfg.ClusterByName("c2"); !ok || cl.Name != "c2" {

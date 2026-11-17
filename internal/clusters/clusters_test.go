@@ -2,19 +2,57 @@ package clusters
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"io"
 	"log/slog"
+	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lxc/incus/v7/shared/api"
 
 	"github.com/mickeyzzc/incus-fleet/internal/config"
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
 )
+
+func testClientPEM(t *testing.T) (string, string) {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "incus-fleet-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	return string(certPEM), string(keyPEM)
+}
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -291,6 +329,52 @@ func TestNewWithDefaultDialerRecordsErrors(t *testing.T) {
 	}
 	if m.List()[0].Online {
 		t.Fatal("cluster should be offline")
+	}
+}
+
+func TestConnectionArgsAcceptInlinePEM(t *testing.T) {
+	cert, key := testClientPEM(t)
+
+	cfg := testConfig("c1")
+	cfg.TLSCert = cert
+	cfg.TLSKey = key
+	cfg.TLSServerCert = "-----BEGIN CERTIFICATE-----\nYQ==\n-----END CERTIFICATE-----\n"
+
+	args, err := connectionArgs(cfg)
+	if err != nil {
+		t.Fatalf("connectionArgs(inline PEM) error = %v", err)
+	}
+	if strings.TrimSpace(args.TLSClientCert) != strings.TrimSpace(cert) ||
+		strings.TrimSpace(args.TLSClientKey) != strings.TrimSpace(key) {
+		t.Fatalf("connectionArgs(inline PEM) did not keep PEM contents")
+	}
+	if args.TLSServerCert == "" {
+		t.Fatal("connectionArgs(inline server cert) is empty")
+	}
+}
+
+func TestConnectionArgsReadFiles(t *testing.T) {
+	cert, key := testClientPEM(t)
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "client.crt")
+	keyPath := filepath.Join(dir, "client.key")
+	if err := os.WriteFile(certPath, []byte(cert), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte(key), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testConfig("c1")
+	cfg.TLSCert = certPath
+	cfg.TLSKey = keyPath
+
+	args, err := connectionArgs(cfg)
+	if err != nil {
+		t.Fatalf("connectionArgs(paths) error = %v", err)
+	}
+	if args.TLSClientCert != cert || args.TLSClientKey != key {
+		t.Fatal("connectionArgs(paths) did not read file contents")
 	}
 }
 

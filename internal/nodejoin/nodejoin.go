@@ -589,7 +589,7 @@ func buildMemberConfig(cluster *api.Cluster, storageSource string) ([]api.Cluste
 func clusterCertificate(conn *clusters.Connection) ([]byte, error) {
 	cfg := conn.Config()
 	if cfg.TLSServerCert != "" {
-		pemBytes, err := os.ReadFile(cfg.TLSServerCert) //nolint:gosec // operator-supplied certificate path
+		pemBytes, err := config.ReadPEMOrFile(cfg.TLSServerCert)
 		if err != nil {
 			return nil, fmt.Errorf("nodejoin: read cluster certificate: %w", err)
 		}
