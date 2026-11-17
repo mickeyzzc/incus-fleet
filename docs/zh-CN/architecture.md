@@ -124,6 +124,17 @@ backend、action、plan hash、result 和时间戳。`unknown` 表示执行器�
 
 `GET /api/v1/tasks`、`GET /api/v1/tasks/{id}` 和 `GET /api/v1/audit` 用于查询这些记录。
 
+## 主机 agent
+
+可选的 Rust agent 是类型化的主机执行器，不是 Incus 代理。它用一次性 token 注册，从中心 CA
+获取客户端证书，并向独立的 agent gateway（`agent.listen`，默认 `:8444`）建立出站 mTLS
+WebSocket。浏览器 API 负责创建注册 token，并通过 `GET /api/v1/agents/{id}/snapshot` 派发只读
+`nodenet.snapshot` 任务。
+
+协议是 protobuf `incusfleet.agent.v1`（`api/agent/v1/agent.proto`），同时生成 Go 和 Rust 类型。
+agent 发送 Hello、Facts 和 Heartbeat；中心发送任务和心跳确认。当前 MVP 只读：facts 采集和基于
+`ip -j` 的网络快照。网络写入、Incus bootstrap、指标和 eBPF 仍在后续阶段。
+
 ## 共享资产与批量操作
 
 资产库把 SSH 公钥和脚本存放在控制平面数据库中。密钥按内容去重。批量操作复用与单实例维护操作相同的 `instances.RunOps` 路径，因此密钥注入、脚本执行和电源操作在单个或多个实例上表现一致。目标按顺序独立执行；一个失败不会中止其余目标。

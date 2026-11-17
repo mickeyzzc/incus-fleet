@@ -26,6 +26,7 @@
 - 单个 Go 二进制，内嵌 Vue UI
 - 管理员 token 登录，HttpOnly 会话；自动化可用 Bearer token
 - 每个部署使用独立客户端证书连接集群
+- 可选 Rust 主机 agent（alpha）：一次性注册、mTLS WebSocket、facts/心跳和只读节点网络快照
 
 > 在线迁移会保留客户机网络状态。若两个集群使用不同网段，迁移后需在客户机内
 > 重新获取 DHCP（或让两个集群使用相同网段）。
@@ -59,6 +60,7 @@ flowchart LR
 
 - Go 1.27 或更新版本
 - Bun 1.4 或更新版本（前端）
+- Rust 1.99 或更新版本（可选主机 agent）
 - 两个或更多可通过 HTTPS 访问的 Incus 集群
 - 被每个集群信任的客户端证书
 - SQLite（默认）或 PostgreSQL

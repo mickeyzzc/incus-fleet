@@ -294,6 +294,48 @@ Handler 错误映射为 `400 invalid_request`（输入错误）、`404 not_found
 SSH；写操作只有在 `node_access.ssh_write_fallback=true` 时才回退（对于尚未部署 agent 的旧
 部署，默认是 true）。
 
+## Agent
+
+主机 agent 是可选的。注册 token 一次性使用，并绑定到一个集群成员。agent gateway 监听独立的
+`agent.listen` TLS 端口（默认 `:8444`），不属于浏览器 API；普通 HTTP 端口只暴露下面的管理
+端点。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/agents/enrollment-tokens` | 创建一次性 token；要求集群已存在 |
+| `GET /api/v1/agents` | 列出已注册 agent 及其最后在线状态 |
+| `GET /api/v1/agents/{id}/snapshot` | 向在线 agent 派发只读 `nodenet.snapshot` |
+
+```json
+// POST /api/v1/agents/enrollment-tokens
+{"cluster": "c1", "member": "node-a", "ttl_seconds": 900}
+// 201
+{"token": "one-time-value", "cluster": "c1", "member": "node-a",
+ "expires_at": "2026-11-18T00:15:00Z"}
+```
+
+token 只返回一次；数据库只存它的 SHA-256。注册请求本身是 agent gateway 上的
+`POST /api/v1/agent/enroll`，携带 PKIX 公钥、cluster、member 和 token。gateway 返回 agent ID、
+客户端证书和 CA 证书。agent 随后用 mTLS 连接 `GET /api/v1/agent/connect`，通过 WebSocket
+发送 protobuf `Envelope` 帧。
+
+`GET /api/v1/agents/{id}/snapshot` 返回：
+
+```json
+{
+  "snapshot": {
+    "host": "node-a",
+    "nics": [{"name": "eth0", "state": "up", "kind": "ethernet",
+              "addresses": [{"family": "inet", "address": "192.0.2.10", "prefixlen": 24}]}],
+    "routes": [{"destination": "default", "gateway": "192.0.2.1", "device": "eth0"}],
+    "capabilities": ["nics", "routes"]
+  }
+}
+```
+
+`503 agent_offline` 表示 agent 没有在线 WebSocket；`504 agent_timeout` 表示派发超时前没有响应；
+`502 agent_error` 表示 agent 拒绝或执行任务失败。
+
 ## 主机任务与审计
 
 每个变更型节点操作都会记录为一个 host task 和一条不可变审计记录。任务和审计与迁移历史

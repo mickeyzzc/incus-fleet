@@ -346,6 +346,48 @@ The backend choice comes from `node_access.mode` (`auto`, `agent`, `ssh`, or `lo
 default `auto`, reads may fall back to SSH; mutating operations fall back only when
 `node_access.ssh_write_fallback` is true (the default for deployments that predate the agent).
 
+## Agents
+
+The host agent is optional. Enrollment tokens are single-use and bound to one cluster member. The
+agent gateway itself listens on the separate `agent.listen` TLS port (`:8444` by default) and is
+not part of the browser API; only the admin endpoints below are exposed on the normal HTTP port.
+
+| Method & path | Purpose |
+|---|---|
+| `POST /api/v1/agents/enrollment-tokens` | create a one-time token; requires an existing cluster |
+| `GET /api/v1/agents` | list enrolled agents and their last-seen state |
+| `GET /api/v1/agents/{id}/snapshot` | dispatch a read-only `nodenet.snapshot` to a connected agent |
+
+```json
+// POST /api/v1/agents/enrollment-tokens
+{"cluster": "c1", "member": "node-a", "ttl_seconds": 900}
+// 201
+{"token": "one-time-value", "cluster": "c1", "member": "node-a",
+ "expires_at": "2026-11-18T00:15:00Z"}
+```
+
+The token value is returned only once; the database stores its SHA-256 hash. Enrollment itself is
+`POST /api/v1/agent/enroll` on the agent gateway with a PKIX public key, cluster, member, and token.
+The gateway returns the agent ID, client certificate, and CA certificate. The agent then connects
+to `GET /api/v1/agent/connect` with mTLS and sends protobuf `Envelope` frames over the WebSocket.
+
+`GET /api/v1/agents/{id}/snapshot` returns:
+
+```json
+{
+  "snapshot": {
+    "host": "node-a",
+    "nics": [{"name": "eth0", "state": "up", "kind": "ethernet",
+              "addresses": [{"family": "inet", "address": "192.0.2.10", "prefixlen": 24}]}],
+    "routes": [{"destination": "default", "gateway": "192.0.2.1", "device": "eth0"}],
+    "capabilities": ["nics", "routes"]
+  }
+}
+```
+
+`503 agent_offline` means the agent has no live WebSocket; `504 agent_timeout` means it did not
+answer before the dispatch timeout; `502 agent_error` means the agent rejected or failed the task.
+
 ## Host tasks and audit
 
 Every mutating node operation is recorded as a host task plus an immutable audit entry. Tasks and

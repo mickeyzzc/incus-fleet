@@ -18,6 +18,10 @@
   `GET /api/v1/audit`，节点网络页提供 **History** 对话框。
 - schema 迁移版本跟踪，以及 host task、审计、agent、注册 token 和证书表。
 - Wi-Fi 与节点网络任务计划已脱敏；密码和 join token 不会持久化。
+- Rust 主机 agent MVP：protobuf `incusfleet.agent.v1` 契约、一次性注册 token、中心 mTLS
+  WebSocket gateway、facts/心跳上报和只读网络快照。
+- 管理端点 `POST /api/v1/agents/enrollment-tokens`、`GET /api/v1/agents` 和
+  `GET /api/v1/agents/{id}/snapshot`。
 
 ### 修复
 

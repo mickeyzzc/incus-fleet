@@ -154,6 +154,18 @@ dispatched, and leased tasks.
 
 `GET /api/v1/tasks`, `GET /api/v1/tasks/{id}`, and `GET /api/v1/audit` expose the records.
 
+## Host agent
+
+The optional Rust agent is a typed host actuator, not an Incus proxy. It enrolls with a one-time
+token, receives a client certificate from the center CA, and opens an outbound mTLS WebSocket to
+the separate agent gateway (`agent.listen`, default `:8444`). The browser API creates enrollment
+tokens and dispatches read-only `nodenet.snapshot` tasks through `GET /api/v1/agents/{id}/snapshot`.
+
+The protocol is protobuf `incusfleet.agent.v1` (`api/agent/v1/agent.proto`), with generated Go and
+Rust types. The agent sends Hello, Facts, and Heartbeat frames; the center sends task dispatches
+and heartbeat acknowledgements. The current MVP is read-only: facts collection and `ip -j` based
+network snapshots. Network writes, Incus bootstrap, telemetry, and eBPF remain later phases.
+
 ## Shared assets and batch operations
 
 The asset library stores SSH public keys and scripts in the control-plane database. Keys are

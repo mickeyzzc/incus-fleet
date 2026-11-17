@@ -259,6 +259,67 @@ SSH 账户需要对白名单中的二进制免密 sudo。如果该账户已经�
 `GET /api/v1/tasks`、`GET /api/v1/tasks/{id}` 和 `GET /api/v1/audit`。审计查询单次最多 200
 条；自动保留/导出会在 agent 生命周期工作中加入。
 
+### 主机 agent（可选）
+
+Rust 主机 agent 是可选的。它用一次性 token 注册，通过出站 mTLS WebSocket 连接中心，上报
+facts/心跳，并提供只读 `nodenet.snapshot` 任务。节点不需要开放入站端口。
+
+在中心主机上生成私有 CA 和 agent gateway 的服务端证书：
+
+```bash
+sudo install -d -m 0755 /etc/incus-fleet
+sudo openssl ecparam -name prime256v1 -genkey -noout -out /etc/incus-fleet/agent-ca.key
+sudo openssl req -x509 -new -key /etc/incus-fleet/agent-ca.key -sha256 -days 3650 \
+  -subj "/CN=incus-fleet-agent-ca" -out /etc/incus-fleet/agent-ca.crt
+sudo openssl ecparam -name prime256v1 -genkey -noout -out /etc/incus-fleet/agent-server.key
+sudo openssl req -new -key /etc/incus-fleet/agent-server.key \
+  -subj "/CN=fleet.example" -out /etc/incus-fleet/agent-server.csr
+printf 'subjectAltName=DNS:fleet.example,IP:192.0.2.20\nextendedKeyUsage=serverAuth\n' \
+  | sudo tee /etc/incus-fleet/agent-server.ext >/dev/null
+sudo openssl x509 -req -in /etc/incus-fleet/agent-server.csr \
+  -CA /etc/incus-fleet/agent-ca.crt -CAkey /etc/incus-fleet/agent-ca.key \
+  -CAcreateserial -days 825 -sha256 -extfile /etc/incus-fleet/agent-server.ext \
+  -out /etc/incus-fleet/agent-server.crt
+```
+
+在中心配置中启用 gateway：
+
+```yaml
+agent:
+  enabled: true
+  listen: 0.0.0.0:8444
+  tls_cert: /etc/incus-fleet/agent-server.crt
+  tls_key: /etc/incus-fleet/agent-server.key
+  client_ca: /etc/incus-fleet/agent-ca.crt
+  ca_key: /etc/incus-fleet/agent-ca.key
+```
+
+从 UI/API 创建一次性 token（只显示一次），然后构建并注册 agent：
+
+```bash
+cargo build --manifest-path agent/Cargo.toml --release
+sudo install -m 0755 agent/target/release/incus-fleet-agent /usr/local/bin/incus-fleet-agent
+sudo useradd --system --home /var/lib/incus-fleet-agent \
+  --shell /usr/sbin/nologin incus-fleet-agent
+sudo install -d -m 0700 -o incus-fleet-agent -g incus-fleet-agent /var/lib/incus-fleet-agent
+sudo install -m 0644 deploy/systemd/incus-fleet-agent.service \
+  /etc/systemd/system/incus-fleet-agent.service
+sudo systemctl daemon-reload
+
+read -r -s AGENT_TOKEN
+printf '%s' "$AGENT_TOKEN" | sudo -u incus-fleet-agent \
+  /usr/local/bin/incus-fleet-agent enroll \
+  --center https://fleet.example:8444 \
+  --ca /etc/incus-fleet/agent-ca.crt \
+  --cluster c1 --member node-a \
+  --state-dir /var/lib/incus-fleet-agent
+sudo systemctl enable --now incus-fleet-agent
+```
+
+当前 agent 以非特权服务运行，只做只读 facts 和网络快照；写操作、eBPF 和 Incus bootstrap 在
+后续阶段。示例单元启用 `NoNewPrivileges=yes`、`ProtectSystem=strict`、`MemoryMax=64M` 和
+`CPUQuota=5%`；在最低配节点上验证资源目标后再扩大使用范围。
+
 #### 从 UI 添加节点
 
 **Add node** 对话框可以准备一台裸机并加入集群。它需要：

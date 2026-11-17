@@ -261,6 +261,69 @@ migration; existing migration history is preserved. The API exposes `GET /api/v1
 `GET /api/v1/tasks/{id}`, and `GET /api/v1/audit`. Audit records are query-limited (maximum 200 per
 request); automatic retention/export is planned with the agent lifecycle work.
 
+### Host agent (optional)
+
+The Rust host agent is optional. It enrolls with a one-time token, connects outbound over mTLS
+WebSocket, reports facts/heartbeats, and serves read-only `nodenet.snapshot` tasks. The center
+does not need an inbound port on the node.
+
+Generate a private CA and a server certificate for the agent gateway on the center host:
+
+```bash
+sudo install -d -m 0755 /etc/incus-fleet
+sudo openssl ecparam -name prime256v1 -genkey -noout -out /etc/incus-fleet/agent-ca.key
+sudo openssl req -x509 -new -key /etc/incus-fleet/agent-ca.key -sha256 -days 3650 \
+  -subj "/CN=incus-fleet-agent-ca" -out /etc/incus-fleet/agent-ca.crt
+sudo openssl ecparam -name prime256v1 -genkey -noout -out /etc/incus-fleet/agent-server.key
+sudo openssl req -new -key /etc/incus-fleet/agent-server.key \
+  -subj "/CN=fleet.example" -out /etc/incus-fleet/agent-server.csr
+printf 'subjectAltName=DNS:fleet.example,IP:192.0.2.20\nextendedKeyUsage=serverAuth\n' \
+  | sudo tee /etc/incus-fleet/agent-server.ext >/dev/null
+sudo openssl x509 -req -in /etc/incus-fleet/agent-server.csr \
+  -CA /etc/incus-fleet/agent-ca.crt -CAkey /etc/incus-fleet/agent-ca.key \
+  -CAcreateserial -days 825 -sha256 -extfile /etc/incus-fleet/agent-server.ext \
+  -out /etc/incus-fleet/agent-server.crt
+```
+
+Enable the gateway in the center configuration:
+
+```yaml
+agent:
+  enabled: true
+  listen: 0.0.0.0:8444
+  tls_cert: /etc/incus-fleet/agent-server.crt
+  tls_key: /etc/incus-fleet/agent-server.key
+  client_ca: /etc/incus-fleet/agent-ca.crt
+  ca_key: /etc/incus-fleet/agent-ca.key
+```
+
+Create a one-time token from the UI/API (it is shown once), then build and enroll the agent:
+
+```bash
+cargo build --manifest-path agent/Cargo.toml --release
+sudo install -m 0755 agent/target/release/incus-fleet-agent /usr/local/bin/incus-fleet-agent
+sudo useradd --system --home /var/lib/incus-fleet-agent \
+  --shell /usr/sbin/nologin incus-fleet-agent
+sudo install -d -m 0700 -o incus-fleet-agent -g incus-fleet-agent /var/lib/incus-fleet-agent
+sudo install -m 0644 deploy/systemd/incus-fleet-agent.service \
+  /etc/systemd/system/incus-fleet-agent.service
+sudo systemctl daemon-reload
+
+read -r -s AGENT_TOKEN
+printf '%s' "$AGENT_TOKEN" | sudo -u incus-fleet-agent \
+  /usr/local/bin/incus-fleet-agent enroll \
+  --center https://fleet.example:8444 \
+  --ca /etc/incus-fleet/agent-ca.crt \
+  --cluster c1 --member node-a \
+  --state-dir /var/lib/incus-fleet-agent
+sudo systemctl enable --now incus-fleet-agent
+```
+
+The agent currently performs read-only facts and network snapshots as an unprivileged service;
+write operations, eBPF, and Incus bootstrap are later phases. The sample unit runs with
+`NoNewPrivileges=yes`, `ProtectSystem=strict`, `MemoryMax=64M`, and `CPUQuota=5%`, so verify the
+resource targets on the lowest-spec node before widening use.
+
 #### Adding a node from the UI
 
 The **Add node** dialog can provision a bare host and join it to a cluster. It needs:

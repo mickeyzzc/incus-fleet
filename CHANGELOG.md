@@ -19,6 +19,10 @@ All notable changes to this project are documented here. The format follows
   `GET /api/v1/audit`, plus a **History** dialog on the node network page.
 - Schema migration tracking and host task, audit, agent, enrollment, and certificate tables.
 - Wi-Fi and node network task plans are redacted; passwords and join tokens are never persisted.
+- Rust host agent MVP: protobuf `incusfleet.agent.v1` contract, one-time enrollment tokens,
+  center mTLS WebSocket gateway, facts/heartbeat reporting, and read-only network snapshots.
+- Admin endpoints `POST /api/v1/agents/enrollment-tokens`, `GET /api/v1/agents`, and
+  `GET /api/v1/agents/{id}/snapshot`.
 
 ### Fixed
 

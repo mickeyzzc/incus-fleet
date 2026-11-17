@@ -27,6 +27,8 @@ from the language switcher.*
 - Single Go binary with the Vue UI embedded
 - Admin-token login with HttpOnly sessions; bearer tokens for automation
 - Cluster connections pinned to per-deployment client certificates
+- Optional Rust host agent (alpha): one-time enrollment, mTLS WebSocket, facts/heartbeats, and
+  read-only node network snapshots
 
 > Live migration preserves guest network state. When clusters use different subnets,
 > renew DHCP inside the guest after the move (or use matching subnets).
@@ -62,6 +64,7 @@ semantics.
 
 - Go 1.27 or newer
 - Bun 1.4 or newer (frontend)
+- Rust 1.99 or newer (optional host agent)
 - Two or more Incus clusters reachable over HTTPS
 - A client certificate trusted by each cluster
 - SQLite (default) or PostgreSQL
