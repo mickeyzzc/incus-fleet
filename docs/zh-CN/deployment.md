@@ -437,13 +437,15 @@ metrics:
     public_url: https://fleet.example
 ```
 
-remote write 队列是磁盘持久化的。每个中心实例写入自己的分区 `spool_dir/<spool_partition>`；
-`spool_partition` 默认依次取 `ha.worker_id`、hostname，因此多个中心实例不会重放或删除彼此的批次。
-同一主机运行多个实例时应显式设置。每个批次先写入再进入内存队列；发送成功后删除文件，崩溃/重启
-遗留的文件会在该分区再次启动时重放。升级时 `spool_dir` 根目录下的旧文件会迁移进分区。
-`queue_size` 限制内存队列，`max_bytes` 限制每个分区（默认 64 MiB），任一上限超出时删除最旧文件。
-429/5xx 后退重试；4xx 批次作为永久拒绝丢弃。`spool_dir` 默认是文件型 SQLite 数据库旁的
-`data/remote-write`。Prometheus 需要
+remote write 队列是磁盘持久化的。每个中心实例写入自己的分区 `spool_dir/<spool_partition>`。
+`spool_partition` 默认依次取 `ha.worker_id`、无冲突的 `hostname-pid`；需要稳定名称时显式设置。
+每个分区都有 `lock` 文件；活跃实例持有独占 flock，其他实例无法重放或删除其文件。新实例启动时
+会持有根锁，接管所有未加锁的过期分区（例如崩溃或 PID 变化后），先重放其中的批次再打开自己的
+分区。两个实例使用相同显式分区启动会立即失败，而不是重复发送。每个批次先写入再进入内存队列；
+发送成功后删除文件，崩溃/重启遗留的文件会被重放。升级时 `spool_dir` 根目录下的旧文件会迁移进
+当前分区。`queue_size` 限制内存队列，`max_bytes` 限制每个分区（默认 64 MiB），任一上限超出时
+删除最旧文件。429/5xx 后退重试；4xx 批次作为永久拒绝丢弃。`spool_dir` 默认是文件型 SQLite
+数据库旁的 `data/remote-write`。Prometheus 需要
 `--web.enable-remote-write-receiver`；VictoriaMetrics 单机使用
 `http://vm:8428/api/v1/write`，集群使用
 `http://vminsert:8480/insert/<accountID>/prometheus/api/v1/write`。token 放在文件或环境变量中，

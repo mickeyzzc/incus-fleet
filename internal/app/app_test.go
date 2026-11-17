@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -426,5 +427,12 @@ func TestRunWithHADispatcher(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run() did not stop")
+	}
+}
+
+func TestDefaultSpoolPartition(t *testing.T) {
+	partition := defaultSpoolPartition()
+	if !strings.Contains(partition, strconv.Itoa(os.Getpid())) || strings.TrimSpace(partition) == "" {
+		t.Fatalf("defaultSpoolPartition() = %q", partition)
 	}
 }

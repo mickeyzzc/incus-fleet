@@ -56,9 +56,9 @@ All notable changes to this project are documented here. The format follows
   bootstrap, step progress, and an explicit SSH fallback. `GET /api/v1/agents` accepts
   `cluster`/`member` filters.
 - Durable remote-write spool with restart replay, bounded queue/byte retention, older-file
-  eviction, and per-instance spool partitions so multiple center instances cannot replay or delete
-  each other's batches. The HA dispatcher now also runs `agent.bootstrap` and `agent.snapshot`
-  handlers.
+  eviction, per-instance spool partitions, and per-partition flock ownership with stale-partition
+  takeover. Default partitions are collision-free (`hostname-pid`). The HA dispatcher now also runs
+  `agent.bootstrap` and `agent.snapshot` handlers.
 - Reliable IPv4/IPv6 TCP retransmit attribution through a sockops flow→cgroup map, validated with
   container packet loss; OOM counters are aggregated per instance across nested cgroups.
 - Native Linux netlink for link/address/fleet-route writes, an opt-in detached network rollback

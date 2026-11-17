@@ -60,6 +60,7 @@ func New(cfg Config) (*Writer, error) {
 	}
 	entries, err := sp.load()
 	if err != nil {
+		sp.Close()
 		return nil, err
 	}
 	w := &Writer{
@@ -126,6 +127,7 @@ func (w *Writer) Enqueue(series []telemetry.Series) {
 func (w *Writer) Close() {
 	w.once.Do(func() { close(w.stop) })
 	w.wg.Wait()
+	w.spool.Close()
 }
 
 func (w *Writer) run(ctx context.Context) {

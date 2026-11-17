@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -416,11 +417,20 @@ func TestSpoolLoadUnreadableFile(t *testing.T) {
 	if _, err := sp.append([]telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}}); err != nil {
 		t.Fatal(err)
 	}
+	var jsonFiles []string
 	entries, err := os.ReadDir(sp.dir)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("spool files = %d, %v", len(entries), err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	path := filepath.Join(sp.dir, entries[0].Name())
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), spoolSuffix) {
+			jsonFiles = append(jsonFiles, entry.Name())
+		}
+	}
+	if len(jsonFiles) != 1 {
+		t.Fatalf("spool json files = %d, %v", len(jsonFiles), err)
+	}
+	path := filepath.Join(sp.dir, jsonFiles[0])
 	if err := os.Chmod(path, 0o000); err != nil {
 		t.Fatal(err)
 	}
@@ -443,6 +453,7 @@ func TestSpoolLoadAppliesRetention(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	sp.Close()
 	tight, err := openSpool(dir, "test", 1, 1<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -529,7 +540,7 @@ func TestSpoolLegacyRootMigration(t *testing.T) {
 	writer.Close()
 }
 
-func TestSpoolPartitionDoesNotReplayOtherInstance(t *testing.T) {
+func TestSpoolStalePartitionTakeover(t *testing.T) {
 	root := t.TempDir()
 	first := newWriter(t, Config{URL: "", SpoolDir: root, SpoolPartition: "app-a", QueueSize: 2})
 	first.Enqueue([]telemetry.Series{{Name: "a"}})
@@ -551,19 +562,40 @@ func TestSpoolPartitionDoesNotReplayOtherInstance(t *testing.T) {
 	other.Start(ctx)
 	select {
 	case <-received:
-		t.Fatal("other partition replayed app-a data")
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(3 * time.Second):
+		t.Fatal("stale app-a partition was not claimed by app-b")
 	}
 	other.Close()
-
-	owner := newWriter(t, Config{URL: server.URL, SpoolDir: root, SpoolPartition: "app-a", QueueSize: 2})
-	owner.Start(ctx)
-	select {
-	case <-received:
-	case <-time.After(3 * time.Second):
-		t.Fatal("owning partition did not replay its data")
+	if _, err := os.Stat(filepath.Join(root, "app-a")); !os.IsNotExist(err) {
+		t.Fatalf("stale partition still exists: %v", err)
 	}
-	owner.Close()
+}
+
+func TestSpoolActivePartitionNotClaimed(t *testing.T) {
+	root := t.TempDir()
+	active := newWriter(t, Config{URL: "", SpoolDir: root, SpoolPartition: "app-a", QueueSize: 2})
+	active.Enqueue([]telemetry.Series{{Name: "a"}})
+
+	other := newWriter(t, Config{URL: "", SpoolDir: root, SpoolPartition: "app-b", QueueSize: 2})
+	if other.spool.count() != 0 {
+		t.Fatalf("active partition was claimed: %d", other.spool.count())
+	}
+	if active.spool.count() != 1 {
+		t.Fatalf("active partition lost data: %d", active.spool.count())
+	}
+	other.Close()
+	active.Close()
+}
+
+func TestSpoolSamePartitionLocked(t *testing.T) {
+	root := t.TempDir()
+	first := newWriter(t, Config{URL: "", SpoolDir: root, SpoolPartition: "app-a", QueueSize: 2})
+	second, err := New(Config{SpoolDir: root, SpoolPartition: "app-a", QueueSize: 2})
+	if err == nil {
+		second.Close()
+		t.Fatal("second writer acquired the same partition")
+	}
+	first.Close()
 }
 
 func TestSanitizePartition(t *testing.T) {
@@ -571,12 +603,23 @@ func TestSanitizePartition(t *testing.T) {
 		"app-a":   "app-a",
 		"app b/c": "app-b-c",
 		"...":     "default",
-		"":        "default",
 	}
 	for input, want := range cases {
 		if got := sanitizePartition(input); got != want {
 			t.Fatalf("sanitizePartition(%q) = %q, want %q", input, got, want)
 		}
+	}
+	if got := sanitizePartition(""); got == "" || got == "default" {
+		t.Fatalf("sanitizePartition(empty) is not collision-free: %q", got)
+	}
+	if got := sanitizePartition("   "); got == "" || got == "default" {
+		t.Fatalf("sanitizePartition(whitespace) is not collision-free: %q", got)
+	}
+	if got := sanitizePartitionName("..."); got != "center" {
+		t.Fatalf("sanitizePartitionName(...) = %q", got)
+	}
+	if got := defaultPartition(); !strings.Contains(got, strconv.Itoa(os.Getpid())) {
+		t.Fatalf("defaultPartition() = %q", got)
 	}
 }
 
@@ -611,5 +654,53 @@ func TestOpenSpoolLegacyMigrationRenameFailure(t *testing.T) {
 	_ = os.Chmod(partition, 0o700) //nolint:gosec // restore test directory
 	if err == nil {
 		t.Fatal("openSpool(read-only partition) expected migration error")
+	}
+}
+
+func TestSpoolCloseAndLockHelpers(t *testing.T) {
+	var nilSpool *spool
+	nilSpool.Close()
+	unlockFile(nil)
+
+	sp, err := openSpool(t.TempDir(), "test", 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp.Close()
+	sp.Close() // second close is a no-op
+}
+
+func TestMigrateLegacyRootUnreadable(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o000); err != nil { //nolint:gosec // test permissions
+		t.Fatal(err)
+	}
+	err := migrateLegacyRoot(root, filepath.Join(root, "app"))
+	_ = os.Chmod(root, 0o700) //nolint:gosec // restore test directory
+	if err == nil {
+		t.Fatal("migrateLegacyRoot(unreadable) expected error")
+	}
+}
+
+func TestClaimStalePartitionRenameFailure(t *testing.T) {
+	root := t.TempDir()
+	stale := filepath.Join(root, "stale")
+	own := filepath.Join(root, "own")
+	if err := os.MkdirAll(stale, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(own, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "batch.json"), []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(own, 0o500); err != nil { //nolint:gosec // test permissions
+		t.Fatal(err)
+	}
+	err := claimStalePartitions(root, own)
+	_ = os.Chmod(own, 0o700) //nolint:gosec // restore test directory
+	if err == nil {
+		t.Fatal("claimStalePartitions(read-only target) expected error")
 	}
 }

@@ -147,7 +147,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 				partition = strings.TrimSpace(cfg.HA.WorkerID)
 			}
 			if partition == "" {
-				partition, _ = os.Hostname()
+				partition = defaultSpoolPartition()
 			}
 			remoteWriter, err = remotewrite.New(remotewrite.Config{
 				URL:            cfg.Metrics.RemoteWrite.URL,
@@ -379,6 +379,14 @@ func (a *App) Close() error {
 	a.clusters.Close()
 
 	return a.store.Close()
+}
+
+func defaultSpoolPartition() string {
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		hostname = "center"
+	}
+	return fmt.Sprintf("%s-%d", hostname, os.Getpid())
 }
 
 func readSecret(value, file string) (string, error) {

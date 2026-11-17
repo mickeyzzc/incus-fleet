@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/mickeyzzc/incus-fleet/internal/telemetry"
 )
 
@@ -35,11 +37,15 @@ type spool struct {
 	maxEntries int
 	maxBytes   int64
 	sequence   atomic.Uint64
+	lock       *os.File
+	closeOnce  sync.Once
 
 	mu        sync.Mutex
 	entries   int
 	sizeBytes int64
 }
+
+const spoolLockName = "lock"
 
 func openSpool(root, partition string, maxEntries int, maxBytes int64) (*spool, error) {
 	if strings.TrimSpace(root) == "" {
@@ -55,18 +61,124 @@ func openSpool(root, partition string, maxEntries int, maxBytes int64) (*spool, 
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, fmt.Errorf("remotewrite: create spool root: %w", err)
 	}
+
+	// Serialize startup claims across instances that share one spool root.
+	rootLock, err := lockRootFile(filepath.Join(root, ".lock"))
+	if err != nil {
+		return nil, fmt.Errorf("remotewrite: lock spool root: %w", err)
+	}
+	defer unlockFile(rootLock)
+
 	dir := filepath.Join(root, partition)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("remotewrite: create spool partition: %w", err)
 	}
+	ownLock, err := lockFile(filepath.Join(dir, spoolLockName))
+	if err != nil {
+		return nil, fmt.Errorf("remotewrite: partition %q is already owned: %w", partition, err)
+	}
+
 	if err := migrateLegacyRoot(root, dir); err != nil {
+		unlockFile(ownLock)
+		return nil, err
+	}
+	if err := claimStalePartitions(root, dir); err != nil {
+		unlockFile(ownLock)
 		return nil, err
 	}
 
 	return &spool{
 		root: root, partition: partition, dir: dir,
 		maxEntries: maxEntries, maxBytes: maxBytes,
+		lock: ownLock,
 	}, nil
+}
+
+// Close releases the partition lock. Writers must call it after their sender
+// goroutine has stopped.
+func (s *spool) Close() {
+	if s == nil {
+		return
+	}
+	s.closeOnce.Do(func() {
+		if s.lock != nil {
+			unlockFile(s.lock)
+			s.lock = nil
+		}
+	})
+}
+
+func lockFile(path string) (*os.File, error) {
+	return flockFile(path, unix.LOCK_EX|unix.LOCK_NB)
+}
+
+func lockRootFile(path string) (*os.File, error) {
+	return flockFile(path, unix.LOCK_EX)
+}
+
+func flockFile(path string, how int) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // spool path is operator-configured
+	if err != nil {
+		return nil, err
+	}
+	if err := unix.Flock(int(file.Fd()), how); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
+}
+
+func unlockFile(file *os.File) {
+	if file == nil {
+		return
+	}
+	_ = unix.Flock(int(file.Fd()), unix.LOCK_UN)
+	_ = file.Close()
+}
+
+// claimStalePartitions moves batches from unlocked partitions into the current
+// partition. Root startup locking ensures two new owners cannot claim at once.
+func claimStalePartitions(root, ownDir string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("remotewrite: read spool root: %w", err)
+	}
+	seq := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		source := filepath.Join(root, entry.Name())
+		if source == ownDir {
+			continue
+		}
+		lock, err := lockFile(filepath.Join(source, spoolLockName))
+		if err != nil {
+			// Locked by a live instance.
+			continue
+		}
+		files, readErr := os.ReadDir(source)
+		if readErr == nil {
+			for _, file := range files {
+				if file.IsDir() || !strings.HasSuffix(file.Name(), spoolSuffix) {
+					continue
+				}
+				seq++
+				target := filepath.Join(
+					ownDir,
+					fmt.Sprintf("taken-%020d-%06d%s", time.Now().UTC().UnixNano(), seq, spoolSuffix),
+				)
+				if err := os.Rename(filepath.Join(source, file.Name()), target); err != nil {
+					unlockFile(lock)
+					return fmt.Errorf("remotewrite: claim stale spool batch: %w", err)
+				}
+			}
+		}
+		unlockFile(lock)
+		_ = os.Remove(filepath.Join(source, spoolLockName))
+		_ = os.Remove(source)
+	}
+	return nil
 }
 
 func sanitizePartition(value string) string {
@@ -83,7 +195,36 @@ func sanitizePartition(value string) string {
 	}
 	out := strings.Trim(b.String(), ".-")
 	if out == "" || out == "." || out == ".." {
+		if strings.TrimSpace(value) == "" {
+			return defaultPartition()
+		}
 		return "default"
+	}
+	return out
+}
+
+func defaultPartition() string {
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		hostname = "center"
+	}
+	return fmt.Sprintf("%s-%d", sanitizePartitionName(hostname), os.Getpid())
+}
+
+func sanitizePartitionName(value string) string {
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), ".-")
+	if out == "" {
+		return "center"
 	}
 	return out
 }
