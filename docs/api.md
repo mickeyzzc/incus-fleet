@@ -594,7 +594,9 @@ created or upgraded automatically at startup.
 }
 ```
 
-An asynchronous network task uses `type: "agent.network"` and a `NodenetApplySpec`-shaped plan:
+The dispatcher supports `agent.network` (a `NodenetApplySpec` plan), `agent.snapshot` (no plan),
+and `agent.bootstrap` (a signed `bootstrap.Spec` plan with `task_id` and `signature`). Network
+example:
 
 ```json
 POST /api/v1/tasks
@@ -606,6 +608,8 @@ POST /api/v1/tasks
 
 The task is claimed by a center instance running the dispatcher (`ha.enabled=true`) and executed
 through the member's online agent. Leases prevent two instances from running the same task.
+`agent.bootstrap` requires a pre-signed spec; the handler dispatches it unchanged to the agent and
+records the step count. `agent.snapshot` is a connectivity probe that reports NIC/route counts.
 
 Task states are `queued`, `dispatched`, `accepted`, `running`, `succeeded`, `failed`, `canceled`,
 and `unknown`. `unknown` means the control plane lost contact with the executor while the

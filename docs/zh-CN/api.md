@@ -531,7 +531,8 @@ POST /api/v1/agents/AGENT_ID/revoke -> 204
 }
 ```
 
-异步网络任务使用 `type: "agent.network"` 和 `NodenetApplySpec` 形状的 plan：
+dispatcher 支持 `agent.network`（`NodenetApplySpec` plan）、`agent.snapshot`（无 plan）和
+`agent.bootstrap`（带 `task_id`、`signature` 的签名 `bootstrap.Spec` plan）。网络示例：
 
 ```json
 POST /api/v1/tasks
@@ -542,7 +543,8 @@ POST /api/v1/tasks
 ```
 
 任务由运行 dispatcher（`ha.enabled=true`）的中心实例领取，并通过成员的在线 agent 执行。lease
-防止两个实例重复执行。
+防止两个实例重复执行。`agent.bootstrap` 要求预签名 spec，handler 原样派发给 agent 并记录步骤数；
+`agent.snapshot` 是连通性探测，返回网卡/路由数量。
 
 任务状态为 `queued`、`dispatched`、`accepted`、`running`、`succeeded`、`failed`、`canceled`
 和 `unknown`。`unknown` 表示控制面与执行器失联，但操作可能已经完成；它不会被当作失败。审计
