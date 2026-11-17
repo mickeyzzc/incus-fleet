@@ -164,8 +164,12 @@ spec：中心构建 join 或 init preseed，并用 agent CA 私钥签名；helpe
 还没有后台 dispatcher。
 
 agent 证书由中心 CA 签发。管理员可以为 agent 现有公钥签发替换证书，或吊销 agent；gateway 在
-连接时检查吊销状态并校验存储的证书指纹。agent 升级使用 detached Ed25519 签名、`.prev`
-备份和 `--version` 健康检查，失败时恢复旧二进制。审计记录可导出为 JSONL 或 CSV。
+连接时检查吊销状态并校验存储的证书指纹。agent 在离过期 30 天内通过 mTLS 自动续期。agent
+升级使用 detached Ed25519 签名、`.prev` 备份、`--version` 健康检查，失败时恢复旧二进制，并可
+自动重启 systemd 服务。审计记录可导出为 JSONL 或 CSV。
+
+后台 dispatcher（`ha.enabled`）用数据库 lease 领取 queued `agent.network` 任务，任务运行期间
+续租，并记录成功/失败。这样多个中心实例共享一个 PostgreSQL 时不会重复执行同一任务。
 
 ## 共享资产与批量操作
 

@@ -370,6 +370,9 @@ The token value is returned only once; the database stores its SHA-256 hash. Enr
 `POST /api/v1/agent/enroll` on the agent gateway with a PKIX public key, cluster, member, and token.
 The gateway returns the agent ID, client certificate, and CA certificate. The agent then connects
 to `GET /api/v1/agent/connect` with mTLS and sends protobuf `Envelope` frames over the WebSocket.
+Certificates are renewed automatically: the agent calls `POST /api/v1/agent/renew` with its current
+mTLS identity when the certificate is within 30 days of expiry. The gateway verifies the current
+fingerprint, signs a certificate for the submitted PKIX public key, and returns the new PEM and CA.
 
 `GET /api/v1/agents/{id}/snapshot` returns:
 
@@ -513,9 +516,22 @@ The HTTP SD response follows the Prometheus format:
 ```
 
 The SD token is configured separately from the admin token and is sent as
-`Authorization: Bearer <token>`. Only online agents are returned. The current release supports
-`mode=proxy`: Prometheus scrapes the center, which returns the latest in-memory sample plus
-`fleet_agent_up`. Direct agent listeners are a later phase.
+`Authorization: Bearer <token>`. Only online agents are returned. `mode=proxy` (default) has Prometheus scrape the center, which returns the latest in-memory sample
+plus `fleet_agent_up`. `mode=direct` returns the agent's own metrics listener from the
+`metrics_address` fact; the agent must run with `--metrics-listen` and the same bearer token used by
+the scrape configuration. Agents without an advertised address are skipped.
+
+```yaml
+# Prometheus scrape config for direct mode
+scrape_configs:
+  - job_name: incus-fleet
+    authorization:
+      credentials_file: /etc/prometheus/fleet-metrics.token
+    http_sd_configs:
+      - url: https://fleet.example/api/v1/sd/agents
+        authorization:
+          credentials_file: /etc/prometheus/fleet-sd.token
+```
 
 Agent identity lifecycle:
 
@@ -523,6 +539,7 @@ Agent identity lifecycle:
 |---|---|
 | `POST /api/v1/agents/{id}/certificate` | sign a new certificate for the agent's PKIX public key |
 | `POST /api/v1/agents/{id}/revoke` | revoke an agent; the gateway rejects future connections |
+| `POST /api/v1/tasks` | enqueue an async `agent.network` task for the HA dispatcher |
 
 ```json
 // rotate
@@ -543,6 +560,7 @@ created or upgraded automatically at startup.
 | Method & path | Purpose |
 |---|---|
 | `GET /api/v1/tasks?cluster=&member=&limit=` | recent tasks, newest first; `limit` 1-200, default 50 |
+| `POST /api/v1/tasks` | enqueue `{cluster,member,type,plan}`; `202` with the queued task |
 | `GET /api/v1/tasks/{id}` | one task and its state-transition events |
 | `GET /api/v1/audit?cluster=&member=&limit=` | host audit records, newest first |
 | `GET /api/v1/audit/export?format=jsonl\|csv` | full audit export, no UI limit |
@@ -571,6 +589,19 @@ created or upgraded automatically at startup.
   ]
 }
 ```
+
+An asynchronous network task uses `type: "agent.network"` and a `NodenetApplySpec`-shaped plan:
+
+```json
+POST /api/v1/tasks
+{"cluster":"c1","member":"node-a","type":"agent.network",
+ "plan":{"action":"route-add","destination":"10.0.1.0/24","gateway":"192.0.2.1","device":"eth0"}}
+// 202
+{"task":{"id":"...","state":"queued","lease_owner":""}}
+```
+
+The task is claimed by a center instance running the dispatcher (`ha.enabled=true`) and executed
+through the member's online agent. Leases prevent two instances from running the same task.
 
 Task states are `queued`, `dispatched`, `accepted`, `running`, `succeeded`, `failed`, `canceled`,
 and `unknown`. `unknown` means the control plane lost contact with the executor while the

@@ -317,7 +317,8 @@ SSH；写操作只有在 `node_access.ssh_write_fallback=true` 时才回退（�
 token 只返回一次；数据库只存它的 SHA-256。注册请求本身是 agent gateway 上的
 `POST /api/v1/agent/enroll`，携带 PKIX 公钥、cluster、member 和 token。gateway 返回 agent ID、
 客户端证书和 CA 证书。agent 随后用 mTLS 连接 `GET /api/v1/agent/connect`，通过 WebSocket
-发送 protobuf `Envelope` 帧。
+发送 protobuf `Envelope` 帧。证书会自动续期：离过期 30 天内时，agent 用当前 mTLS 身份调用
+`POST /api/v1/agent/renew`；gateway 校验当前指纹，为提交的 PKIX 公钥签发新证书并返回新 PEM 和 CA。
 
 `GET /api/v1/agents/{id}/snapshot` 返回：
 
@@ -455,8 +456,21 @@ HTTP SD 响应遵循 Prometheus 格式：
 ```
 
 SD token 与管理员 token 分离，通过 `Authorization: Bearer <token>` 发送。只返回在线 agent。当前
-版本支持 `mode=proxy`：Prometheus 抓取中心，中心返回最新内存样本和 `fleet_agent_up`。agent
-直连监听在后续阶段。
+`mode=proxy`（默认）由 Prometheus 抓取中心，中心返回最新内存样本和 `fleet_agent_up`。
+`mode=direct` 返回 agent 自己的监听地址（来自 `metrics_address` fact）；agent 必须用
+`--metrics-listen` 启动，并使用与抓取配置相同的 bearer token。没有上报地址的 agent 会被跳过。
+
+```yaml
+# direct 模式的 Prometheus 抓取配置
+scrape_configs:
+  - job_name: incus-fleet
+    authorization:
+      credentials_file: /etc/prometheus/fleet-metrics.token
+    http_sd_configs:
+      - url: https://fleet.example/api/v1/sd/agents
+        authorization:
+          credentials_file: /etc/prometheus/fleet-sd.token
+```
 
 agent 身份生命周期：
 
@@ -464,6 +478,7 @@ agent 身份生命周期：
 |---|---|
 | `POST /api/v1/agents/{id}/certificate` | 为 agent 的 PKIX 公钥签发新证书 |
 | `POST /api/v1/agents/{id}/revoke` | 吊销 agent；gateway 拒绝后续连接 |
+| `POST /api/v1/tasks` | 为 HA dispatcher 入队异步 `agent.network` 任务 |
 
 ```json
 // 轮换
@@ -483,6 +498,7 @@ POST /api/v1/agents/AGENT_ID/revoke -> 204
 | 方法与路径 | 用途 |
 |---|---|
 | `GET /api/v1/tasks?cluster=&member=&limit=` | 最近的任务，按时间倒序；`limit` 1-200，默认 50 |
+| `POST /api/v1/tasks` | 入队 `{cluster,member,type,plan}`；返回 `202` 和 queued 任务 |
 | `GET /api/v1/tasks/{id}` | 一个任务及其状态事件 |
 | `GET /api/v1/audit?cluster=&member=&limit=` | 主机审计记录，按时间倒序 |
 | `GET /api/v1/audit/export?format=jsonl\|csv` | 完整审计导出，不受 UI 上限 |
@@ -511,6 +527,19 @@ POST /api/v1/agents/AGENT_ID/revoke -> 204
   ]
 }
 ```
+
+异步网络任务使用 `type: "agent.network"` 和 `NodenetApplySpec` 形状的 plan：
+
+```json
+POST /api/v1/tasks
+{"cluster":"c1","member":"node-a","type":"agent.network",
+ "plan":{"action":"route-add","destination":"10.0.1.0/24","gateway":"192.0.2.1","device":"eth0"}}
+// 202
+{"task":{"id":"...","state":"queued","lease_owner":""}}
+```
+
+任务由运行 dispatcher（`ha.enabled=true`）的中心实例领取，并通过成员的在线 agent 执行。lease
+防止两个实例重复执行。
 
 任务状态为 `queued`、`dispatched`、`accepted`、`running`、`succeeded`、`failed`、`canceled`
 和 `unknown`。`unknown` 表示控制面与执行器失联，但操作可能已经完成；它不会被当作失败。审计

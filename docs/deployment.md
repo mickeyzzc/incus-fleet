@@ -373,8 +373,9 @@ curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   https://fleet.example/api/v1/agents/AGENT_ID/revoke
 ```
 
-The gateway checks revocation on every connection. The agent must write the returned certificate
-into its identity directory and reconnect; automated renewal is a later refinement.
+The gateway checks revocation on every connection. The agent renews automatically when its
+certificate is within 30 days of expiry: it calls `POST /api/v1/agent/renew` over its current mTLS
+identity and writes the returned certificate into the identity directory before reconnecting.
 
 The audit history can be exported without the UI's 200-row limit:
 
@@ -385,10 +386,23 @@ curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
   'https://fleet.example/api/v1/audit/export?format=csv' > audit.csv
 ```
 
-Host tasks have database-backed lease primitives (`lease_owner`, `lease_until`,
+Host tasks have database-backed leases (`lease_owner`, `lease_until`,
 `ClaimHostTask`/`RenewHostTaskLease`/`ReleaseHostTask`). PostgreSQL uses
-`FOR UPDATE SKIP LOCKED`; SQLite serializes through a transaction. These primitives are ready for
-a multi-instance task worker; the current center still executes synchronous HTTP operations.
+`FOR UPDATE SKIP LOCKED`; SQLite serializes through a transaction. Enable the background dispatcher
+to consume queued tasks:
+
+```yaml
+ha:
+  enabled: true
+  worker_id: app-a          # unique per center instance; defaults to hostname-pid
+  lease: 30s
+  interval: 2s
+```
+
+Start two or more center instances against the same PostgreSQL database. Each claims at most one
+task, renews its lease while running, and releases nothing on success. Enqueue asynchronous agent
+network work with `POST /api/v1/tasks`; synchronous node-page operations keep their existing
+behavior. On SQLite, leases still work but only one instance should run the dispatcher.
 
 Upgrade an agent with a detached Ed25519 signature:
 
@@ -401,8 +415,9 @@ incus-fleet-agent upgrade \
 ```
 
 The installer verifies the signature, keeps `incus-fleet-agent.prev`, installs the new binary with
-mode 0755, and runs `--version`; if the health check fails it restores the previous binary. Restart
-the service after a successful install.
+mode 0755, and runs `--version`; if the health check fails it restores the previous binary. After a
+successful install it runs `systemctl try-restart incus-fleet-agent` when systemd is running. Use
+`--no-restart` (or `INCUS_FLEET_UPGRADE_NO_RESTART=1`) to skip the restart.
 
 #### Prometheus/VictoriaMetrics
 
@@ -448,8 +463,20 @@ scrape_configs:
           credentials_file: /etc/prometheus/fleet-sd.token
 ```
 
-`mode=proxy` is the only mode in this release; direct agent listeners are a later phase. The SD
-endpoint only returns online agents.
+`mode=proxy` has Prometheus scrape the center. For `mode=direct`, start each agent with a metrics
+listener and the same scrape token:
+
+```bash
+# /etc/incus-fleet/agent-metrics.token contains the bearer token
+incus-fleet-agent run --state-dir /var/lib/incus-fleet-agent \
+  --metrics-listen 0.0.0.0:9100 \
+  --metrics-advertise 192.0.2.11:9100 \
+  --metrics-token-file /etc/incus-fleet/agent-metrics.token
+```
+
+With `metrics.http_sd.mode: direct`, the SD endpoint returns `metrics_address` targets with
+`__metrics_path__=/metrics`. Configure the Prometheus scrape job with the same bearer token. Agents
+without an advertised address are skipped; the SD endpoint only returns online agents.
 
 #### eBPF telemetry (optional)
 
@@ -468,6 +495,19 @@ sudo install -m 0644 agent/bpf/metrics.bpf.o /usr/lib/incus-fleet/metrics.bpf.o
 Add `--ebpf-object /usr/lib/incus-fleet/metrics.bpf.o` to the agent `ExecStart` and enable
 `AmbientCapabilities=CAP_BPF CAP_PERFMON` in the unit. If the object, BTF, or permissions are
 missing, the agent logs the reason and keeps using procfs/cgroup; no telemetry is lost.
+
+Verify the object with the agent's own loader before enabling it in the service:
+
+```bash
+sudo incus-fleet-agent ebpf-self-test \
+  --object /usr/lib/incus-fleet/metrics.bpf.o --hold-secs 10
+# initial_tcp_retransmits=0
+# initial_oom_kills=0
+# tcp_retransmits=...
+# oom_kills=...
+```
+
+A non-zero `tcp_retransmits` delta under induced packet loss confirms the tracepoints are attached.
 
 Per-cgroup metrics are container-first; VMs are host-side cgroup metrics only. `fleet_agent_telemetry_mode`
 reports `ebpf` or `procfs`.

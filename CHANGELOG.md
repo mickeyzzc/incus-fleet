@@ -40,6 +40,13 @@ All notable changes to this project are documented here. The format follows
   signed agent upgrade with automatic rollback, and JSONL/CSV audit export.
 - The host metrics panel can switch between the center ring buffer and the Prometheus/VictoriaMetrics
   query proxy.
+- An HA dispatcher consumes queued `agent.network` tasks with database leases; enqueue with
+  `POST /api/v1/tasks`. Agents auto-renew certificates within 30 days of expiry, and signed upgrades
+  restart the systemd unit unless `--no-restart` is set.
+- Direct HTTP SD mode using an agent `/metrics` listener with bearer-token auth, in addition to the
+  center proxy mode.
+- `incus-fleet-agent ebpf-self-test` validates the aya loader and attached tracepoints; the eBPF
+  object Makefile now finds Debian multiarch headers.
 - Native Linux netlink for link/address/fleet-route writes, an opt-in detached network rollback
   timer, and agent-backed node network routing for the existing UI.
 

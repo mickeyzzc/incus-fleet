@@ -38,6 +38,11 @@
 - PostgreSQL/SQLite 主机任务 lease 原语、agent 证书轮换/吊销 API、带自动回滚的签名 agent
   升级，以及 JSONL/CSV 审计导出。
 - 主机指标面板可在中心环形缓冲和 Prometheus/VictoriaMetrics 查询代理之间切换。
+- HA dispatcher 使用数据库 lease 消费 queued `agent.network` 任务；通过 `POST /api/v1/tasks` 入队。
+  agent 在离过期 30 天内自动续期证书，签名升级默认重启 systemd 服务（可用 `--no-restart` 关闭）。
+- 新增 agent `/metrics` 监听 + bearer token 的 direct HTTP SD 模式，保留中心 proxy 模式。
+- `incus-fleet-agent ebpf-self-test` 可验证 aya 加载器和 tracepoint 挂载；eBPF Makefile 现在能
+  找到 Debian multiarch 头文件。
 - Linux 原生 netlink 链路/地址/fleet 路由写入、可选 detach 网络回滚计时器，以及现有 UI 的
   agent 后端节点网络路由。
 

@@ -366,8 +366,8 @@ curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   https://fleet.example/api/v1/agents/AGENT_ID/revoke
 ```
 
-gateway 每次连接都会检查吊销状态。agent 需要把返回的证书写入 identity 目录并重连；自动续期
-是后续增强。
+gateway 每次连接都会检查吊销状态。agent 在证书离过期 30 天内时自动续期：用当前 mTLS 身份调用
+`POST /api/v1/agent/renew`，把返回的证书写入 identity 目录后重连。
 
 审计历史可以绕过 UI 的 200 条限制导出：
 
@@ -378,10 +378,21 @@ curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
   'https://fleet.example/api/v1/audit/export?format=csv' > audit.csv
 ```
 
-主机任务已有数据库级 lease 原语（`lease_owner`、`lease_until`、
+主机任务已有数据库级 lease（`lease_owner`、`lease_until`、
 `ClaimHostTask`/`RenewHostTaskLease`/`ReleaseHostTask`）。PostgreSQL 使用
-`FOR UPDATE SKIP LOCKED`；SQLite 通过事务串行化。这些原语已为多实例任务 worker 准备好；当前
-中心仍同步执行 HTTP 操作。
+`FOR UPDATE SKIP LOCKED`；SQLite 通过事务串行化。启用后台 dispatcher 消费 queued 任务：
+
+```yaml
+ha:
+  enabled: true
+  worker_id: app-a          # 每个中心实例唯一；默认 hostname-pid
+  lease: 30s
+  interval: 2s
+```
+
+让两个或更多中心实例连接同一个 PostgreSQL。每个实例同时只领取一个任务，运行期间续租。通过
+`POST /api/v1/tasks` 入队异步 agent 网络操作；节点页面的同步操作行为不变。SQLite 下 lease 仍
+可用，但只应有一个实例运行 dispatcher。
 
 使用 detached Ed25519 签名升级 agent：
 
@@ -394,7 +405,8 @@ incus-fleet-agent upgrade \
 ```
 
 安装器验证签名、保留 `incus-fleet-agent.prev`、以 0755 安装新二进制并运行 `--version`；健康检查
-失败时恢复旧二进制。成功后重启服务。
+失败时恢复旧二进制。成功后如果 systemd 正在运行，会执行 `systemctl try-restart incus-fleet-agent`。
+使用 `--no-restart`（或 `INCUS_FLEET_UPGRADE_NO_RESTART=1`）跳过重启。
 
 #### Prometheus/VictoriaMetrics
 
@@ -439,7 +451,20 @@ scrape_configs:
           credentials_file: /etc/prometheus/fleet-sd.token
 ```
 
-本版本只支持 `mode=proxy`；agent 直连监听在后续阶段。SD 端点只返回在线 agent。
+`mode=proxy` 由 Prometheus 抓取中心。`mode=direct` 需要给每个 agent 启动指标监听，并使用相同的
+抓取 token：
+
+```bash
+# /etc/incus-fleet/agent-metrics.token 保存 bearer token
+incus-fleet-agent run --state-dir /var/lib/incus-fleet-agent \
+  --metrics-listen 0.0.0.0:9100 \
+  --metrics-advertise 192.0.2.11:9100 \
+  --metrics-token-file /etc/incus-fleet/agent-metrics.token
+```
+
+配置 `metrics.http_sd.mode: direct` 后，SD 端点返回 `metrics_address` 目标和
+`__metrics_path__=/metrics`。Prometheus 抓取任务使用同一个 bearer token。没有上报地址的 agent
+会被跳过；SD 端点只返回在线 agent。
 
 #### eBPF 遥测（可选）
 
@@ -458,6 +483,19 @@ sudo install -m 0644 agent/bpf/metrics.bpf.o /usr/lib/incus-fleet/metrics.bpf.o
 在 agent 的 `ExecStart` 中加入 `--ebpf-object /usr/lib/incus-fleet/metrics.bpf.o`，并在 unit 中
 启用 `AmbientCapabilities=CAP_BPF CAP_PERFMON`。如果对象、BTF 或权限缺失，agent 会记录原因并
 继续使用 procfs/cgroup，不会丢失遥测。
+
+启用前可以用 agent 自带的加载器验证对象：
+
+```bash
+sudo incus-fleet-agent ebpf-self-test \
+  --object /usr/lib/incus-fleet/metrics.bpf.o --hold-secs 10
+# initial_tcp_retransmits=0
+# initial_oom_kills=0
+# tcp_retransmits=...
+# oom_kills=...
+```
+
+在人为丢包时 `tcp_retransmits` 有增量，说明 tracepoint 已正确挂载。
 
 实例指标以容器为主；VM 只做宿主侧 cgroup 指标。`fleet_agent_telemetry_mode` 报告 `ebpf` 或
 `procfs`。

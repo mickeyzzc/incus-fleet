@@ -204,9 +204,14 @@ center instances; the current synchronous HTTP path does not yet run a backgroun
 
 Agent certificates are issued by the center CA. Admins can sign a replacement certificate for an
 existing agent public key or revoke an agent; the gateway checks revocation on connect and verifies
-the stored certificate fingerprint. Agent upgrades use a detached Ed25519 signature, a `.prev`
-backup, and a `--version` health check that restores the previous binary on failure. Audit records
-can be exported as JSONL or CSV.
+the stored certificate fingerprint. The agent renews itself over mTLS within 30 days of expiry.
+Agent upgrades use a detached Ed25519 signature, a `.prev` backup, a `--version` health check that
+restores the previous binary on failure, and an optional systemd restart. Audit records can be
+exported as JSONL or CSV.
+
+A background dispatcher (`ha.enabled`) claims queued `agent.network` tasks with database leases,
+renews the lease while the agent runs the task, and records success/failure. This lets multiple
+center instances share one PostgreSQL database without executing the same task twice.
 
 ## Shared assets and batch operations
 
