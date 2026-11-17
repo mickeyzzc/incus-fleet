@@ -26,7 +26,7 @@ use crate::snapshot;
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Run the agent forever, reconnecting with exponential backoff.
-pub async fn run(state_dir: &Path, helper: &Path) -> Result<()> {
+pub async fn run(state_dir: &Path, helper: &Path, ebpf_object: Option<&Path>) -> Result<()> {
     let bootstrap_ca = state_dir.join("identity/ca.pem");
     let (identity, files) = Identity::load(state_dir)?;
     let tls = client_tls(&files.ca_pem, &files.cert_pem, &files.key_pem)?;
@@ -34,7 +34,16 @@ pub async fn run(state_dir: &Path, helper: &Path) -> Result<()> {
 
     let mut backoff = Duration::from_secs(1);
     loop {
-        match session(&connect_url, &identity, tls.clone(), helper, &bootstrap_ca).await {
+        match session(
+            &connect_url,
+            &identity,
+            tls.clone(),
+            helper,
+            &bootstrap_ca,
+            ebpf_object,
+        )
+        .await
+        {
             Ok(()) => {
                 info!("agent session closed");
                 backoff = Duration::from_secs(1);
@@ -91,6 +100,7 @@ async fn session(
     tls: Arc<ClientConfig>,
     helper: &Path,
     bootstrap_ca: &Path,
+    ebpf_object: Option<&Path>,
 ) -> Result<()> {
     let (mut ws, _) = tokio::time::timeout(
         Duration::from_secs(10),
@@ -123,7 +133,7 @@ async fn session(
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut telemetry_tick = tokio::time::interval(Duration::from_secs(10));
     telemetry_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut telemetry = metrics::Collector::new();
+    let mut telemetry = metrics::Collector::with_ebpf(ebpf_object);
     let started = Instant::now();
 
     loop {

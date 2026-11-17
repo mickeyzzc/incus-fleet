@@ -1,14 +1,23 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use tracing::warn;
+
+use crate::cgroup;
+use crate::ebpf;
+use crate::histogram::Histogram;
 use crate::proto::v1::{MetricType, Sample, Series, TelemetryBatch};
 
 /// Collector keeps the previous CPU counters needed for a rate.
 pub struct Collector {
     started: Instant,
     previous_cpu: Option<(u64, u64)>,
+    ebpf: Option<ebpf::Collector>,
+    mode: &'static str,
+    cgroup_root: PathBuf,
+    collect_histogram: Histogram,
 }
 
 impl Collector {
@@ -16,11 +25,35 @@ impl Collector {
         Self {
             started: Instant::now(),
             previous_cpu: None,
+            ebpf: None,
+            mode: "procfs",
+            cgroup_root: PathBuf::from("/sys/fs/cgroup"),
+            collect_histogram: Histogram::default(),
         }
+    }
+
+    /// Try to attach an eBPF object; failures fall back to procfs/cgroup.
+    pub fn with_ebpf(object: Option<&Path>) -> Self {
+        let mut collector = Self::new();
+        if let Some(path) = object
+            && ebpf::available(Some(path))
+        {
+            match ebpf::Collector::open(path) {
+                Ok(loader) => {
+                    collector.ebpf = Some(loader);
+                    collector.mode = "ebpf";
+                }
+                Err(err) => {
+                    warn!(error = %err, "eBPF collector unavailable; using procfs fallback")
+                }
+            }
+        }
+        collector
     }
 
     /// Collect one 10-second-friendly sample batch.
     pub fn collect(&mut self, agent_id: &str) -> TelemetryBatch {
+        let started = Instant::now();
         let now = now_ms();
         let mut series = Vec::new();
 
@@ -76,6 +109,48 @@ impl Collector {
             self.started.elapsed().as_secs_f64(),
         ));
 
+        let cgroup_series = cgroup::collect(&self.cgroup_root, now);
+        series.extend(cgroup_series);
+
+        let ebpf_snapshot = self.ebpf.as_ref().map(|collector| collector.collect());
+        if let Some(snapshot) = ebpf_snapshot {
+            series.push(counter(
+                "fleet_host_tcp_retransmits_total",
+                HashMap::new(),
+                now,
+                snapshot.tcp_retransmits as f64,
+            ));
+            series.push(counter(
+                "fleet_host_oom_kills_total",
+                HashMap::new(),
+                now,
+                snapshot.oom_kills as f64,
+            ));
+        } else {
+            if let Some(value) = proc_tcp_retransmits() {
+                series.push(counter(
+                    "fleet_host_tcp_retransmits_total",
+                    HashMap::new(),
+                    now,
+                    value as f64,
+                ));
+            }
+            if let Some(value) = proc_oom_kills() {
+                series.push(counter(
+                    "fleet_host_oom_kills_total",
+                    HashMap::new(),
+                    now,
+                    value as f64,
+                ));
+            }
+        }
+        series.push(gauge(
+            "fleet_agent_telemetry_mode",
+            labels(&[("mode", self.mode)]),
+            now,
+            1.0,
+        ));
+
         for (device, rx, tx) in read_network() {
             series.push(counter(
                 "fleet_host_network_bytes_total",
@@ -90,6 +165,14 @@ impl Collector {
                 tx as f64,
             ));
         }
+
+        self.collect_histogram
+            .observe(started.elapsed().as_secs_f64());
+        series.extend(self.collect_histogram.series(
+            "fleet_agent_collect_duration_seconds",
+            &HashMap::new(),
+            now,
+        ));
 
         TelemetryBatch {
             agent_id: agent_id.to_string(),
@@ -182,6 +265,33 @@ fn read_network() -> Vec<(String, u64, u64)> {
     out
 }
 
+fn proc_tcp_retransmits() -> Option<u64> {
+    let content = fs::read_to_string("/proc/net/snmp").ok()?;
+    let mut header = false;
+    for line in content.lines() {
+        if line.starts_with("Tcp:") {
+            if !header {
+                header = true;
+                continue;
+            }
+            let values: Vec<&str> = line.split_whitespace().collect();
+            let idx = values.iter().position(|value| *value == "RetransSegs")?;
+            return values.get(idx + 1)?.parse().ok();
+        }
+    }
+    None
+}
+
+fn proc_oom_kills() -> Option<u64> {
+    let content = fs::read_to_string("/proc/vmstat").ok()?;
+    for line in content.lines() {
+        if let Some(value) = line.strip_prefix("oom_kill ") {
+            return value.trim().parse().ok();
+        }
+    }
+    None
+}
+
 fn read_u64(path: &str) -> Option<u64> {
     fs::read_to_string(Path::new(path))
         .ok()?
@@ -207,6 +317,19 @@ mod tests {
         assert_eq!(meminfo_value(content, "MemTotal"), Some(1000));
         assert_eq!(meminfo_value(content, "MemAvailable"), Some(400));
         assert_eq!(meminfo_value(content, "Missing"), None);
+    }
+
+    #[test]
+    fn collector_always_reports_mode() {
+        let mut collector = Collector::new();
+        let batch = collector.collect("agent-1");
+        assert_eq!(batch.agent_id, "agent-1");
+        assert!(
+            batch
+                .series
+                .iter()
+                .any(|item| item.name == "fleet_agent_telemetry_mode")
+        );
     }
 
     #[test]

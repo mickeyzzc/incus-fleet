@@ -22,7 +22,7 @@ COVERPKG := $(shell $(GO) list ./internal/... 2>/dev/null | grep -v -E '/interna
 GO_FILES := $(shell find cmd internal web -name '*.go' -not -path '*/node_modules/*')
 
 .PHONY: help deps frontend backend build run test test-go test-web coverage coverage-go coverage-web \
-	lint lint-go lint-web fmt fmt-check vet tidy check release clean proto agent-test agent-lint agent-build
+	lint lint-go lint-web fmt fmt-check vet tidy check release clean proto agent-test agent-lint agent-build agent-ebpf
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -61,6 +61,9 @@ agent-lint: ## Run Rust formatting and clippy
 
 agent-build: ## Build the Rust agent in release mode
 	cargo build --manifest-path agent/Cargo.toml --release
+
+agent-ebpf: ## Build the optional eBPF object (Linux clang/libbpf required)
+	$(MAKE) -C agent/bpf
 
 proto: ## Regenerate Go protobuf bindings
 	protoc -I api --go_out=. --go_opt=module=$(MODULE) api/agent/v1/agent.proto

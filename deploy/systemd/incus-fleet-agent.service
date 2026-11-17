@@ -19,6 +19,9 @@ KillSignal=SIGTERM
 # Keep this off: the helper is invoked through the sudo whitelist in
 # deploy/agent-sudoers. ReadWritePaths carve out the manager config paths and
 # the helper's rollback state directory.
+# eBPF is optional. To enable it after building metrics.bpf.o, add:
+#   AmbientCapabilities=CAP_BPF CAP_PERFMON
+# and pass --ebpf-object /usr/lib/incus-fleet/metrics.bpf.o in ExecStart.
 NoNewPrivileges=false
 ProtectSystem=strict
 ProtectHome=yes

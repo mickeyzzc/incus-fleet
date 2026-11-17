@@ -24,6 +24,7 @@ config.yaml
 
 # Rust agent build artifacts
 /agent/target/
+/agent/bpf/*.o
 
 # Frontend
 /web/node_modules/

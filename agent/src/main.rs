@@ -1,6 +1,9 @@
+mod cgroup;
+mod ebpf;
 mod enroll;
 mod facts;
 mod helper;
+mod histogram;
 mod identity;
 mod metrics;
 mod proto;
@@ -48,6 +51,9 @@ enum Command {
         state_dir: PathBuf,
         #[arg(long, default_value = "/usr/libexec/incus-fleet-helper")]
         helper: PathBuf,
+        /// Optional eBPF object built from agent/bpf/metrics.bpf.c.
+        #[arg(long)]
+        ebpf_object: Option<PathBuf>,
     },
     /// Print the persisted identity.
     Status {
@@ -79,8 +85,12 @@ async fn main() -> Result<()> {
             info!(agent = %agent_id, "enrolled");
             println!("{agent_id}");
         }
-        Command::Run { state_dir, helper } => {
-            runtime::run(&state_dir, &helper).await?;
+        Command::Run {
+            state_dir,
+            helper,
+            ebpf_object,
+        } => {
+            runtime::run(&state_dir, &helper, ebpf_object.as_deref()).await?;
         }
         Command::Status { state_dir } => {
             let (identity, _) = identity::Identity::load(&state_dir)?;
