@@ -126,3 +126,39 @@ func TestRingBoundsAndValidationHelpers(t *testing.T) {
 		t.Fatal("empty filter should match")
 	}
 }
+
+func TestSinkReceivesOnlyNewSamples(t *testing.T) {
+	store := New(10)
+	var got []Series
+	store.SetSink(func(series []Series) { got = append(got, series...) })
+	now := time.Now().UTC()
+	store.Ingest(testBatch(now), "c1", "node-a")
+	if len(got) != 2 {
+		t.Fatalf("sink series = %#v", got)
+	}
+	if len(got[0].Points) != 1 {
+		t.Fatalf("sink points = %#v", got[0].Points)
+	}
+	store.Ingest(testBatch(now.Add(time.Second)), "c1", "node-a")
+	if len(got) != 4 || len(got[2].Points) != 1 {
+		t.Fatalf("second sink = %#v", got)
+	}
+}
+
+func TestQueryFilters(t *testing.T) {
+	store := New(10)
+	now := time.Now().UTC()
+	store.Ingest(testBatch(now), "c1", "node-a")
+	if got := store.Query(Filter{AgentID: "agent-1"}); len(got) != 2 {
+		t.Fatalf("agent filter = %d", len(got))
+	}
+	if got := store.Query(Filter{Member: "node-b"}); len(got) != 0 {
+		t.Fatalf("member filter = %d", len(got))
+	}
+	if !validName("fleet_" + strings.Repeat("x", 190)) {
+		t.Fatal("long valid name rejected")
+	}
+	if validName("fleet_" + strings.Repeat("x", 196)) {
+		t.Fatal("overlong name accepted")
+	}
+}

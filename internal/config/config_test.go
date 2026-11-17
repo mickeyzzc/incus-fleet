@@ -480,3 +480,47 @@ func TestApplyEnvAgentAndMetrics(t *testing.T) {
 		t.Fatalf("metrics env = %#v", cfg.Metrics)
 	}
 }
+
+func TestMetricsExternalDefaultsAndValidation(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.applyDefaults()
+	if cfg.Metrics.RemoteWrite.Timeout != "10s" || cfg.Metrics.RemoteWrite.QueueSize != 10000 ||
+		cfg.Metrics.RemoteWrite.BatchSize != 500 || cfg.Metrics.Query.Type != "prometheus" ||
+		cfg.Metrics.HTTPSD.Mode != "proxy" {
+		t.Fatalf("external defaults = %#v %#v %#v", cfg.Metrics.RemoteWrite, cfg.Metrics.Query, cfg.Metrics.HTTPSD)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{"remote url", func(c *Config) { c.Metrics.RemoteWrite.Enabled = true; c.Metrics.RemoteWrite.URL = "bad" }},
+		{"remote timeout", func(c *Config) {
+			c.Metrics.RemoteWrite.Enabled = true
+			c.Metrics.RemoteWrite.URL = "https://example.com/write"
+			c.Metrics.RemoteWrite.Timeout = "bad"
+		}},
+		{"query url", func(c *Config) { c.Metrics.Query.Enabled = true; c.Metrics.Query.URL = "bad" }},
+		{"query type", func(c *Config) {
+			c.Metrics.Query.Enabled = true
+			c.Metrics.Query.URL = "https://example.com"
+			c.Metrics.Query.Type = "magic"
+		}},
+		{"sd token", func(c *Config) { c.Metrics.HTTPSD.Enabled = true }},
+		{"sd mode", func(c *Config) {
+			c.Metrics.HTTPSD.Enabled = true
+			c.Metrics.HTTPSD.Token = "t"
+			c.Metrics.HTTPSD.Mode = "magic"
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := minimalConfig()
+			cfg.applyDefaults()
+			tc.mutate(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("Validate() expected error")
+			}
+		})
+	}
+}

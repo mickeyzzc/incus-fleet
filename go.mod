@@ -3,6 +3,7 @@ module github.com/mickeyzzc/incus-fleet
 go 1.27.0
 
 require (
+	github.com/golang/snappy v1.0.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/lxc/incus/v7 v7.0.2

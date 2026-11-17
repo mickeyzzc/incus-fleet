@@ -37,9 +37,22 @@ database:
 
 # Center-side telemetry buffer (Phase 4).
 # metrics:
-#   enabled: false
+#   enabled: true
 #   retention: 1h
 #   interval: 10s
+#   remote_write:
+#     enabled: false
+#     url: https://prometheus.example/api/v1/write
+#     bearer_token_file: /etc/incus-fleet/prom.token
+#   query:
+#     enabled: false
+#     url: https://prometheus.example
+#     type: prometheus
+#   http_sd:
+#     enabled: false
+#     mode: proxy
+#     token: replace-with-a-random-token
+#     public_url: https://fleet.example
 
 clusters:
   - name: c1

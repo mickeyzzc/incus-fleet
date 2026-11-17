@@ -18,7 +18,7 @@ LDFLAGS := -s -w \
 GO_PACKAGES := ./cmd/... ./internal/... ./web
 # main() calls os.Exit and web only embeds assets, so the coverage gate applies
 # to the internal packages that hold product behavior.
-COVERPKG := $(shell $(GO) list ./internal/... 2>/dev/null | grep -v -E '/internal/(testutil|agentpb)' | paste -sd, -)
+COVERPKG := $(shell $(GO) list ./internal/... 2>/dev/null | grep -v -E '/internal/(testutil|agentpb|prompb)' | paste -sd, -)
 GO_FILES := $(shell find cmd internal web -name '*.go' -not -path '*/node_modules/*')
 
 .PHONY: help deps frontend backend build run test test-go test-web coverage coverage-go coverage-web \

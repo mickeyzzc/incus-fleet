@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/mickeyzzc/incus-fleet/internal/agentgw"
@@ -19,10 +21,12 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/config"
 	"github.com/mickeyzzc/incus-fleet/internal/httpapi"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
+	"github.com/mickeyzzc/incus-fleet/internal/metricsquery"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
 	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
 	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
+	"github.com/mickeyzzc/incus-fleet/internal/remotewrite"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/telemetry"
 	"github.com/mickeyzzc/incus-fleet/internal/version"
@@ -49,14 +53,16 @@ func WithDialer(dialer clusters.DialFunc) Option {
 
 // App is one running incus-fleet instance.
 type App struct {
-	config      *config.Config
-	logger      *slog.Logger
-	store       *store.SQLStore
-	clusters    *clusters.Manager
-	server      *http.Server
-	agentGW     *agentgw.Gateway
-	agentTLS    *tls.Config
-	agentServer *http.Server
+	config       *config.Config
+	logger       *slog.Logger
+	store        *store.SQLStore
+	clusters     *clusters.Manager
+	server       *http.Server
+	agentGW      *agentgw.Gateway
+	agentTLS     *tls.Config
+	agentServer  *http.Server
+	remoteWrite  *remotewrite.Writer
+	metricsQuery *metricsquery.Proxy
 }
 
 // New builds all services and the HTTP handler.
@@ -110,9 +116,42 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		agentGW  *agentgw.Gateway
 		agentTLS *tls.Config
 	)
+	remoteToken, err := readSecret(cfg.Metrics.RemoteWrite.BearerToken, cfg.Metrics.RemoteWrite.BearerTokenFile)
+	if err != nil {
+		manager.Close()
+		_ = st.Close()
+		return nil, err
+	}
+	queryToken, err := readSecret(cfg.Metrics.Query.BearerToken, cfg.Metrics.Query.BearerTokenFile)
+	if err != nil {
+		manager.Close()
+		_ = st.Close()
+		return nil, err
+	}
+
 	var telemetryStore *telemetry.Store
+	var remoteWriter *remotewrite.Writer
 	if cfg.Metrics.Enabled {
 		telemetryStore = telemetry.New(telemetry.DefaultMaxSeries)
+		if cfg.Metrics.RemoteWrite.Enabled {
+			remoteWriter = remotewrite.New(remotewrite.Config{
+				URL:         cfg.Metrics.RemoteWrite.URL,
+				BearerToken: remoteToken,
+				Timeout:     parseDuration(cfg.Metrics.RemoteWrite.Timeout, 10*time.Second),
+				QueueSize:   cfg.Metrics.RemoteWrite.QueueSize,
+				BatchSize:   cfg.Metrics.RemoteWrite.BatchSize,
+			})
+			remoteWriter.Start(ctx)
+			telemetryStore.SetSink(func(series []telemetry.Series) { remoteWriter.Enqueue(series) })
+		}
+	}
+	var queryProxy *metricsquery.Proxy
+	if cfg.Metrics.Query.Enabled {
+		queryProxy = metricsquery.New(metricsquery.Config{
+			URL: cfg.Metrics.Query.URL, Type: cfg.Metrics.Query.Type,
+			BearerToken: queryToken,
+			Timeout:     parseDuration(cfg.Metrics.Query.Timeout, 15*time.Second),
+		})
 	}
 	if cfg.Agent.Enabled {
 		ca, err := agentgw.LoadCA(cfg.Agent.ClientCA, cfg.Agent.CAKey)
@@ -159,20 +198,25 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	}
 
 	handler := httpapi.New(httpapi.Deps{
-		Clusters:   manager,
-		Instances:  instancesService,
-		Assets:     assetsService,
-		Migrations: migrationsService,
-		Store:      st,
-		NodeNet:    nodeAccess,
-		NodeJoin:   nodeJoin,
-		Agent:      agentGW,
-		Bootstrap:  agentGW,
-		Telemetry:  telemetryStore,
-		Auth:       authenticator,
-		StaticFS:   o.staticFS,
-		Logger:     logger,
-		Version:    version.String(),
+		Clusters:     manager,
+		Instances:    instancesService,
+		Assets:       assetsService,
+		Migrations:   migrationsService,
+		Store:        st,
+		NodeNet:      nodeAccess,
+		NodeJoin:     nodeJoin,
+		Agent:        agentGW,
+		Bootstrap:    agentGW,
+		Telemetry:    telemetryStore,
+		MetricsQuery: queryProxy,
+		MetricsSD: httpapi.MetricsSDConfig{
+			Enabled: cfg.Metrics.HTTPSD.Enabled, Token: cfg.Metrics.HTTPSD.Token,
+			PublicURL: cfg.Metrics.HTTPSD.PublicURL, Mode: cfg.Metrics.HTTPSD.Mode,
+		},
+		Auth:     authenticator,
+		StaticFS: o.staticFS,
+		Logger:   logger,
+		Version:  version.String(),
 	}).Handler()
 
 	server := &http.Server{
@@ -192,13 +236,15 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	logger.Info("incus-fleet initialized", "clusters", len(cfg.Clusters), "online", online, "database", cfg.Database.Driver)
 
 	return &App{
-		config:   cfg,
-		logger:   logger,
-		store:    st,
-		clusters: manager,
-		server:   server,
-		agentGW:  agentGW,
-		agentTLS: agentTLS,
+		config:       cfg,
+		logger:       logger,
+		store:        st,
+		clusters:     manager,
+		server:       server,
+		agentGW:      agentGW,
+		agentTLS:     agentTLS,
+		remoteWrite:  remoteWriter,
+		metricsQuery: queryProxy,
 	}, nil
 }
 
@@ -279,7 +325,28 @@ func (a *App) Run(ctx context.Context) error {
 
 // Close releases database and cluster resources.
 func (a *App) Close() error {
+	if a.remoteWrite != nil {
+		a.remoteWrite.Close()
+	}
 	a.clusters.Close()
 
 	return a.store.Close()
+}
+
+func readSecret(value, file string) (string, error) {
+	if strings.TrimSpace(file) == "" {
+		return strings.TrimSpace(value), nil
+	}
+	data, err := os.ReadFile(file) //nolint:gosec // operator-configured token file
+	if err != nil {
+		return "", fmt.Errorf("app: read token file: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func parseDuration(value string, fallback time.Duration) time.Duration {
+	if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+		return parsed
+	}
+	return fallback
 }

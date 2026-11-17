@@ -49,7 +49,11 @@ type Store struct {
 	maxSeries int
 	order     []string
 	series    map[string]*ring
+	sink      Sink
 }
+
+// Sink receives normalized series after ingestion.
+type Sink func([]Series)
 
 // New builds a store. maxSeries <= 0 uses DefaultMaxSeries.
 func New(maxSeries int) *Store {
@@ -59,6 +63,13 @@ func New(maxSeries int) *Store {
 	return &Store{maxSeries: maxSeries, series: make(map[string]*ring)}
 }
 
+// SetSink attaches a downstream writer. The sink runs outside the store lock.
+func (s *Store) SetSink(sink Sink) {
+	s.mu.Lock()
+	s.sink = sink
+	s.mu.Unlock()
+}
+
 // Ingest adds one agent batch. Center-owned labels are injected and cannot be
 // overridden by the agent.
 func (s *Store) Ingest(batch *agentpb.TelemetryBatch, cluster, member string) int {
@@ -66,6 +77,7 @@ func (s *Store) Ingest(batch *agentpb.TelemetryBatch, cluster, member string) in
 		return 0
 	}
 	added := 0
+	ingested := make([]Series, 0, len(batch.Series))
 	for _, item := range batch.Series {
 		if item == nil || !validName(item.Name) {
 			continue
@@ -86,6 +98,7 @@ func (s *Store) Ingest(batch *agentpb.TelemetryBatch, cluster, member string) in
 			s.series[key] = r
 			s.order = append(s.order, key)
 		}
+		newPoints := make([]Sample, 0, len(item.Samples))
 		for _, sample := range item.Samples {
 			if sample == nil {
 				continue
@@ -94,10 +107,24 @@ func (s *Store) Ingest(batch *agentpb.TelemetryBatch, cluster, member string) in
 			if at.IsZero() || time.Since(at) > Retention || time.Since(at) < -5*time.Minute {
 				continue
 			}
-			r.append(Sample{At: at, Value: sample.Value})
+			point := Sample{At: at, Value: sample.Value}
+			r.append(point)
+			newPoints = append(newPoints, point)
 			added++
 		}
+		if len(newPoints) > 0 {
+			ingested = append(ingested, Series{
+				Name: item.Name, Labels: cloneLabels(labels), Type: metricType(item.Type),
+				Points: newPoints,
+			})
+		}
 		s.mu.Unlock()
+	}
+	s.mu.RLock()
+	sink := s.sink
+	s.mu.RUnlock()
+	if sink != nil && len(ingested) > 0 {
+		sink(ingested)
 	}
 
 	return added

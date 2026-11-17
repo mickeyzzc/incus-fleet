@@ -20,6 +20,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/hostops"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
+	"github.com/mickeyzzc/incus-fleet/internal/metricsquery"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
 	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
 	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
@@ -37,38 +38,42 @@ const (
 
 // Deps are the dependencies of the HTTP API.
 type Deps struct {
-	Clusters   *clusters.Manager
-	Instances  *instances.Service
-	Assets     *assets.Service
-	Migrations *migrations.Service
-	Store      *store.SQLStore
-	NodeNet    *nodeaccess.Service
-	NodeJoin   *nodejoin.Service
-	Agent      AgentDispatcher
-	Bootstrap  BootstrapSigner
-	Telemetry  *telemetry.Store
-	Auth       *auth.Authenticator
-	StaticFS   fs.FS
-	Logger     *slog.Logger
-	Version    string
+	Clusters     *clusters.Manager
+	Instances    *instances.Service
+	Assets       *assets.Service
+	Migrations   *migrations.Service
+	Store        *store.SQLStore
+	NodeNet      *nodeaccess.Service
+	NodeJoin     *nodejoin.Service
+	Agent        AgentDispatcher
+	Bootstrap    BootstrapSigner
+	Telemetry    *telemetry.Store
+	MetricsSD    MetricsSDConfig
+	MetricsQuery *metricsquery.Proxy
+	Auth         *auth.Authenticator
+	StaticFS     fs.FS
+	Logger       *slog.Logger
+	Version      string
 }
 
 // API is the complete HTTP handler for incus-fleet.
 type API struct {
-	clusters   *clusters.Manager
-	instances  *instances.Service
-	assets     *assets.Service
-	migrations *migrations.Service
-	store      *store.SQLStore
-	nodenet    *nodeaccess.Service
-	nodejoin   *nodejoin.Service
-	agent      AgentDispatcher
-	bootstrap  BootstrapSigner
-	telemetry  *telemetry.Store
-	auth       *auth.Authenticator
-	logger     *slog.Logger
-	version    string
-	static     fs.FS
+	clusters     *clusters.Manager
+	instances    *instances.Service
+	assets       *assets.Service
+	migrations   *migrations.Service
+	store        *store.SQLStore
+	nodenet      *nodeaccess.Service
+	nodejoin     *nodejoin.Service
+	agent        AgentDispatcher
+	bootstrap    BootstrapSigner
+	telemetry    *telemetry.Store
+	metricsSD    MetricsSDConfig
+	metricsQuery *metricsquery.Proxy
+	auth         *auth.Authenticator
+	logger       *slog.Logger
+	version      string
+	static       fs.FS
 }
 
 // New builds the HTTP handler.
@@ -79,19 +84,21 @@ func New(deps Deps) *API {
 	}
 
 	api := &API{
-		clusters:   deps.Clusters,
-		instances:  deps.Instances,
-		assets:     deps.Assets,
-		migrations: deps.Migrations,
-		store:      deps.Store,
-		nodenet:    deps.NodeNet,
-		nodejoin:   deps.NodeJoin,
-		agent:      deps.Agent,
-		bootstrap:  deps.Bootstrap,
-		telemetry:  deps.Telemetry,
-		auth:       deps.Auth,
-		logger:     logger,
-		version:    deps.Version,
+		clusters:     deps.Clusters,
+		instances:    deps.Instances,
+		assets:       deps.Assets,
+		migrations:   deps.Migrations,
+		store:        deps.Store,
+		nodenet:      deps.NodeNet,
+		nodejoin:     deps.NodeJoin,
+		agent:        deps.Agent,
+		bootstrap:    deps.Bootstrap,
+		telemetry:    deps.Telemetry,
+		metricsSD:    deps.MetricsSD,
+		metricsQuery: deps.MetricsQuery,
+		auth:         deps.Auth,
+		logger:       logger,
+		version:      deps.Version,
 	}
 
 	if deps.StaticFS != nil {
@@ -153,6 +160,9 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("GET /api/v1/metrics/query", a.requireAuth(http.HandlerFunc(a.queryMetrics)))
 	mux.Handle("GET /api/v1/metrics/snapshot", a.requireAuth(http.HandlerFunc(a.snapshotMetrics)))
 	mux.Handle("GET /api/v1/metrics/export", a.requireAuth(http.HandlerFunc(a.exportMetrics)))
+	mux.Handle("GET /api/v1/metrics/query_range", a.requireAuth(http.HandlerFunc(a.queryRange)))
+	mux.Handle("GET /api/v1/sd/agents", a.requireSDToken(http.HandlerFunc(a.sdAgents)))
+	mux.Handle("GET /api/v1/agents/{id}/metrics/prometheus", a.requireSDToken(http.HandlerFunc(a.agentPrometheus)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.listSnapshots)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.createSnapshot)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore", a.requireAuth(http.HandlerFunc(a.restoreSnapshot)))

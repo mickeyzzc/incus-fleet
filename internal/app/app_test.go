@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -271,5 +272,63 @@ func TestNewAgentCAError(t *testing.T) {
 		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
 	); err == nil {
 		t.Fatal("New(agent missing CA) expected error")
+	}
+}
+
+func TestParseDuration(t *testing.T) {
+	if got := parseDuration("5s", time.Minute); got != 5*time.Second {
+		t.Fatalf("parseDuration(5s) = %v", got)
+	}
+	if got := parseDuration("bad", time.Minute); got != time.Minute {
+		t.Fatalf("parseDuration(bad) = %v", got)
+	}
+}
+
+func TestReadSecret(t *testing.T) {
+	value, err := readSecret("inline", "")
+	if err != nil || value != "inline" {
+		t.Fatalf("readSecret(inline) = %q, %v", value, err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "token")
+	if err := os.WriteFile(path, []byte(" file-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, err = readSecret("", path)
+	if err != nil || value != "file-token" {
+		t.Fatalf("readSecret(file) = %q, %v", value, err)
+	}
+	if _, err := readSecret("", filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("readSecret(missing) expected error")
+	}
+}
+
+func TestNewWithExternalMetrics(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+
+	cfg := testConfig(t)
+	cfg.Metrics = config.MetricsConfig{
+		Enabled: true,
+		RemoteWrite: config.RemoteWriteConfig{
+			Enabled: true, URL: backend.URL, Timeout: "1s", QueueSize: 10, BatchSize: 10,
+		},
+		Query: config.MetricsQueryConfig{
+			Enabled: true, URL: backend.URL, Type: "prometheus", Timeout: "1s",
+		},
+		HTTPSD: config.MetricsHTTPSDConfig{Enabled: true, Token: "sd", Mode: "proxy"},
+	}
+	application, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatalf("New(external metrics) error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+	if application.remoteWrite == nil || application.metricsQuery == nil {
+		t.Fatal("external metrics not wired")
 	}
 }

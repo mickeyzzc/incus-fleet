@@ -32,7 +32,7 @@ jobs:
 
       - name: Coverage (90% gate)
         run: |
-          packages=$(go list ./internal/... | grep -v -E '/internal/(testutil|agentpb)' | paste -sd, -)
+          packages=$(go list ./internal/... | grep -v -E '/internal/(testutil|agentpb|prompb)' | paste -sd, -)
           go test -coverpkg="$packages" -coverprofile=coverage.out ./cmd/... ./internal/... ./web
           total=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+')
           echo "Go coverage: ${total}%"

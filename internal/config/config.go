@@ -40,9 +40,41 @@ type AgentConfig struct {
 
 // MetricsConfig controls the center-side one-hour telemetry buffer.
 type MetricsConfig struct {
+	Enabled     bool                `yaml:"enabled"`
+	Retention   string              `yaml:"retention"`
+	Interval    string              `yaml:"interval"`
+	RemoteWrite RemoteWriteConfig   `yaml:"remote_write"`
+	Query       MetricsQueryConfig  `yaml:"query"`
+	HTTPSD      MetricsHTTPSDConfig `yaml:"http_sd"`
+}
+
+// RemoteWriteConfig configures Prometheus/VictoriaMetrics remote write.
+type RemoteWriteConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	URL             string `yaml:"url"`
+	BearerToken     string `yaml:"bearer_token"`
+	BearerTokenFile string `yaml:"bearer_token_file"`
+	Timeout         string `yaml:"timeout"`
+	QueueSize       int    `yaml:"queue_size"`
+	BatchSize       int    `yaml:"batch_size"`
+}
+
+// MetricsQueryConfig configures the PromQL query proxy.
+type MetricsQueryConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	URL             string `yaml:"url"`
+	Type            string `yaml:"type"`
+	BearerToken     string `yaml:"bearer_token"`
+	BearerTokenFile string `yaml:"bearer_token_file"`
+	Timeout         string `yaml:"timeout"`
+}
+
+// MetricsHTTPSDConfig configures Prometheus HTTP service discovery.
+type MetricsHTTPSDConfig struct {
 	Enabled   bool   `yaml:"enabled"`
-	Retention string `yaml:"retention"`
-	Interval  string `yaml:"interval"`
+	Token     string `yaml:"token"`
+	PublicURL string `yaml:"public_url"`
+	Mode      string `yaml:"mode"`
 }
 
 // NodeAccess configures the SSH identity used to manage network settings on
@@ -153,6 +185,21 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("INCUS_FLEET_METRICS_INTERVAL"); v != "" {
 		c.Metrics.Interval = v
 	}
+	if v := os.Getenv("INCUS_FLEET_METRICS_REMOTE_WRITE_URL"); v != "" {
+		c.Metrics.RemoteWrite.URL = v
+	}
+	if v := os.Getenv("INCUS_FLEET_METRICS_REMOTE_WRITE_BEARER_TOKEN"); v != "" {
+		c.Metrics.RemoteWrite.BearerToken = v
+	}
+	if v := os.Getenv("INCUS_FLEET_METRICS_QUERY_URL"); v != "" {
+		c.Metrics.Query.URL = v
+	}
+	if v := os.Getenv("INCUS_FLEET_METRICS_QUERY_BEARER_TOKEN"); v != "" {
+		c.Metrics.Query.BearerToken = v
+	}
+	if v := os.Getenv("INCUS_FLEET_METRICS_HTTP_SD_TOKEN"); v != "" {
+		c.Metrics.HTTPSD.Token = v
+	}
 }
 
 func (c *Config) applyDefaults() {
@@ -179,6 +226,24 @@ func (c *Config) applyDefaults() {
 	}
 	if strings.TrimSpace(c.Metrics.Interval) == "" {
 		c.Metrics.Interval = "10s"
+	}
+	if strings.TrimSpace(c.Metrics.RemoteWrite.Timeout) == "" {
+		c.Metrics.RemoteWrite.Timeout = "10s"
+	}
+	if c.Metrics.RemoteWrite.QueueSize <= 0 {
+		c.Metrics.RemoteWrite.QueueSize = 10000
+	}
+	if c.Metrics.RemoteWrite.BatchSize <= 0 {
+		c.Metrics.RemoteWrite.BatchSize = 500
+	}
+	if strings.TrimSpace(c.Metrics.Query.Type) == "" {
+		c.Metrics.Query.Type = "prometheus"
+	}
+	if strings.TrimSpace(c.Metrics.Query.Timeout) == "" {
+		c.Metrics.Query.Timeout = "15s"
+	}
+	if strings.TrimSpace(c.Metrics.HTTPSD.Mode) == "" {
+		c.Metrics.HTTPSD.Mode = "proxy"
 	}
 
 	for i := range c.Clusters {
@@ -291,6 +356,23 @@ func (c *Config) ValidateFiles() error {
 		}
 	}
 
+	for _, p := range []struct {
+		label string
+		path  string
+	}{
+		{"metrics.remote_write.bearer_token_file", c.Metrics.RemoteWrite.BearerTokenFile},
+		{"metrics.query.bearer_token_file", c.Metrics.Query.BearerTokenFile},
+	} {
+		if p.path == "" {
+			continue
+		}
+		if info, err := os.Stat(p.path); err != nil {
+			return fmt.Errorf("config: %s: %w", p.label, err)
+		} else if info.IsDir() {
+			return fmt.Errorf("config: %s is a directory", p.label)
+		}
+	}
+
 	if c.Agent.Enabled {
 		for _, p := range []struct {
 			label string
@@ -387,6 +469,38 @@ func (m MetricsConfig) validate() error {
 		interval, err := time.ParseDuration(strings.TrimSpace(m.Interval))
 		if err != nil || interval < time.Second || interval > time.Minute {
 			return fmt.Errorf("config: metrics.interval %q must be a duration between 1s and 1m", m.Interval)
+		}
+	}
+	if m.RemoteWrite.Enabled {
+		if _, err := url.ParseRequestURI(m.RemoteWrite.URL); err != nil {
+			return fmt.Errorf("config: metrics.remote_write.url is invalid")
+		}
+		if _, err := time.ParseDuration(m.RemoteWrite.Timeout); err != nil {
+			return fmt.Errorf("config: metrics.remote_write.timeout is invalid")
+		}
+	}
+	if m.Query.Enabled {
+		if _, err := url.ParseRequestURI(m.Query.URL); err != nil {
+			return fmt.Errorf("config: metrics.query.url is invalid")
+		}
+		if m.Query.Type != "prometheus" && m.Query.Type != "victoriametrics" {
+			return fmt.Errorf("config: metrics.query.type must be prometheus or victoriametrics")
+		}
+		if _, err := time.ParseDuration(m.Query.Timeout); err != nil {
+			return fmt.Errorf("config: metrics.query.timeout is invalid")
+		}
+	}
+	if m.HTTPSD.Enabled {
+		if strings.TrimSpace(m.HTTPSD.Token) == "" {
+			return fmt.Errorf("config: metrics.http_sd.token is required")
+		}
+		if m.HTTPSD.Mode != "proxy" {
+			return fmt.Errorf("config: metrics.http_sd.mode must be proxy (direct agent listeners are not implemented yet)")
+		}
+		if m.HTTPSD.PublicURL != "" {
+			if _, err := url.ParseRequestURI(m.HTTPSD.PublicURL); err != nil {
+				return fmt.Errorf("config: metrics.http_sd.public_url is invalid")
+			}
 		}
 	}
 
