@@ -1,5 +1,5 @@
 // Package remotewrite sends center telemetry to Prometheus-compatible remote
-// write endpoints using a bounded in-memory queue.
+// write endpoints through a bounded, disk-backed spool.
 package remotewrite
 
 import (
@@ -26,20 +26,24 @@ type Config struct {
 	Timeout     time.Duration
 	QueueSize   int
 	BatchSize   int
+	SpoolDir    string
+	MaxBytes    int64
 }
 
-// Writer queues telemetry and writes batches.
+// Writer queues telemetry on disk and sends it in batches. Spool files are
+// removed only after a successful write (or a permanent 4xx rejection).
 type Writer struct {
 	cfg    Config
 	client *http.Client
-	queue  chan telemetry.Series
+	queue  chan spoolEntry
 	stop   chan struct{}
+	spool  *spool
 	once   sync.Once
 	wg     sync.WaitGroup
 }
 
-// New builds a writer. Call Start before Enqueue.
-func New(cfg Config) *Writer {
+// New builds a writer and replays any files left by a previous process.
+func New(cfg Config) (*Writer, error) {
 	if cfg.QueueSize <= 0 {
 		cfg.QueueSize = 10000
 	}
@@ -49,12 +53,30 @@ func New(cfg Config) *Writer {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 10 * time.Second
 	}
-	return &Writer{
+	sp, err := openSpool(cfg.SpoolDir, cfg.QueueSize, cfg.MaxBytes)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := sp.load()
+	if err != nil {
+		return nil, err
+	}
+	w := &Writer{
 		cfg:    cfg,
 		client: &http.Client{Timeout: cfg.Timeout},
-		queue:  make(chan telemetry.Series, cfg.QueueSize),
+		queue:  make(chan spoolEntry, cfg.QueueSize),
 		stop:   make(chan struct{}),
+		spool:  sp,
 	}
+	for _, entry := range entries {
+		select {
+		case w.queue <- entry:
+		default:
+			sp.remove(entry)
+		}
+	}
+
+	return w, nil
 }
 
 // Start launches the background sender.
@@ -66,20 +88,33 @@ func (w *Writer) Start(ctx context.Context) {
 	}()
 }
 
-// Enqueue adds series without blocking; the oldest item is dropped when full.
+// Enqueue persists series before queueing them. The oldest spool file is
+// removed when the queue or disk budget is full.
 func (w *Writer) Enqueue(series []telemetry.Series) {
-	for _, item := range series {
+	if len(series) == 0 {
+		return
+	}
+	select {
+	case <-w.stop:
+		return
+	default:
+	}
+	entry, err := w.spool.append(series)
+	if err != nil {
+		return
+	}
+
+	for {
 		select {
-		case w.queue <- item:
+		case w.queue <- entry:
+			return
 		case <-w.stop:
+			w.spool.remove(entry)
 			return
 		default:
 			select {
-			case <-w.queue:
-			default:
-			}
-			select {
-			case w.queue <- item:
+			case old := <-w.queue:
+				w.spool.remove(old)
 			default:
 			}
 		}
@@ -93,67 +128,129 @@ func (w *Writer) Close() {
 }
 
 func (w *Writer) run(ctx context.Context) {
-	batch := make([]telemetry.Series, 0, w.cfg.BatchSize)
+	batch := make([]spoolEntry, 0, w.cfg.BatchSize)
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
+	retry := time.NewTimer(0)
+	if !retry.Stop() {
+		<-retry.C
+	}
+	var pending []spoolEntry
+
 	for {
+		if len(pending) > 0 {
+			select {
+			case <-ctx.Done():
+				_ = w.attempt(context.Background(), pending)
+				return
+			case <-w.stop:
+				_ = w.attempt(context.Background(), pending)
+				return
+			case <-retry.C:
+				pending = w.attempt(ctx, pending)
+				if len(pending) > 0 {
+					retry.Reset(2 * time.Second)
+				}
+			}
+			continue
+		}
+
 		select {
 		case <-ctx.Done():
+			pending = append(pending, batch...)
+			_ = w.attempt(context.Background(), pending)
 			return
 		case <-w.stop:
-			w.flush(context.Background(), batch)
+			pending = append(pending, batch...)
+			_ = w.attempt(context.Background(), pending)
 			return
 		case item := <-w.queue:
 			batch = append(batch, item)
-			if len(batch) >= w.cfg.BatchSize {
-				w.flush(ctx, batch)
-				batch = batch[:0]
+			if seriesCount(batch) >= w.cfg.BatchSize {
+				pending = w.attempt(ctx, batch)
+				batch = nil
+				if len(pending) > 0 {
+					retry.Reset(2 * time.Second)
+				}
 			}
 		case <-timer.C:
 			if len(batch) > 0 {
-				w.flush(ctx, batch)
-				batch = batch[:0]
+				pending = w.attempt(ctx, batch)
+				batch = nil
+				if len(pending) > 0 {
+					retry.Reset(2 * time.Second)
+				}
 			}
 			timer.Reset(time.Second)
 		}
 	}
 }
 
-func (w *Writer) flush(ctx context.Context, batch []telemetry.Series) {
-	if len(batch) == 0 || w.cfg.URL == "" {
-		return
+func seriesCount(batch []spoolEntry) int {
+	total := 0
+	for _, entry := range batch {
+		total += len(entry.series)
+	}
+	return total
+}
+
+// attempt sends a batch and returns the entries that must be retried. Success
+// and permanent 4xx rejections delete the spool files.
+func (w *Writer) attempt(ctx context.Context, batch []spoolEntry) []spoolEntry {
+	if len(batch) == 0 {
+		return nil
+	}
+	sent, permanent := w.flush(ctx, batch)
+	if sent || permanent {
+		for _, entry := range batch {
+			w.spool.remove(entry)
+		}
+		return nil
+	}
+
+	return batch
+}
+
+func (w *Writer) flush(ctx context.Context, batch []spoolEntry) (bool, bool) {
+	if len(batch) == 0 {
+		return true, false
+	}
+	if w.cfg.URL == "" {
+		return true, false
 	}
 	request := &prompb.WriteRequest{}
-	for _, series := range batch {
-		ts := &prompb.TimeSeries{}
-		labels := make([]*prompb.Label, 0, len(series.Labels)+1)
-		labels = append(labels, &prompb.Label{Name: "__name__", Value: series.Name})
-		keys := make([]string, 0, len(series.Labels))
-		for key := range series.Labels {
-			keys = append(keys, key)
+	for _, entry := range batch {
+		for _, series := range entry.series {
+			ts := &prompb.TimeSeries{}
+			labels := make([]*prompb.Label, 0, len(series.Labels)+1)
+			labels = append(labels, &prompb.Label{Name: "__name__", Value: series.Name})
+			keys := make([]string, 0, len(series.Labels))
+			for key := range series.Labels {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				labels = append(labels, &prompb.Label{Name: key, Value: series.Labels[key]})
+			}
+			ts.Labels = labels
+			for _, point := range series.Points {
+				ts.Samples = append(ts.Samples, &prompb.Sample{
+					Value: point.Value, Timestamp: point.At.UnixMilli(),
+				})
+			}
+			request.Timeseries = append(request.Timeseries, ts)
 		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			labels = append(labels, &prompb.Label{Name: key, Value: series.Labels[key]})
-		}
-		ts.Labels = labels
-		for _, point := range series.Points {
-			ts.Samples = append(ts.Samples, &prompb.Sample{
-				Value: point.Value, Timestamp: point.At.UnixMilli(),
-			})
-		}
-		request.Timeseries = append(request.Timeseries, ts)
 	}
 	payload, err := proto.Marshal(request)
 	if err != nil {
-		return
+		return false, true
 	}
 	body := snappy.Encode(nil, payload)
 
 	for attempt := 0; attempt < 3; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.cfg.URL, bytes.NewReader(body))
 		if err != nil {
-			return
+			return false, true
 		}
 		req.Header.Set("Content-Encoding", "snappy")
 		req.Header.Set("Content-Type", "application/x-protobuf")
@@ -167,21 +264,23 @@ func (w *Writer) flush(ctx context.Context, batch []telemetry.Series) {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				return
+				return true, false
 			}
 			if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < 500 {
-				return
+				return false, true
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return false, false
 		case <-time.After(time.Duration(attempt+1) * 200 * time.Millisecond):
 		}
 	}
+
+	return false, false
 }
 
 // String returns a safe description without credentials.
 func (c Config) String() string {
-	return fmt.Sprintf("remote-write(%s, queue=%d, batch=%d)", c.URL, c.QueueSize, c.BatchSize)
+	return fmt.Sprintf("remote-write(%s, queue=%d, batch=%d, spool=%s)", c.URL, c.QueueSize, c.BatchSize, c.SpoolDir)
 }

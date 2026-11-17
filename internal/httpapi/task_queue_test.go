@@ -53,6 +53,34 @@ func TestEnqueueHostTask(t *testing.T) {
 	}
 }
 
+func TestEnqueueAdditionalAgentTasks(t *testing.T) {
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	cookie := f.login(t)
+
+	snapshot := f.request(t, http.MethodPost, "/api/v1/tasks", map[string]any{
+		"cluster": "c1", "member": "test-node", "type": "agent.snapshot",
+	}, cookie, "")
+	if snapshot.Code != http.StatusAccepted {
+		t.Fatalf("snapshot = %d body=%s", snapshot.Code, snapshot.Body.String())
+	}
+
+	unsigned := f.request(t, http.MethodPost, "/api/v1/tasks", map[string]any{
+		"cluster": "c1", "member": "test-node", "type": "agent.bootstrap",
+		"plan": map[string]any{"task_id": "b1"},
+	}, cookie, "")
+	if unsigned.Code != http.StatusBadRequest {
+		t.Fatalf("unsigned bootstrap = %d body=%s", unsigned.Code, unsigned.Body.String())
+	}
+
+	signed := f.request(t, http.MethodPost, "/api/v1/tasks", map[string]any{
+		"cluster": "c1", "member": "test-node", "type": "agent.bootstrap",
+		"plan": map[string]any{"task_id": "b1", "signature": "signed"},
+	}, cookie, "")
+	if signed.Code != http.StatusAccepted {
+		t.Fatalf("signed bootstrap = %d body=%s", signed.Code, signed.Body.String())
+	}
+}
+
 func TestEnqueueHostTaskDisabled(t *testing.T) {
 	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
 	cookie := f.login(t)

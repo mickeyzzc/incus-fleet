@@ -467,6 +467,7 @@ func TestApplyEnvAgentAndMetrics(t *testing.T) {
 	t.Setenv("INCUS_FLEET_METRICS_ENABLED", "true")
 	t.Setenv("INCUS_FLEET_METRICS_RETENTION", "30m")
 	t.Setenv("INCUS_FLEET_METRICS_INTERVAL", "30s")
+	t.Setenv("INCUS_FLEET_METRICS_REMOTE_WRITE_SPOOL_DIR", "/tmp/fleet-spool-test")
 
 	cfg := minimalConfig()
 	cfg.applyEnv()
@@ -476,7 +477,8 @@ func TestApplyEnvAgentAndMetrics(t *testing.T) {
 	if !cfg.Agent.Enabled || cfg.Agent.Listen != "127.0.0.1:9444" {
 		t.Fatalf("agent env = %#v", cfg.Agent)
 	}
-	if !cfg.Metrics.Enabled || cfg.Metrics.Retention != "30m" || cfg.Metrics.Interval != "30s" {
+	if !cfg.Metrics.Enabled || cfg.Metrics.Retention != "30m" || cfg.Metrics.Interval != "30s" ||
+		cfg.Metrics.RemoteWrite.SpoolDir != "/tmp/fleet-spool-test" {
 		t.Fatalf("metrics env = %#v", cfg.Metrics)
 	}
 }
@@ -486,7 +488,8 @@ func TestMetricsExternalDefaultsAndValidation(t *testing.T) {
 	cfg.applyDefaults()
 	if cfg.Metrics.RemoteWrite.Timeout != "10s" || cfg.Metrics.RemoteWrite.QueueSize != 10000 ||
 		cfg.Metrics.RemoteWrite.BatchSize != 500 || cfg.Metrics.Query.Type != "prometheus" ||
-		cfg.Metrics.HTTPSD.Mode != "proxy" {
+		cfg.Metrics.HTTPSD.Mode != "proxy" || cfg.Metrics.RemoteWrite.SpoolDir == "" ||
+		cfg.Metrics.RemoteWrite.MaxBytes != 64<<20 {
 		t.Fatalf("external defaults = %#v %#v %#v", cfg.Metrics.RemoteWrite, cfg.Metrics.Query, cfg.Metrics.HTTPSD)
 	}
 

@@ -364,3 +364,63 @@ func TestNewHADefaultWorker(t *testing.T) {
 		t.Fatal("default HA worker is empty")
 	}
 }
+
+func TestNewRemoteWriteSpoolError(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testConfig(t)
+	cfg.Metrics = config.MetricsConfig{
+		Enabled: true,
+		RemoteWrite: config.RemoteWriteConfig{
+			Enabled: true, URL: "https://example.com/write",
+			Timeout: "1s", QueueSize: 10, BatchSize: 10,
+			SpoolDir: filepath.Join(blocker, "queue"),
+		},
+	}
+	if _, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+	); err == nil {
+		t.Fatal("New(blocked remote-write spool) expected error")
+	}
+}
+
+func TestRunWithHADispatcher(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Server.Listen = freeAddress(t)
+	cfg.HA = config.HAConfig{Enabled: true, WorkerID: "test-worker", Lease: "30s", Interval: "1s"}
+	application, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- application.Run(ctx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := http.Get("http://" + cfg.Server.Listen + "/api/v1/healthz")
+		if err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("server did not start: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() did not stop")
+	}
+}

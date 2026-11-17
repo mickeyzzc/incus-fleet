@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
+	"github.com/mickeyzzc/incus-fleet/internal/bootstrap"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 )
 
@@ -25,7 +27,12 @@ func (f *fakeDispatcher) Dispatch(_ context.Context, _ string, typ agentpb.TaskT
 	if f.result != nil || f.err != nil {
 		return f.result, f.err
 	}
-	body, _ := proto.Marshal(&agentpb.NodenetApplyResult{Ok: true, Action: "link-state", Backend: "helper"})
+	var body []byte
+	if typ == agentpb.TaskType_TASK_TYPE_NODENET_SNAPSHOT {
+		body, _ = proto.Marshal(&agentpb.NodenetSnapshot{Host: "node-a"})
+	} else {
+		body, _ = proto.Marshal(&agentpb.NodenetApplyResult{Ok: true, Action: "link-state", Backend: "helper"})
+	}
 	return &agentpb.TaskResult{State: agentpb.TaskState_TASK_STATE_SUCCEEDED, Payload: body}, nil
 }
 
@@ -94,4 +101,106 @@ func TestAgentNetworkHandlerErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAgentSnapshotHandler(t *testing.T) {
+	dispatcher := &fakeDispatcher{}
+	handler := AgentSnapshotHandler(dispatcher, fakeLookup{agent: &store.Agent{ID: "agent-1", Status: store.AgentOnline}})
+	summary, err := handler(context.Background(), &store.HostTask{ID: "t", AgentID: "agent-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary == "" || dispatcher.typ != agentpb.TaskType_TASK_TYPE_NODENET_SNAPSHOT {
+		t.Fatalf("summary=%q type=%v", summary, dispatcher.typ)
+	}
+}
+
+func TestAgentBootstrapHandler(t *testing.T) {
+	spec := bootstrap.Spec{
+		Version: 1, Mode: "join", Cluster: "c1", Member: "node-a",
+		Address: "192.0.2.10", Preseed: "cluster: {enabled: true}", TaskID: "b1",
+		Nonce: "n", ExpiresAt: time.Now().Add(time.Hour).Unix(), Signature: "signed",
+	}
+	plan, _ := json.Marshal(spec)
+	dispatcher := &fakeDispatcher{result: &agentpb.TaskResult{
+		State: agentpb.TaskState_TASK_STATE_SUCCEEDED,
+		Payload: func() []byte {
+			data, _ := proto.Marshal(&agentpb.IncusBootstrapResult{Ok: true, Mode: "bootstrap", Steps: []string{"install"}})
+			return data
+		}(),
+	}}
+	handler := AgentBootstrapHandler(dispatcher, fakeLookup{agent: &store.Agent{ID: "agent-1", Status: store.AgentOnline}})
+	summary, err := handler(context.Background(), &store.HostTask{ID: "t", AgentID: "agent-1", Plan: string(plan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary == "" || dispatcher.typ != agentpb.TaskType_TASK_TYPE_INCUS_BOOTSTRAP {
+		t.Fatalf("summary=%q type=%v", summary, dispatcher.typ)
+	}
+	if _, err := handler(context.Background(), &store.HostTask{ID: "t", AgentID: "agent-1", Plan: "{}"}); err == nil {
+		t.Fatal("unsigned bootstrap plan accepted")
+	}
+}
+
+func TestAgentBootstrapHandlerErrors(t *testing.T) {
+	lookup := fakeLookup{agent: &store.Agent{ID: "agent-1", Status: store.AgentOnline}}
+	unsigned, _ := json.Marshal(bootstrap.Spec{TaskID: "b1", Signature: ""})
+	cases := []struct {
+		name       string
+		task       *store.HostTask
+		dispatcher AgentDispatcher
+		lookup     fakeLookup
+	}{
+		{"nil dispatcher", &store.HostTask{AgentID: "a", Plan: "{}"}, nil, lookup},
+		{"bad plan", &store.HostTask{AgentID: "a", Plan: "not-json"}, &fakeDispatcher{}, lookup},
+		{"unsigned", &store.HostTask{AgentID: "a", Plan: string(unsigned)}, &fakeDispatcher{}, lookup},
+		{"lookup error", &store.HostTask{Plan: `{"task_id":"b1","signature":"s"}`}, &fakeDispatcher{}, fakeLookup{err: errors.New("no")}},
+		{"offline", &store.HostTask{Plan: `{"task_id":"b1","signature":"s"}`}, &fakeDispatcher{}, fakeLookup{agent: &store.Agent{Status: store.AgentOffline}}},
+		{"dispatch error", &store.HostTask{AgentID: "a", Plan: `{"task_id":"b1","signature":"s"}`}, &fakeDispatcher{err: errors.New("down")}, lookup},
+		{"failed result", &store.HostTask{AgentID: "a", Plan: `{"task_id":"b1","signature":"s"}`},
+			&fakeDispatcher{result: &agentpb.TaskResult{State: agentpb.TaskState_TASK_STATE_FAILED, Error: "no"}}, lookup},
+		{"invalid payload", &store.HostTask{AgentID: "a", Plan: `{"task_id":"b1","signature":"s"}`},
+			&fakeDispatcher{result: &agentpb.TaskResult{State: agentpb.TaskState_TASK_STATE_SUCCEEDED, Payload: []byte("bad")}}, lookup},
+		{"ok false", &store.HostTask{AgentID: "a", Plan: `{"task_id":"b1","signature":"s"}`},
+			&fakeDispatcher{result: &agentpb.TaskResult{State: agentpb.TaskState_TASK_STATE_SUCCEEDED, Payload: mustProto(t, &agentpb.IncusBootstrapResult{Ok: false, Message: "nope"})}}, lookup},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := AgentBootstrapHandler(tc.dispatcher, tc.lookup)(context.Background(), tc.task); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func TestAgentSnapshotHandlerErrors(t *testing.T) {
+	lookup := fakeLookup{agent: &store.Agent{ID: "a", Status: store.AgentOnline}}
+	cases := []struct {
+		name       string
+		task       *store.HostTask
+		dispatcher AgentDispatcher
+		lookup     fakeLookup
+	}{
+		{"nil dispatcher", &store.HostTask{AgentID: "a"}, nil, lookup},
+		{"no agent", &store.HostTask{}, &fakeDispatcher{}, fakeLookup{agent: &store.Agent{Status: store.AgentOffline}}},
+		{"dispatch error", &store.HostTask{AgentID: "a"}, &fakeDispatcher{err: errors.New("down")}, lookup},
+		{"failed result", &store.HostTask{AgentID: "a"}, &fakeDispatcher{result: &agentpb.TaskResult{State: agentpb.TaskState_TASK_STATE_FAILED}}, lookup},
+		{"invalid payload", &store.HostTask{AgentID: "a"}, &fakeDispatcher{result: &agentpb.TaskResult{State: agentpb.TaskState_TASK_STATE_SUCCEEDED, Payload: []byte("bad")}}, lookup},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := AgentSnapshotHandler(tc.dispatcher, tc.lookup)(context.Background(), tc.task); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func mustProto(t *testing.T, message proto.Message) []byte {
+	t.Helper()
+	data, err := proto.Marshal(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

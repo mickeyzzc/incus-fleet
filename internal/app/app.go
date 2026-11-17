@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -137,13 +138,24 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	if cfg.Metrics.Enabled {
 		telemetryStore = telemetry.New(telemetry.DefaultMaxSeries)
 		if cfg.Metrics.RemoteWrite.Enabled {
-			remoteWriter = remotewrite.New(remotewrite.Config{
+			spoolDir := strings.TrimSpace(cfg.Metrics.RemoteWrite.SpoolDir)
+			if spoolDir == "" {
+				spoolDir = filepath.Join(os.TempDir(), "incus-fleet-remote-write")
+			}
+			remoteWriter, err = remotewrite.New(remotewrite.Config{
 				URL:         cfg.Metrics.RemoteWrite.URL,
 				BearerToken: remoteToken,
 				Timeout:     parseDuration(cfg.Metrics.RemoteWrite.Timeout, 10*time.Second),
 				QueueSize:   cfg.Metrics.RemoteWrite.QueueSize,
 				BatchSize:   cfg.Metrics.RemoteWrite.BatchSize,
+				SpoolDir:    spoolDir,
+				MaxBytes:    cfg.Metrics.RemoteWrite.MaxBytes,
 			})
+			if err != nil {
+				manager.Close()
+				_ = st.Close()
+				return nil, err
+			}
 			remoteWriter.Start(ctx)
 			telemetryStore.SetSink(func(series []telemetry.Series) { remoteWriter.Enqueue(series) })
 		}
@@ -190,6 +202,8 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		nodeAccess.SetAgentResolver(agentops.New(agentGW, st).Resolve)
 		if taskRunner != nil {
 			taskRunner.Register(taskrunner.AgentNetworkTask, taskrunner.AgentNetworkHandler(agentGW, st))
+			taskRunner.Register(taskrunner.AgentBootstrapTask, taskrunner.AgentBootstrapHandler(agentGW, st))
+			taskRunner.Register(taskrunner.AgentSnapshotTask, taskrunner.AgentSnapshotHandler(agentGW, st))
 		}
 	}
 

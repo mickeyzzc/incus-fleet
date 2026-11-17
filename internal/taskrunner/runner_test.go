@@ -133,3 +133,14 @@ func TestRunProcessesQueuedTask(t *testing.T) {
 	task, _ := st.GetHostTask(context.Background(), "task-run")
 	t.Fatalf("task = %#v", task)
 }
+
+func TestRunLogsClaimError(t *testing.T) {
+	st := openStore(t)
+	runner := New(st, "worker", time.Minute, 10*time.Millisecond, testLogger())
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	runner.Run(ctx)
+}

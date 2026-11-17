@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -67,6 +68,8 @@ type RemoteWriteConfig struct {
 	Timeout         string `yaml:"timeout"`
 	QueueSize       int    `yaml:"queue_size"`
 	BatchSize       int    `yaml:"batch_size"`
+	SpoolDir        string `yaml:"spool_dir"`
+	MaxBytes        int64  `yaml:"max_bytes"`
 }
 
 // MetricsQueryConfig configures the PromQL query proxy.
@@ -201,6 +204,9 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("INCUS_FLEET_METRICS_REMOTE_WRITE_BEARER_TOKEN"); v != "" {
 		c.Metrics.RemoteWrite.BearerToken = v
 	}
+	if v := os.Getenv("INCUS_FLEET_METRICS_REMOTE_WRITE_SPOOL_DIR"); v != "" {
+		c.Metrics.RemoteWrite.SpoolDir = v
+	}
 	if v := os.Getenv("INCUS_FLEET_METRICS_QUERY_URL"); v != "" {
 		c.Metrics.Query.URL = v
 	}
@@ -239,6 +245,18 @@ func (c *Config) applyDefaults() {
 	}
 	if strings.TrimSpace(c.Metrics.RemoteWrite.Timeout) == "" {
 		c.Metrics.RemoteWrite.Timeout = "10s"
+	}
+	if c.Metrics.RemoteWrite.MaxBytes <= 0 {
+		c.Metrics.RemoteWrite.MaxBytes = 64 << 20
+	}
+	if strings.TrimSpace(c.Metrics.RemoteWrite.SpoolDir) == "" {
+		switch {
+		case c.Database.Driver == "sqlite" && c.Database.DSN != "" &&
+			c.Database.DSN != ":memory:" && !strings.Contains(c.Database.DSN, "mode=memory"):
+			c.Metrics.RemoteWrite.SpoolDir = filepath.Join(filepath.Dir(c.Database.DSN), "remote-write")
+		default:
+			c.Metrics.RemoteWrite.SpoolDir = filepath.Join(os.TempDir(), "incus-fleet-remote-write")
+		}
 	}
 	if c.Metrics.RemoteWrite.QueueSize <= 0 {
 		c.Metrics.RemoteWrite.QueueSize = 10000
@@ -516,6 +534,12 @@ func (m MetricsConfig) validate() error {
 		}
 		if _, err := time.ParseDuration(m.RemoteWrite.Timeout); err != nil {
 			return fmt.Errorf("config: metrics.remote_write.timeout is invalid")
+		}
+		if m.RemoteWrite.MaxBytes <= 0 {
+			return fmt.Errorf("config: metrics.remote_write.max_bytes must be positive")
+		}
+		if strings.TrimSpace(m.RemoteWrite.SpoolDir) == "" {
+			return fmt.Errorf("config: metrics.remote_write.spool_dir is required")
 		}
 	}
 	if m.Query.Enabled {

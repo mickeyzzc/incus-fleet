@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
+	"github.com/mickeyzzc/incus-fleet/internal/bootstrap"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/taskrunner"
 )
@@ -40,12 +41,18 @@ func (a *API) enqueueHostTask(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "" {
 		req.Type = taskrunner.AgentNetworkTask
 	}
-	if req.Type != taskrunner.AgentNetworkTask {
-		writeError(w, http.StatusBadRequest, "invalid_request", "type must be agent.network")
+	switch req.Type {
+	case taskrunner.AgentNetworkTask, taskrunner.AgentBootstrapTask, taskrunner.AgentSnapshotTask:
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", "type must be agent.network, agent.bootstrap, or agent.snapshot")
 		return
 	}
-	if req.Cluster == "" || req.Member == "" || len(req.Plan) == 0 {
-		writeError(w, http.StatusBadRequest, "invalid_request", "cluster, member, and plan are required")
+	if req.Cluster == "" || req.Member == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "cluster and member are required")
+		return
+	}
+	if req.Type != taskrunner.AgentSnapshotTask && len(req.Plan) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "plan is required for this task type")
 		return
 	}
 	summary, err := a.clusters.Get(req.Cluster)
@@ -65,16 +72,25 @@ func (a *API) enqueueHostTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var spec agentpb.NodenetApplySpec
-	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(req.Plan, &spec); err != nil || spec.Action == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "plan must be a valid NodenetApplySpec with an action")
-		return
-	}
-	switch spec.Action {
-	case "link-state", "address", "route-add", "route-delete", "firewall-add", "firewall-delete", "wifi-connect":
-	default:
-		writeError(w, http.StatusBadRequest, "invalid_request", "unsupported network action")
-		return
+	switch req.Type {
+	case taskrunner.AgentNetworkTask:
+		var spec agentpb.NodenetApplySpec
+		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(req.Plan, &spec); err != nil || spec.Action == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "plan must be a valid NodenetApplySpec with an action")
+			return
+		}
+		switch spec.Action {
+		case "link-state", "address", "route-add", "route-delete", "firewall-add", "firewall-delete", "wifi-connect":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid_request", "unsupported network action")
+			return
+		}
+	case taskrunner.AgentBootstrapTask:
+		var spec bootstrap.Spec
+		if err := json.Unmarshal(req.Plan, &spec); err != nil || spec.Signature == "" || spec.TaskID == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "plan must be a signed bootstrap spec with task_id")
+			return
+		}
 	}
 
 	now := time.Now().UTC()

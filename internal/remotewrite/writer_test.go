@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +18,30 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/prompb"
 	"github.com/mickeyzzc/incus-fleet/internal/telemetry"
 )
+
+func newWriter(t *testing.T, cfg Config) *Writer {
+	t.Helper()
+	if cfg.SpoolDir == "" {
+		cfg.SpoolDir = t.TempDir()
+	}
+	writer, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	return writer
+}
+
+func waitFor(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("condition was not met before the deadline")
+}
 
 func TestWriterSendsSnappyProtobuf(t *testing.T) {
 	var (
@@ -33,26 +59,20 @@ func TestWriterSendsSnappyProtobuf(t *testing.T) {
 	}))
 	defer server.Close()
 
-	writer := New(Config{URL: server.URL, BearerToken: "secret", BatchSize: 10, QueueSize: 10})
+	writer := newWriter(t, Config{URL: server.URL, BearerToken: "secret", BatchSize: 10, QueueSize: 10})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	writer.Start(ctx)
-	now := time.Now().UTC()
 	writer.Enqueue([]telemetry.Series{{
 		Name: "fleet_host_load", Labels: map[string]string{"cluster": "c1", "member": "node-a"},
-		Type: "gauge", Points: []telemetry.Sample{{At: now, Value: 1.5}},
+		Type: "gauge", Points: []telemetry.Sample{{At: time.Now().UTC(), Value: 1.5}},
 	}})
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	waitFor(t, func() bool {
 		mu.Lock()
-		hasBody := len(body) > 0
-		mu.Unlock()
-		if hasBody {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		defer mu.Unlock()
+		return len(body) > 0
+	})
 	writer.Close()
 	mu.Lock()
 	defer mu.Unlock()
@@ -73,13 +93,20 @@ func TestWriterSendsSnappyProtobuf(t *testing.T) {
 	if len(request.Timeseries) != 1 || request.Timeseries[0].Labels[0].Name != "__name__" {
 		t.Fatalf("timeseries = %d", len(request.Timeseries))
 	}
+	if writer.spool.count() != 0 {
+		t.Fatalf("spool was not cleared: %d", writer.spool.count())
+	}
 }
 
 func TestWriterRetriesServerErrors(t *testing.T) {
 	var calls int
+	var mu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
 		calls++
-		if calls == 1 {
+		current := calls
+		mu.Unlock()
+		if current == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -87,29 +114,31 @@ func TestWriterRetriesServerErrors(t *testing.T) {
 	}))
 	defer server.Close()
 
-	writer := New(Config{URL: server.URL, BatchSize: 1, QueueSize: 1, Timeout: time.Second})
+	writer := newWriter(t, Config{URL: server.URL, BatchSize: 1, QueueSize: 1, Timeout: time.Second})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	writer.Start(ctx)
 	writer.Enqueue([]telemetry.Series{{Name: "fleet_host_load", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}})
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if calls >= 2 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return calls >= 2
+	})
 	writer.Close()
-	if calls < 2 {
-		t.Fatalf("calls = %d, want retry", calls)
+	if writer.spool.count() != 0 {
+		t.Fatalf("successful retry left spool files: %d", writer.spool.count())
 	}
 }
 
 func TestWriterQueueOverflowAndString(t *testing.T) {
-	writer := New(Config{URL: "https://example.com/write", QueueSize: 1, BatchSize: 1})
-	writer.Enqueue([]telemetry.Series{{Name: "a"}, {Name: "b"}})
+	writer := newWriter(t, Config{URL: "https://example.com/write", QueueSize: 1, BatchSize: 1})
+	writer.Enqueue([]telemetry.Series{{Name: "a"}})
+	writer.Enqueue([]telemetry.Series{{Name: "b"}})
 	if len(writer.queue) != 1 {
 		t.Fatalf("queue length = %d", len(writer.queue))
+	}
+	if writer.spool.count() != 1 {
+		t.Fatalf("spool length = %d", writer.spool.count())
 	}
 	if text := writer.cfg.String(); !strings.Contains(text, "remote-write") {
 		t.Fatalf("String() = %q", text)
@@ -117,17 +146,25 @@ func TestWriterQueueOverflowAndString(t *testing.T) {
 	writer.Close()
 }
 
-func TestWriterNoopPaths(_ *testing.T) {
-	writer := New(Config{URL: "", QueueSize: 1})
-	writer.flush(context.Background(), nil)
-	writer.flush(context.Background(), []telemetry.Series{{Name: "x"}})
-	writer.Close()
-	writer.Enqueue([]telemetry.Series{{Name: "x"}})
+func TestWriterNoopPaths(t *testing.T) {
+	writer, err := New(Config{URL: "", QueueSize: 1, SpoolDir: t.TempDir()})
+	if err == nil {
+		writer.flush(context.Background(), nil)
+		writer.Close()
+		writer.Enqueue([]telemetry.Series{})
+	}
 }
 
 func TestWriterBadURLAndClientError(t *testing.T) {
-	writer := New(Config{URL: "://bad", BatchSize: 1})
-	writer.flush(context.Background(), []telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}})
+	writer := newWriter(t, Config{URL: "://bad", BatchSize: 1})
+	entry, err := writer.spool.append([]telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, permanent := writer.flush(context.Background(), []spoolEntry{entry})
+	if sent || !permanent {
+		t.Fatalf("bad URL result = sent=%v permanent=%v", sent, permanent)
+	}
 	writer.Close()
 
 	calls := 0
@@ -136,10 +173,318 @@ func TestWriterBadURLAndClientError(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 	}))
 	defer server.Close()
-	writer = New(Config{URL: server.URL, BatchSize: 1})
-	writer.flush(context.Background(), []telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}})
-	writer.Close()
+	writer = newWriter(t, Config{URL: server.URL, BatchSize: 1})
+	entry, err = writer.spool.append([]telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining := writer.attempt(context.Background(), []spoolEntry{entry}); remaining != nil {
+		t.Fatalf("4xx should be dropped, remaining=%d", len(remaining))
+	}
 	if calls != 1 {
 		t.Fatalf("4xx retried: calls = %d", calls)
 	}
+	writer.Close()
+}
+
+func TestWriterReplaysSpoolAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+	first := newWriter(t, Config{URL: "", QueueSize: 10, SpoolDir: dir})
+	first.Enqueue([]telemetry.Series{{Name: "fleet_host_load", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}})
+	first.Close()
+	if first.spool.count() != 1 {
+		t.Fatalf("spool before restart = %d", first.spool.count())
+	}
+
+	received := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case received <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	second := newWriter(t, Config{URL: server.URL, QueueSize: 10, BatchSize: 10, SpoolDir: dir})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	second.Start(ctx)
+	select {
+	case <-received:
+	case <-time.After(5 * time.Second):
+		t.Fatal("replayed batch was not sent")
+	}
+	second.Close()
+	waitFor(t, func() bool { return second.spool.count() == 0 })
+}
+
+func TestWriterRetainsSpoolOnServerFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	writer := newWriter(t, Config{URL: server.URL, QueueSize: 10, BatchSize: 1, SpoolDir: dir})
+	entry, err := writer.spool.append([]telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining := writer.attempt(context.Background(), []spoolEntry{entry}); len(remaining) != 1 {
+		t.Fatalf("failed batch remaining = %d", len(remaining))
+	}
+	if writer.spool.count() != 1 {
+		t.Fatalf("failed batch was deleted: %d", writer.spool.count())
+	}
+	writer.Close()
+}
+
+func TestSpoolBoundedRetention(t *testing.T) {
+	sp, err := openSpool(t.TempDir(), 2, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := sp.append([]telemetry.Series{{
+			Name:   "fleet_host_load",
+			Points: []telemetry.Sample{{At: time.Now(), Value: float64(i)}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if sp.count() > 2 {
+		t.Fatalf("entry retention exceeded: %d", sp.count())
+	}
+	if sp.bytes() > 200 {
+		t.Fatalf("byte retention exceeded: %d", sp.bytes())
+	}
+	entries, err := sp.load()
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("load after trim = %d, %v", len(entries), err)
+	}
+}
+
+func TestWriterRetriesPendingBatch(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		calls int
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		calls++
+		current := calls
+		mu.Unlock()
+		if current < 4 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	writer := newWriter(t, Config{URL: server.URL, QueueSize: 10, BatchSize: 1, Timeout: time.Second})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer.Start(ctx)
+	writer.Enqueue([]telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}})
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return calls >= 4
+	})
+	writer.Close()
+	waitFor(t, func() bool { return writer.spool.count() == 0 })
+}
+
+func TestSpoolValidationAndCorruption(t *testing.T) {
+	if defaults, err := openSpool(t.TempDir(), 0, 0); err != nil || defaults.maxEntries != 10000 ||
+		defaults.maxBytes != DefaultMaxBytes {
+		t.Fatalf("openSpool(defaults) = %#v, %v", defaults, err)
+	}
+	if _, err := openSpool("", 1, 1); err == nil {
+		t.Fatal("openSpool(empty) expected error")
+	}
+	dir := t.TempDir()
+	sp, err := openSpool(dir, 2, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sp.append(nil); err == nil {
+		t.Fatal("append(empty) expected error")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "00000000000000000001-000001.json"), []byte("not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := sp.load()
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("load(corrupt) = %d, %v", len(entries), err)
+	}
+	if sp.count() != 0 {
+		t.Fatalf("corrupt file was not removed: %d", sp.count())
+	}
+
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(Config{SpoolDir: filepath.Join(blocker, "queue"), QueueSize: 1}); err == nil {
+		t.Fatal("New(blocked spool) expected error")
+	}
+}
+
+func TestEnqueueAfterClose(t *testing.T) {
+	writer := newWriter(t, Config{URL: "https://example.com/write", QueueSize: 2})
+	writer.Close()
+	writer.Enqueue([]telemetry.Series{{Name: "late"}})
+	if writer.spool.count() != 0 {
+		t.Fatalf("late enqueue left spool files: %d", writer.spool.count())
+	}
+}
+
+func TestWriterContextCancelWithFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	writer := newWriter(t, Config{URL: server.URL, QueueSize: 10, BatchSize: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	writer.Start(ctx)
+	writer.Enqueue([]telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}})
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	writer.Close()
+	if writer.spool.count() == 0 {
+		t.Fatal("failed batch was not retained for replay")
+	}
+}
+
+func TestWriterCloseWithQueuedBatch(t *testing.T) {
+	received := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case received <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	writer := newWriter(t, Config{URL: server.URL, QueueSize: 10, BatchSize: 10})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer.Start(ctx)
+	writer.Enqueue([]telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}})
+	writer.Close()
+	select {
+	case <-received:
+	case <-time.After(3 * time.Second):
+		t.Fatal("queued batch was not flushed on close")
+	}
+}
+
+func TestSpoolEdgeCases(t *testing.T) {
+	dir := t.TempDir()
+	sp, err := openSpool(dir, 2, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp.remove(spoolEntry{path: filepath.Join(dir, "missing.json"), size: 10})
+	if sp.count() != 0 || sp.bytes() != 0 {
+		t.Fatalf("empty spool count=%d bytes=%d", sp.count(), sp.bytes())
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if sp.count() != 0 || sp.bytes() != 0 {
+		t.Fatalf("missing dir count=%d bytes=%d", sp.count(), sp.bytes())
+	}
+	sp.trim()
+}
+
+func TestSpoolLoadUnreadableFile(t *testing.T) {
+	dir := t.TempDir()
+	sp, err := openSpool(dir, 2, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sp.append([]telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: 1}}}}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("spool files = %d, %v", len(entries), err)
+	}
+	path := filepath.Join(dir, entries[0].Name())
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if loaded, err := sp.load(); err != nil || len(loaded) != 0 {
+		t.Fatalf("load(unreadable) = %d, %v", len(loaded), err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSpoolLoadAppliesRetention(t *testing.T) {
+	dir := t.TempDir()
+	sp, err := openSpool(dir, 5, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := sp.append([]telemetry.Series{{Name: "x", Points: []telemetry.Sample{{At: time.Now(), Value: float64(i)}}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tight, err := openSpool(dir, 1, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := tight.load()
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("load(retention) = %d, %v", len(entries), err)
+	}
+	if tight.count() != 1 {
+		t.Fatalf("retention left %d files", tight.count())
+	}
+}
+
+func TestEnqueueSpoolWriteFailure(t *testing.T) {
+	writer := newWriter(t, Config{URL: "https://example.com/write", QueueSize: 2})
+	if err := os.Chmod(writer.spool.dir, 0o500); err != nil { //nolint:gosec // test permissions
+		t.Fatal(err)
+	}
+	writer.Enqueue([]telemetry.Series{{Name: "x"}})
+	if len(writer.queue) != 0 {
+		t.Fatalf("failed spool write queued an entry: %d", len(writer.queue))
+	}
+	if err := os.Chmod(writer.spool.dir, 0o700); err != nil { //nolint:gosec // test permissions
+		t.Fatal(err)
+	}
+	writer.Close()
+}
+
+func TestNewSpoolLoadFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	_, err := New(Config{SpoolDir: dir})
+	_ = os.Chmod(dir, 0o700) //nolint:gosec // restore test directory
+	if err == nil {
+		t.Fatal("New(unreadable spool) expected error")
+	}
+}
+
+func TestRunWithCanceledContext(t *testing.T) {
+	writer := newWriter(t, Config{URL: "", QueueSize: 2})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	writer.Start(ctx)
+	writer.Enqueue([]telemetry.Series{{Name: "x"}})
+	time.Sleep(20 * time.Millisecond)
+	writer.Close()
 }
