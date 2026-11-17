@@ -32,6 +32,8 @@ All notable changes to this project are documented here. The format follows
 - `POST /api/v1/agents/{id}/bootstrap` for agent-driven Incus provisioning.
 - Agent host telemetry every 10 seconds, a one-hour center ring buffer, query/snapshot/export
   endpoints, and host metrics charts on the node detail page.
+- cgroup v2 per-instance CPU/memory/pids/IO metrics, bounded histogram primitives, and an optional
+  Linux eBPF collector for host TCP retransmit/OOM counters with procfs fallback.
 
 ### Fixed
 

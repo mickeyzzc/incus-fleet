@@ -341,6 +341,27 @@ agent 每 10 秒上报主机 CPU/内存/负载/运行时间/网络计数器。�
 SQLite/PostgreSQL；重启中心会清空缓冲。节点详情页显示最近 1 小时，API 可导出 JSON、
 Prometheus text 或 CSV。Prometheus/VictoriaMetrics remote write 和 HTTP SD 在后续阶段。
 
+#### eBPF 遥测（可选）
+
+agent 始终从 `/sys/fs/cgroup` 采集 cgroup v2 实例指标，并从 `/proc` 采集主机回退计数器。eBPF
+是可选的，增加主机 TCP 重传和 OOM kill 计数。要求 Linux 内核 >= 5.8 且启用 BTF
+（`/sys/kernel/btf/vmlinux`）、`CAP_BPF`/`CAP_PERFMON`（或 root），以及从
+`agent/bpf/metrics.bpf.c` 构建的对象：
+
+```bash
+sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
+make agent-ebpf
+sudo install -d -m 0755 /usr/lib/incus-fleet
+sudo install -m 0644 agent/bpf/metrics.bpf.o /usr/lib/incus-fleet/metrics.bpf.o
+```
+
+在 agent 的 `ExecStart` 中加入 `--ebpf-object /usr/lib/incus-fleet/metrics.bpf.o`，并在 unit 中
+启用 `AmbientCapabilities=CAP_BPF CAP_PERFMON`。如果对象、BTF 或权限缺失，agent 会记录原因并
+继续使用 procfs/cgroup，不会丢失遥测。
+
+实例指标以容器为主；VM 只做宿主侧 cgroup 指标。`fleet_agent_telemetry_mode` 报告 `ebpf` 或
+`procfs`。
+
 #### 通过 agent 引导 Incus
 
 agent 上线后，中心可以通过 `POST /api/v1/agents/{id}/bootstrap` 准备 Incus。spec 使用与 agent

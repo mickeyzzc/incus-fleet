@@ -346,6 +346,27 @@ writes metrics to SQLite/PostgreSQL; restarting it clears the buffer. The node d
 the last hour, and the API exports JSON, Prometheus text, or CSV. Prometheus/VictoriaMetrics
 remote write and HTTP SD are later phases.
 
+#### eBPF telemetry (optional)
+
+The agent always collects per-cgroup v2 instance metrics from `/sys/fs/cgroup` and host fallback
+counters from `/proc`. eBPF is optional and adds host TCP retransmit and OOM-kill counters. It
+requires Linux kernel >= 5.8 with BTF (`/sys/kernel/btf/vmlinux`), `CAP_BPF`/`CAP_PERFMON` (or
+root), and an object built from `agent/bpf/metrics.bpf.c`:
+
+```bash
+sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
+make agent-ebpf
+sudo install -d -m 0755 /usr/lib/incus-fleet
+sudo install -m 0644 agent/bpf/metrics.bpf.o /usr/lib/incus-fleet/metrics.bpf.o
+```
+
+Add `--ebpf-object /usr/lib/incus-fleet/metrics.bpf.o` to the agent `ExecStart` and enable
+`AmbientCapabilities=CAP_BPF CAP_PERFMON` in the unit. If the object, BTF, or permissions are
+missing, the agent logs the reason and keeps using procfs/cgroup; no telemetry is lost.
+
+Per-cgroup metrics are container-first; VMs are host-side cgroup metrics only. `fleet_agent_telemetry_mode`
+reports `ebpf` or `procfs`.
+
 #### Incus bootstrap through the agent
 
 Once the agent is online, the center can provision Incus through

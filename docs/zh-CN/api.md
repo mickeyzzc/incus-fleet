@@ -408,9 +408,13 @@ Prometheus 导出带 `# TYPE` 行和毫秒时间戳。CSV 为长表：
 `timestamp,metric,cluster,member,agent_id,value`。如果 `metrics.enabled=false`，三个端点都返回
 `503 unavailable`。重启中心会清空 1 小时历史，这是有意的设计。
 
-agent 当前导出 `fleet_host_cpu_usage_ratio`、`fleet_host_memory_bytes`、`fleet_host_load`、
-`fleet_host_uptime_seconds` 和 `fleet_host_network_bytes_total`。实例级指标和 eBPF 在后续阶段
-加入。
+agent 导出主机指标（`fleet_host_cpu_usage_ratio`、`fleet_host_memory_bytes`、
+`fleet_host_load`、`fleet_host_uptime_seconds`、`fleet_host_network_bytes_total`），以及 cgroup v2
+回退的实例指标（`fleet_instance_cpu_seconds_total`、`fleet_instance_memory_bytes`、
+`fleet_instance_processes`、`fleet_instance_io_bytes_total`）。可选 eBPF 对象增加
+`fleet_host_tcp_retransmits_total` 和 `fleet_host_oom_kills_total`；
+`fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}` 表示当前路径。agent 内置有界直方图原语，
+供后续 eBPF 延迟指标使用；当前对象只暴露计数器。
 
 ## 主机任务与审计
 

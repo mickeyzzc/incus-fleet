@@ -31,6 +31,8 @@
 - 用于 agent 驱动 Incus 准备的 `POST /api/v1/agents/{id}/bootstrap`。
 - Agent 每 10 秒上报主机遥测，中心 1 小时环形缓冲，query/snapshot/export 端点，以及节点详情页
   的主机指标图表。
+- cgroup v2 实例级 CPU/内存/pids/IO 指标、有界直方图原语，以及可选的 Linux eBPF 主机 TCP
+  重传/OOM 计数器（procfs 回退）。
 
 ### 修复
 

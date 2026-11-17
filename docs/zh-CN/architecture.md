@@ -112,7 +112,11 @@ flowchart LR
 
 宿主机 CPU、内存、存储和实例数量来自 Incus 集群资源 API。单实例指标来自实时实例状态 API：CPU 时间、内存使用量与峰值、各挂载点的磁盘占用，以及各网卡的流量计数。前端每 3 秒采样一次，并通过计数器差值推算速率。
 
-可选主机 agent 每 10 秒上报主机遥测。中心把它保存在有界内存环形缓冲（360 个点，1 小时），并注入 `cluster`、`member`、`agent_id` 标签。`GET /api/v1/metrics/query|snapshot|export` 提供 JSON、Prometheus text 和 CSV；指标不写入控制面数据库。实例级 agent 指标、eBPF 和外部 TSDB 集成在后续阶段。
+可选主机 agent 每 10 秒上报主机遥测。中心把它保存在有界内存环形缓冲（360 个点，1 小时），并注入 `cluster`、`member`、`agent_id` 标签。`GET /api/v1/metrics/query|snapshot|export` 提供 JSON、Prometheus text 和 CSV；指标不写入控制面数据库。
+
+agent 无需额外权限即可采集 cgroup v2 容器指标（VM 只做宿主侧 cgroup 指标）。可选 eBPF 增加
+主机 TCP 重传和 OOM kill 计数；对象、BTF 或权限缺失时记录原因并回退 procfs/cgroup。agent 内置
+有界直方图原语，供后续 eBPF 延迟指标使用。外部 TSDB 集成在后续阶段。
 
 ## 主机操作
 

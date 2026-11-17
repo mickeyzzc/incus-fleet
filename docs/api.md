@@ -464,9 +464,13 @@ Prometheus export includes `# TYPE` lines and millisecond timestamps. CSV is lon
 `timestamp,metric,cluster,member,agent_id,value`. If `metrics.enabled` is false, all three endpoints
 return `503 unavailable`. Restarting the center resets the one-hour history; this is intentional.
 
-The agent currently exports `fleet_host_cpu_usage_ratio`, `fleet_host_memory_bytes`,
-`fleet_host_load`, `fleet_host_uptime_seconds`, and `fleet_host_network_bytes_total`. Per-instance
-and eBPF series are added in later phases.
+The agent exports host series (`fleet_host_cpu_usage_ratio`, `fleet_host_memory_bytes`,
+`fleet_host_load`, `fleet_host_uptime_seconds`, `fleet_host_network_bytes_total`) and, from the
+cgroup v2 fallback, per-instance series (`fleet_instance_cpu_seconds_total`,
+`fleet_instance_memory_bytes`, `fleet_instance_processes`, `fleet_instance_io_bytes_total`). The
+optional eBPF object adds `fleet_host_tcp_retransmits_total` and `fleet_host_oom_kills_total`;
+`fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}` reports the active path. Bounded histogram
+primitives are included in the agent for eBPF latency work; the current object exposes counters.
 
 ## Host tasks and audit
 

@@ -142,8 +142,13 @@ per-mountpoint disk usage, and per-interface network counters. The frontend samp
 The optional host agent adds host telemetry every 10 seconds. The center stores it in a bounded
 in-memory ring buffer (360 points, one hour) with center-injected `cluster`, `member`, and
 `agent_id` labels. `GET /api/v1/metrics/query|snapshot|export` exposes JSON, Prometheus text, and
-CSV; metrics are not written to the control-plane database. Per-instance agent metrics, eBPF, and
-external TSDB integration are later phases.
+CSV; metrics are not written to the control-plane database.
+
+The agent collects cgroup v2 metrics for containers (and host-side cgroup metrics for VMs) without
+extra privileges. Optional eBPF adds host TCP retransmit and OOM-kill counters; when the object,
+BTF, or capabilities are missing it logs the reason and falls back to procfs/cgroup. Bounded
+histogram primitives are included for future eBPF latency metrics. External TSDB integration is a
+later phase.
 
 ## Host operations
 
