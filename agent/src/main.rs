@@ -246,6 +246,15 @@ async fn main() -> Result<()> {
                 let final_snapshot = collector.collect();
                 println!("tcp_retransmits={}", final_snapshot.tcp_retransmits);
                 println!("oom_kills={}", final_snapshot.oom_kills);
+                println!(
+                    "oom_exact={} oom_fallback={} oom_debug=[task_null={}, css_null={}, cgroup_null={}, id_zero={}]",
+                    final_snapshot.oom_exact,
+                    final_snapshot.oom_fallback,
+                    final_snapshot.oom_debug[0],
+                    final_snapshot.oom_debug[1],
+                    final_snapshot.oom_debug[2],
+                    final_snapshot.oom_debug[3]
+                );
                 println!("socket_cgroups={}", collector.socket_cgroup_count());
                 for item in &final_snapshot.instances {
                     println!(

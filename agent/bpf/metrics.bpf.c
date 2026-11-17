@@ -3,6 +3,26 @@
 //   make -C agent/bpf
 #include <linux/bpf.h>
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_core_read.h>
+
+// Minimal CO-RE definitions for resolving an OOM victim's cgroup. Keeping these
+// partial (with preserve_access_index) avoids shipping a full vmlinux.h while
+// still letting the loader relocate cgroup->kn->id against the running kernel.
+struct css_set {
+    struct cgroup *dfl_cgrp;
+} __attribute__((preserve_access_index));
+struct task_struct {
+    struct css_set *cgroups;
+} __attribute__((preserve_access_index));
+struct kernfs_node {
+    __u64 id;
+} __attribute__((preserve_access_index));
+struct cgroup {
+    struct kernfs_node *kn;
+} __attribute__((preserve_access_index));
+
+extern struct task_struct *bpf_task_from_pid(__s32 pid) __ksym __weak;
+extern void bpf_task_release(struct task_struct *p) __ksym __weak;
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -68,6 +88,16 @@ struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 4096);
 } OOM_EVENTS SEC(".maps");
+
+// [0] exact victim cgroup, [1] fallback to current task,
+// [2] task_from_pid returned NULL, [3] css_set was NULL,
+// [4] css_set.dfl_cgrp was NULL, [5] resolved cgroup id was zero.
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 6);
+    __type(key, __u32);
+    __type(value, __u64);
+} OOM_STATS SEC(".maps");
 
 struct block_start_value {
     __u64 ts;
@@ -198,24 +228,81 @@ struct oom_mark_ctx {
     int pid;
 };
 
-SEC("tracepoint/oom/mark_victim")
-int oom_mark(void *raw_ctx)
+static __always_inline void bump_oom_stat(__u32 key)
 {
-    __u64 cgroup_id = bpf_get_current_cgroup_id();
-    bump_host(&OOM_KILLS);
-    bump_cgroup(&CGROUP_OOM_KILLS, cgroup_id);
+    __u64 *value = bpf_map_lookup_elem(&OOM_STATS, &key);
+    if (value)
+        __sync_fetch_and_add(value, 1);
+}
 
-    // Userspace resolves this pid's cgroup when the OOM context is the root
-    // cgroup (for example a host-triggered global OOM that kills a container
-    // task). The BPF map above already covers container-memcg OOM exactly.
-    struct oom_mark_ctx *ctx = raw_ctx;
+static __always_inline void emit_oom(__u64 cgroup_id, int pid)
+{
     struct oom_event *event = bpf_ringbuf_reserve(&OOM_EVENTS, sizeof(*event), 0);
     if (event) {
         event->ts = bpf_ktime_get_ns();
-        event->pid = ctx->pid;
+        event->pid = pid;
         event->cgroup_id = cgroup_id;
         bpf_ringbuf_submit(event, 0);
     }
+}
+
+// Resolve the victim task's cgroup in kernel context. This is exact for both
+// memcg OOM and root-context global OOM, where bpf_get_current_cgroup_id()
+// refers to the OOM killer rather than the victim.
+static __always_inline __u64 victim_cgroup_id(int pid)
+{
+    struct task_struct *task = bpf_task_from_pid(pid);
+    if (!task) {
+        bump_oom_stat(2);
+        return 0;
+    }
+    __u64 cgroup_id = 0;
+    struct css_set *cgroups = BPF_CORE_READ(task, cgroups);
+    if (!cgroups) {
+        bump_oom_stat(3);
+    } else {
+        struct cgroup *cgrp = BPF_CORE_READ(cgroups, dfl_cgrp);
+        if (!cgrp) {
+            bump_oom_stat(4);
+        } else {
+            cgroup_id = BPF_CORE_READ(cgrp, kn, id);
+            if (!cgroup_id)
+                bump_oom_stat(5);
+        }
+    }
+    bpf_task_release(task);
+    return cgroup_id;
+}
+
+SEC("tracepoint/oom/mark_victim")
+int oom_mark_exact(void *raw_ctx)
+{
+    struct oom_mark_ctx *ctx = raw_ctx;
+    __u64 cgroup_id = victim_cgroup_id(ctx->pid);
+    if (cgroup_id) {
+        bump_oom_stat(0);
+    } else {
+        cgroup_id = bpf_get_current_cgroup_id();
+        bump_oom_stat(1);
+    }
+    bump_host(&OOM_KILLS);
+    bump_cgroup(&CGROUP_OOM_KILLS, cgroup_id);
+    emit_oom(cgroup_id, ctx->pid);
+    return 0;
+}
+
+// Fallback for kernels without the task/cgroup kfuncs. Userspace still tries
+// /proc/<pid>/cgroup from the ring-buffer event when the cgroup is not an Incus
+// instance, but that path is racy once the victim exits.
+SEC("tracepoint/oom/mark_victim")
+int oom_mark(void *raw_ctx)
+{
+    struct oom_mark_ctx *ctx = raw_ctx;
+    __u64 cgroup_id = bpf_get_current_cgroup_id();
+    bump_oom_stat(1);
+    bump_host(&OOM_KILLS);
+    bump_cgroup(&CGROUP_OOM_KILLS, cgroup_id);
+    emit_oom(cgroup_id, ctx->pid);
     return 0;
 }
 

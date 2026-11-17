@@ -86,6 +86,12 @@ pub struct InstanceSnapshot {
 pub struct Snapshot {
     pub tcp_retransmits: u64,
     pub oom_kills: u64,
+    /// OOM kills resolved to the victim task's cgroup through kfuncs.
+    pub oom_exact: u64,
+    /// OOM kills that used the current task's cgroup (kfunc fallback).
+    pub oom_fallback: u64,
+    /// [task NULL, css_set NULL, dfl_cgrp NULL, cgroup id 0].
+    pub oom_debug: [u64; 4],
     pub instances: Vec<InstanceSnapshot>,
 }
 
@@ -239,6 +245,7 @@ mod platform {
         block_latency: AyaHashMap<MapData, BlockKey, u64>,
         block_sum_ns: AyaHashMap<MapData, u64, u64>,
         socket_cgroups: AyaHashMap<MapData, FlowKey, u64>,
+        oom_stats: aya::maps::PerCpuArray<MapData, u64>,
         oom_extra: Arc<Mutex<BTreeMap<(String, String), u64>>>,
         _sockops: Option<SockOpsLink>,
     }
@@ -262,7 +269,7 @@ mod platform {
                 }
             };
             attach_tracepoint(&mut ebpf, "tcp_retransmit", "tcp", "tcp_retransmit_skb")?;
-            attach_tracepoint(&mut ebpf, "oom_mark", "oom", "mark_victim")?;
+            attach_oom(&mut ebpf)?;
             attach_raw_tracepoint(&mut ebpf, "block_issue", "block_rq_issue")?;
             attach_raw_tracepoint(&mut ebpf, "block_complete", "block_rq_complete")?;
 
@@ -301,6 +308,11 @@ mod platform {
                     .ok_or_else(|| "missing SOCKET_CGROUPS map".to_string())?,
             )
             .map_err(|err| format!("open SOCKET_CGROUPS: {err}"))?;
+            let oom_stats = aya::maps::PerCpuArray::try_from(
+                ebpf.take_map("OOM_STATS")
+                    .ok_or_else(|| "missing OOM_STATS map".to_string())?,
+            )
+            .map_err(|err| format!("open OOM_STATS: {err}"))?;
             let oom_extra: Arc<Mutex<BTreeMap<(String, String), u64>>> =
                 Arc::new(Mutex::new(BTreeMap::new()));
             if let Some(map) = ebpf.take_map("OOM_EVENTS") {
@@ -319,6 +331,7 @@ mod platform {
                 block_latency,
                 block_sum_ns,
                 socket_cgroups,
+                oom_stats,
                 oom_extra,
                 _sockops: sockops,
             })
@@ -448,6 +461,22 @@ mod platform {
             Snapshot {
                 tcp_retransmits: total(&self.retransmits),
                 oom_kills: total(&self.oom_kills),
+                oom_exact: self
+                    .oom_stats
+                    .get(&0, 0)
+                    .map(|values| values.iter().sum())
+                    .unwrap_or(0),
+                oom_fallback: self
+                    .oom_stats
+                    .get(&1, 0)
+                    .map(|values| values.iter().sum())
+                    .unwrap_or(0),
+                oom_debug: [2, 3, 4, 5].map(|key| {
+                    self.oom_stats
+                        .get(&key, 0)
+                        .map(|values| values.iter().sum())
+                        .unwrap_or(0)
+                }),
                 instances,
             }
         }
@@ -608,6 +637,19 @@ mod platform {
             return Err(std::io::Error::last_os_error());
         }
         Ok(())
+    }
+
+    fn attach_oom(ebpf: &mut Ebpf) -> Result<(), String> {
+        match attach_tracepoint(ebpf, "oom_mark_exact", "oom", "mark_victim") {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "exact OOM attribution unavailable; using current-cgroup fallback"
+                );
+                attach_tracepoint(ebpf, "oom_mark", "oom", "mark_victim")
+            }
+        }
     }
 
     fn attach_sockops(
@@ -783,6 +825,9 @@ mod tests {
         let snapshot = Snapshot {
             tcp_retransmits: 5,
             oom_kills: 1,
+            oom_exact: 0,
+            oom_fallback: 0,
+            oom_debug: [0; 4],
             instances: vec![InstanceSnapshot {
                 instance: "demo".into(),
                 kind: "container".into(),
