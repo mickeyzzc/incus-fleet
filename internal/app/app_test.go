@@ -332,3 +332,35 @@ func TestNewWithExternalMetrics(t *testing.T) {
 		t.Fatal("external metrics not wired")
 	}
 }
+
+func TestNewWithHADispatcher(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.HA = config.HAConfig{Enabled: true, WorkerID: "test-worker", Lease: "30s", Interval: "1s"}
+	application, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatalf("New(ha) error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+	if application.taskRunner == nil || application.taskRunner.Worker() != "test-worker" {
+		t.Fatalf("task runner = %#v", application.taskRunner)
+	}
+}
+
+func TestNewHADefaultWorker(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.HA = config.HAConfig{Enabled: true}
+	application, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+	if application.taskRunner == nil || application.taskRunner.Worker() == "" {
+		t.Fatal("default HA worker is empty")
+	}
+}

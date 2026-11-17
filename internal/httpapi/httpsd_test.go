@@ -147,3 +147,32 @@ func TestMetricsSDStoreError(t *testing.T) {
 		t.Fatalf("store error = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestMetricsServiceDiscoveryDirectMode(t *testing.T) {
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	now := time.Now().UTC()
+	for _, agent := range []*store.Agent{
+		{ID: "agent-1", Cluster: "c1", Member: "node-a", Status: store.AgentOnline,
+			Facts:     `{"hostname":"node-a","extra":{"metrics_address":"198.51.100.10:9100"}}`,
+			CreatedAt: now, UpdatedAt: now},
+		{ID: "agent-2", Cluster: "c1", Member: "node-b", Status: store.AgentOnline,
+			Facts: `{}`, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := f.store.UpsertAgent(context.Background(), agent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.handler = New(Deps{
+		Clusters: f.manager, Store: f.store, Auth: f.auth, Version: "test",
+		MetricsSD: MetricsSDConfig{Enabled: true, Token: "sd", Mode: "direct"},
+	}).Handler()
+	rec := f.request(t, http.MethodGet, "/api/v1/sd/agents", nil, nil, "sd")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"198.51.100.10:9100"`) ||
+		!strings.Contains(rec.Body.String(), `"__metrics_path__":"/metrics"`) ||
+		strings.Contains(rec.Body.String(), "agent-2") {
+		t.Fatalf("direct sd = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if metricsAddress("bad") != "" || metricsAddress(`{"extra":{"metrics_address":"x:1"}}`) != "x:1" {
+		t.Fatal("metricsAddress() mismatch")
+	}
+}

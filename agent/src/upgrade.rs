@@ -54,6 +54,29 @@ pub fn verify_and_install(
     Ok(())
 }
 
+/// Restart the systemd unit after a successful install. It is a no-op outside
+/// systemd or when INCUS_FLEET_UPGRADE_NO_RESTART=1.
+pub fn restart_service() {
+    if !should_restart(Path::new("/")) {
+        return;
+    }
+    match Command::new("systemctl")
+        .args(["try-restart", "incus-fleet-agent"])
+        .status()
+    {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!("systemctl try-restart exited with {status}"),
+        Err(err) => eprintln!("systemctl try-restart failed: {err}"),
+    }
+}
+
+fn should_restart(root: &Path) -> bool {
+    if std::env::var("INCUS_FLEET_UPGRADE_NO_RESTART").as_deref() == Ok("1") {
+        return false;
+    }
+    root.join("run/systemd/system").exists()
+}
+
 fn decode_key(value: &str) -> Result<[u8; 32]> {
     if let Ok(bytes) = hex_decode(value)
         && bytes.len() == 32
@@ -144,6 +167,14 @@ mod tests {
             .is_err()
         );
         assert_eq!(fs::read_to_string(&target).unwrap(), "old");
+    }
+
+    #[test]
+    fn detects_systemd_root() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!should_restart(dir.path()));
+        fs::create_dir_all(dir.path().join("run/systemd/system")).unwrap();
+        assert!(should_restart(dir.path()));
     }
 
     #[test]

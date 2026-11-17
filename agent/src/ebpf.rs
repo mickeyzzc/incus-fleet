@@ -78,7 +78,8 @@ mod platform {
             .map_err(|err| format!("load {name}: {err}"))?;
         program
             .attach(category, event)
-            .map_err(|err| format!("attach {name}: {err}"))
+            .map_err(|err| format!("attach {name}: {err}"))?;
+        Ok(())
     }
 
     fn total(map: &PerCpuArray<MapData, u64>) -> u64 {

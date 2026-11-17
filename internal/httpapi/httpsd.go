@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/telemetry"
 )
@@ -56,19 +59,41 @@ func (a *API) sdAgents(w http.ResponseWriter, r *http.Request) {
 		if agent.Status != store.AgentOnline {
 			continue
 		}
-		targets = append(targets, sdTarget{
-			Targets: []string{host},
+		target := sdTarget{
 			Labels: map[string]string{
-				"__scheme__":       scheme,
-				"__metrics_path__": "/api/v1/agents/" + url.PathEscape(agent.ID) + "/metrics/prometheus",
-				"cluster":          agent.Cluster,
-				"member":           agent.Member,
-				"agent_id":         agent.ID,
+				"cluster":  agent.Cluster,
+				"member":   agent.Member,
+				"agent_id": agent.ID,
 			},
-		})
+		}
+		if a.metricsSD.Mode == "direct" {
+			address := metricsAddress(agent.Facts)
+			if address == "" {
+				continue
+			}
+			target.Targets = []string{address}
+			target.Labels["__scheme__"] = "http"
+			target.Labels["__metrics_path__"] = "/metrics"
+		} else {
+			target.Targets = []string{host}
+			target.Labels["__scheme__"] = scheme
+			target.Labels["__metrics_path__"] = "/api/v1/agents/" + url.PathEscape(agent.ID) + "/metrics/prometheus"
+		}
+		targets = append(targets, target)
 	}
 
 	writeJSON(w, http.StatusOK, targets)
+}
+
+func metricsAddress(facts string) string {
+	if strings.TrimSpace(facts) == "" || facts == "{}" {
+		return ""
+	}
+	var report agentpb.FactsReport
+	if err := protojson.Unmarshal([]byte(facts), &report); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(report.Extra["metrics_address"])
 }
 
 func (a *API) publicTarget(r *http.Request) (string, string) {

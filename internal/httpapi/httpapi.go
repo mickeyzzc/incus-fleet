@@ -155,6 +155,7 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("GET /api/v1/audit", a.requireAuth(http.HandlerFunc(a.listHostAudit)))
 	mux.Handle("GET /api/v1/audit/export", a.requireAuth(http.HandlerFunc(a.exportHostAudit)))
 	mux.Handle("GET /api/v1/tasks", a.requireAuth(http.HandlerFunc(a.listHostTasks)))
+	mux.Handle("POST /api/v1/tasks", a.requireAuth(http.HandlerFunc(a.enqueueHostTask)))
 	mux.Handle("GET /api/v1/tasks/{id}", a.requireAuth(http.HandlerFunc(a.getHostTask)))
 	mux.Handle("GET /api/v1/agents", a.requireAuth(http.HandlerFunc(a.listAgents)))
 	mux.Handle("POST /api/v1/agents/enrollment-tokens", a.requireAuth(http.HandlerFunc(a.createAgentEnrollmentToken)))

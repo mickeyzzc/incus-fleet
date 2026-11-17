@@ -29,6 +29,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/remotewrite"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
+	"github.com/mickeyzzc/incus-fleet/internal/taskrunner"
 	"github.com/mickeyzzc/incus-fleet/internal/telemetry"
 	"github.com/mickeyzzc/incus-fleet/internal/version"
 	"github.com/mickeyzzc/incus-fleet/web"
@@ -64,6 +65,7 @@ type App struct {
 	agentServer  *http.Server
 	remoteWrite  *remotewrite.Writer
 	metricsQuery *metricsquery.Proxy
+	taskRunner   *taskrunner.Runner
 }
 
 // New builds all services and the HTTP handler.
@@ -154,6 +156,18 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 			Timeout:     parseDuration(cfg.Metrics.Query.Timeout, 15*time.Second),
 		})
 	}
+	var taskRunner *taskrunner.Runner
+	if cfg.HA.Enabled {
+		worker := strings.TrimSpace(cfg.HA.WorkerID)
+		if worker == "" {
+			hostname, _ := os.Hostname()
+			worker = fmt.Sprintf("%s-%d", hostname, os.Getpid())
+		}
+		taskRunner = taskrunner.New(st, worker,
+			parseDuration(cfg.HA.Lease, 30*time.Second),
+			parseDuration(cfg.HA.Interval, 2*time.Second), logger)
+	}
+
 	if cfg.Agent.Enabled {
 		ca, err := agentgw.LoadCA(cfg.Agent.ClientCA, cfg.Agent.CAKey)
 		if err != nil {
@@ -174,6 +188,9 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		agentGW = agentgw.New(st, ca, logger, options...)
 		agentTLS = agentGW.TLSConfig(serverCert)
 		nodeAccess.SetAgentResolver(agentops.New(agentGW, st).Resolve)
+		if taskRunner != nil {
+			taskRunner.Register(taskrunner.AgentNetworkTask, taskrunner.AgentNetworkHandler(agentGW, st))
+		}
 	}
 
 	// Clusters registered at runtime through the web UI persist in the
@@ -248,6 +265,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		agentTLS:     agentTLS,
 		remoteWrite:  remoteWriter,
 		metricsQuery: queryProxy,
+		taskRunner:   taskRunner,
 	}, nil
 }
 
@@ -264,6 +282,11 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	a.logger.Info("http server listening", "address", listener.Addr().String())
+
+	if a.taskRunner != nil {
+		go a.taskRunner.Run(ctx)
+		a.logger.Info("host task dispatcher running", "worker", a.taskRunner.Worker())
+	}
 
 	serverCount := 1
 	errCh := make(chan error, 2)

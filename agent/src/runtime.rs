@@ -26,11 +26,26 @@ use crate::snapshot;
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Run the agent forever, reconnecting with exponential backoff.
-pub async fn run(state_dir: &Path, helper: &Path, ebpf_object: Option<&Path>) -> Result<()> {
+pub async fn run(
+    state_dir: &Path,
+    helper: &Path,
+    ebpf_object: Option<&Path>,
+    metrics: Option<crate::metrics_server::ServeConfig>,
+) -> Result<()> {
     let bootstrap_ca = state_dir.join("identity/ca.pem");
+    let (identity, files) = Identity::load(state_dir)?;
+    if let Err(err) = crate::renew::renew_if_needed(&identity, &files, state_dir).await {
+        warn!(error = %err, "certificate renewal failed; continuing with the current certificate");
+    }
     let (identity, files) = Identity::load(state_dir)?;
     let tls = client_tls(&files.ca_pem, &files.cert_pem, &files.key_pem)?;
     let connect_url = websocket_url(&identity.center_url)?;
+    let latest = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let advertise = metrics.as_ref().map(|config| config.advertise.clone());
+    if let Some(config) = metrics {
+        let latest = latest.clone();
+        tokio::spawn(crate::metrics_server::serve(config, latest));
+    }
 
     let mut backoff = Duration::from_secs(1);
     loop {
@@ -41,6 +56,8 @@ pub async fn run(state_dir: &Path, helper: &Path, ebpf_object: Option<&Path>) ->
             helper,
             &bootstrap_ca,
             ebpf_object,
+            &latest,
+            advertise.as_deref(),
         )
         .await
         {
@@ -94,6 +111,7 @@ fn websocket_url(center_url: &str) -> Result<String> {
     Ok(url.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn session(
     url: &str,
     identity: &Identity,
@@ -101,6 +119,8 @@ async fn session(
     helper: &Path,
     bootstrap_ca: &Path,
     ebpf_object: Option<&Path>,
+    latest: &crate::metrics_server::Latest,
+    advertise: Option<&str>,
 ) -> Result<()> {
     let (mut ws, _) = tokio::time::timeout(
         Duration::from_secs(10),
@@ -122,7 +142,12 @@ async fn session(
     };
     send(&mut ws, mk_envelope(envelope::Body::Hello(hello))).await?;
 
-    let current_facts = facts::collect().await;
+    let mut current_facts = facts::collect().await;
+    if let Some(address) = advertise {
+        current_facts
+            .extra
+            .insert("metrics_address".into(), address.to_string());
+    }
     send(
         &mut ws,
         mk_envelope(envelope::Body::Facts(current_facts.to_proto())),
@@ -150,6 +175,9 @@ async fn session(
             }
             _ = telemetry_tick.tick() => {
                 let batch = telemetry.collect(&identity.agent_id);
+                if let Ok(mut guard) = latest.lock() {
+                    *guard = Some(batch.clone());
+                }
                 send(&mut ws, mk_envelope(envelope::Body::Telemetry(batch))).await?;
             }
             message = ws.next() => {

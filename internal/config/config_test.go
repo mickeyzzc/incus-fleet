@@ -524,3 +524,29 @@ func TestMetricsExternalDefaultsAndValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestHAConfigDefaultsAndValidation(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.applyDefaults()
+	if cfg.HA.Lease != "30s" || cfg.HA.Interval != "2s" || cfg.HA.Enabled {
+		t.Fatalf("ha defaults = %#v", cfg.HA)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate(defaults) error = %v", err)
+	}
+	cases := []HAConfig{
+		{Lease: "1s"},
+		{Lease: "2h"},
+		{Interval: "10ms"},
+		{Interval: "2m"},
+		{Enabled: true, WorkerID: "bad worker"},
+	}
+	for _, ha := range cases {
+		cfg := minimalConfig()
+		cfg.applyDefaults()
+		cfg.HA = ha
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("Validate(%#v) expected error", ha)
+		}
+	}
+}

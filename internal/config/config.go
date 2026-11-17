@@ -23,6 +23,7 @@ type Config struct {
 	NodeAccess  NodeAccess    `yaml:"node_access"`
 	Agent       AgentConfig   `yaml:"agent"`
 	Metrics     MetricsConfig `yaml:"metrics"`
+	HA          HAConfig      `yaml:"ha"`
 	LocalMember string        `yaml:"local_member"`
 	Clusters    []Cluster     `yaml:"clusters"`
 }
@@ -36,6 +37,15 @@ type AgentConfig struct {
 	TLSKey   string `yaml:"tls_key"`
 	ClientCA string `yaml:"client_ca"`
 	CAKey    string `yaml:"ca_key"`
+}
+
+// HAConfig controls the background host-task dispatcher. Multiple center
+// instances can share one PostgreSQL database.
+type HAConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	WorkerID string `yaml:"worker_id"`
+	Lease    string `yaml:"lease"`
+	Interval string `yaml:"interval"`
 }
 
 // MetricsConfig controls the center-side one-hour telemetry buffer.
@@ -245,6 +255,12 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Metrics.HTTPSD.Mode) == "" {
 		c.Metrics.HTTPSD.Mode = "proxy"
 	}
+	if strings.TrimSpace(c.HA.Lease) == "" {
+		c.HA.Lease = "30s"
+	}
+	if strings.TrimSpace(c.HA.Interval) == "" {
+		c.HA.Interval = "2s"
+	}
 
 	for i := range c.Clusters {
 		if c.Clusters[i].Project == "" {
@@ -284,6 +300,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.Metrics.validate(); err != nil {
+		return err
+	}
+	if err := c.HA.validate(); err != nil {
 		return err
 	}
 	if err := c.NodeAccess.validate(); err != nil {
@@ -458,6 +477,26 @@ func (a AgentConfig) validate() error {
 	return nil
 }
 
+func (h HAConfig) validate() error {
+	if strings.TrimSpace(h.Lease) != "" {
+		lease, err := time.ParseDuration(strings.TrimSpace(h.Lease))
+		if err != nil || lease < 5*time.Second || lease > time.Hour {
+			return fmt.Errorf("config: ha.lease %q must be a duration between 5s and 1h", h.Lease)
+		}
+	}
+	if strings.TrimSpace(h.Interval) != "" {
+		interval, err := time.ParseDuration(strings.TrimSpace(h.Interval))
+		if err != nil || interval < 100*time.Millisecond || interval > time.Minute {
+			return fmt.Errorf("config: ha.interval %q must be a duration between 100ms and 1m", h.Interval)
+		}
+	}
+	if h.Enabled && strings.ContainsAny(h.WorkerID, " \t\n") {
+		return fmt.Errorf("config: ha.worker_id must not contain whitespace")
+	}
+
+	return nil
+}
+
 func (m MetricsConfig) validate() error {
 	if strings.TrimSpace(m.Retention) != "" {
 		retention, err := time.ParseDuration(strings.TrimSpace(m.Retention))
@@ -494,8 +533,8 @@ func (m MetricsConfig) validate() error {
 		if strings.TrimSpace(m.HTTPSD.Token) == "" {
 			return fmt.Errorf("config: metrics.http_sd.token is required")
 		}
-		if m.HTTPSD.Mode != "proxy" {
-			return fmt.Errorf("config: metrics.http_sd.mode must be proxy (direct agent listeners are not implemented yet)")
+		if m.HTTPSD.Mode != "proxy" && m.HTTPSD.Mode != "direct" {
+			return fmt.Errorf("config: metrics.http_sd.mode must be proxy or direct")
 		}
 		if m.HTTPSD.PublicURL != "" {
 			if _, err := url.ParseRequestURI(m.HTTPSD.PublicURL); err != nil {

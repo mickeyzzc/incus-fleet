@@ -545,3 +545,133 @@ func TestIssueCertificate(t *testing.T) {
 		t.Fatal("IssueCertificate(nil CA) expected error")
 	}
 }
+
+func TestRenewCertificate(t *testing.T) {
+	ca := mustTestCA(t)
+	st := openAgentStore(t)
+	gw := New(st, ca, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := httptest.NewUnstartedServer(gw.Handler())
+	srv.TLS = &tls.Config{ClientAuth: tls.VerifyClientCertIfGiven, ClientCAs: ca.Pool()}
+	srv.StartTLS()
+	defer srv.Close()
+
+	pubPEM, keyPEM := agentKeyPair(t)
+	block, _ := pem.Decode(pubPEM)
+	pub, _ := x509.ParsePKIXPublicKey(block.Bytes)
+	certPEM, fingerprint, expires, err := ca.IssueAgent("agent-1", "c1", "node-a", pub, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := &store.Agent{
+		ID: "agent-1", Cluster: "c1", Member: "node-a", Status: store.AgentOnline,
+		CertFingerprint: fingerprint, CertNotAfter: expires, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := st.UpsertAgent(context.Background(), agent); err != nil {
+		t.Fatal(err)
+	}
+	clientCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		RootCAs: pool, Certificates: []tls.Certificate{clientCert}, MinVersion: tls.VersionTLS12,
+	}}}
+
+	body, _ := json.Marshal(map[string]string{"public_key": string(pubPEM)})
+	resp, err := client.Post(srv.URL+"/api/v1/agent/renew", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("renew status = %d body=%s", resp.StatusCode, data)
+	}
+	var renewed enrollmentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&renewed); err != nil {
+		t.Fatal(err)
+	}
+	if renewed.Certificate == "" || renewed.ExpiresAt.IsZero() {
+		t.Fatalf("renew response = %#v", renewed)
+	}
+	updated, _ := st.GetAgent(context.Background(), "agent-1")
+	if updated.CertFingerprint == fingerprint || updated.CertFingerprint == "" {
+		t.Fatalf("fingerprint not rotated: %q", updated.CertFingerprint)
+	}
+
+	renewedCert, err := tls.X509KeyPair([]byte(renewed.Certificate), keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Transport.(*http.Transport).TLSClientConfig.Certificates = []tls.Certificate{renewedCert}
+	client.CloseIdleConnections()
+
+	malformed, err := client.Post(srv.URL+"/api/v1/agent/renew", "application/json", strings.NewReader("{bad"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = malformed.Body.Close()
+	if malformed.StatusCode != http.StatusBadRequest {
+		t.Fatalf("malformed status = %d", malformed.StatusCode)
+	}
+	empty, err := client.Post(srv.URL+"/api/v1/agent/renew", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = empty.Body.Close()
+	if empty.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty key status = %d", empty.StatusCode)
+	}
+
+	bad, _ := json.Marshal(map[string]string{"public_key": "bad"})
+	resp, err = client.Post(srv.URL+"/api/v1/agent/renew", "application/json", bytes.NewReader(bad))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad key status = %d", resp.StatusCode)
+	}
+
+	if err := st.RevokeAgent(context.Background(), "agent-1"); err != nil {
+		t.Fatal(err)
+	}
+	resp, err = client.Post(srv.URL+"/api/v1/agent/renew", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("revoked status = %d", resp.StatusCode)
+	}
+
+	noCert, err := srv.Client().Post(srv.URL+"/api/v1/agent/renew", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = noCert.Body.Close()
+	if noCert.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no cert status = %d", noCert.StatusCode)
+	}
+}
+
+func TestRenewBranches(t *testing.T) {
+	disabled := New(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/renew", strings.NewReader("{}"))
+	disabled.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("disabled renew = %d", rec.Code)
+	}
+
+	ca := mustTestCA(t)
+	gw := New(openAgentStore(t), ca, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/agent/renew", strings.NewReader("{}"))
+	gw.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no cert renew = %d", rec.Code)
+	}
+}

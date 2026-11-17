@@ -137,6 +137,7 @@ func (g *Gateway) TLSConfig(server tls.Certificate) *tls.Config {
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/agent/enroll", g.enroll)
+	mux.HandleFunc("POST /api/v1/agent/renew", g.renew)
 	mux.HandleFunc("GET /api/v1/agent/connect", g.connect)
 	return mux
 }
@@ -241,6 +242,64 @@ func (g *Gateway) enroll(w http.ResponseWriter, r *http.Request) {
 		Certificate: string(certPEM),
 		CA:          string(g.ca.CertPEM()),
 		ExpiresAt:   expires,
+	})
+}
+
+func (g *Gateway) renew(w http.ResponseWriter, r *http.Request) {
+	if g.ca == nil || g.store == nil {
+		writeAgentError(w, http.StatusServiceUnavailable, "unavailable", "agent gateway is not configured")
+		return
+	}
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		writeAgentError(w, http.StatusUnauthorized, "invalid_certificate", "a client certificate is required")
+		return
+	}
+	cert := r.TLS.PeerCertificates[0]
+	agentID := strings.TrimSpace(cert.Subject.CommonName)
+	agent, err := g.store.GetAgent(r.Context(), agentID)
+	if err != nil {
+		writeAgentError(w, http.StatusForbidden, "unknown_agent", "agent is not enrolled")
+		return
+	}
+	if agent.Status == store.AgentRevoked {
+		writeAgentError(w, http.StatusForbidden, "revoked", "agent is revoked")
+		return
+	}
+	if agent.CertFingerprint != "" && agent.CertFingerprint != Fingerprint(cert) {
+		writeAgentError(w, http.StatusForbidden, "invalid_certificate", "certificate does not match the registration")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxEnrollBody)
+	var req struct {
+		PublicKey string `json:"public_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.PublicKey) == "" {
+		writeAgentError(w, http.StatusBadRequest, "invalid_request", "public_key is required")
+		return
+	}
+	publicKey, err := parsePublicKey(req.PublicKey)
+	if err != nil {
+		writeAgentError(w, http.StatusBadRequest, "invalid_request", "public_key is not a valid PKIX PEM public key")
+		return
+	}
+	certPEM, fingerprint, expires, err := g.ca.IssueAgent(agent.ID, agent.Cluster, agent.Member, publicKey, g.certTTL)
+	if err != nil {
+		g.logger.Error("renew agent certificate", "error", err)
+		writeAgentError(w, http.StatusInternalServerError, "internal_error", "failed to issue certificate")
+		return
+	}
+	agent.CertFingerprint = fingerprint
+	agent.CertNotAfter = expires
+	agent.UpdatedAt = time.Now().UTC()
+	if err := g.store.UpsertAgent(r.Context(), agent); err != nil {
+		writeAgentError(w, http.StatusInternalServerError, "internal_error", "failed to store certificate")
+		return
+	}
+
+	writeAgentJSON(w, http.StatusOK, enrollmentResponse{
+		AgentID: agent.ID, Cluster: agent.Cluster, Member: agent.Member,
+		Certificate: string(certPEM), CA: string(g.ca.CertPEM()), ExpiresAt: expires,
 	})
 }
 

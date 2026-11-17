@@ -50,9 +50,17 @@ database:
 #     type: prometheus
 #   http_sd:
 #     enabled: false
-#     mode: proxy
+#     mode: proxy             # proxy | direct (direct needs agent --metrics-listen)
 #     token: replace-with-a-random-token
 #     public_url: https://fleet.example
+
+# Optional HA dispatcher for queued async host tasks. Use PostgreSQL when more
+# than one center instance runs the dispatcher.
+# ha:
+#   enabled: false
+#   worker_id: app-a
+#   lease: 30s
+#   interval: 2s
 
 clusters:
   - name: c1
