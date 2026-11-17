@@ -539,8 +539,10 @@ sudo incus-fleet-agent ebpf-self-test \
 `--debug-cgroups` prints the observed cgroup ids and the inode mapping when attribution looks wrong.
 A non-zero `tcp_retransmits` delta confirms the host tracepoints are attached; block I/O or
 retransmits inside a container should add an `instance=<name> ... tcp_retransmits=...` line. The
-selftest also prints `socket_cgroups` to show how many flow mappings sockops has learned. Both IPv4
-and IPv6 loopback/container flows are supported.
+selftest also prints `socket_cgroups` to show how many flow mappings sockops has learned, plus
+`oom_exact`/`oom_fallback` and the `oom_debug` counters. Both IPv4 and IPv6 loopback/container flows
+are supported. A controlled global OOM inside an isolated VM should report `oom_exact=1`,
+`oom_fallback=0`, and an `instance=<name> ... oom_kills=1` line.
 
 Per-cgroup eBPF metrics are attributed by reading each cgroup's kernel file handle (including nested
 systemd cgroups), so container block I/O becomes `fleet_instance_block_latency_seconds_*` and
@@ -549,11 +551,12 @@ cgroup metrics only. TCP retransmits are attributed via a sockops-maintained IPv
 map, so softirq retransmit timers keep the container attribution. The sockops program is attached
 with `BPF_PROG_ATTACH` + `BPF_F_ALLOW_MULTI`, so it coexists with other sockops programs; if that
 attach mode is unavailable the agent skips sockops instead of replacing anything and falls back to
-current-task attribution. OOM kills are aggregated per instance across nested cgroups. When a
-host-triggered OOM's current cgroup is root, a ring-buffer event carries the victim pid and the agent
-resolves `/proc/<pid>/cgroup` into an instance before the process disappears; otherwise the kill stays
-in the host counter. The host counters remain exact. `fleet_agent_telemetry_mode` reports `ebpf` or
-`procfs`.
+current-task attribution. OOM kills are aggregated per instance across nested cgroups. The OOM
+tracepoint resolves the victim pid to its cgroup in kernel context with `bpf_task_from_pid` and a
+CO-RE read of `task_struct->cgroups->dfl_cgrp->kn->id`, so root-context global OOM is attributed to
+the killed container rather than the OOM killer. Kernels without those kfuncs use the current-cgroup
+path plus a ring-buffer victim pid and `/proc/<pid>/cgroup` fallback. The host counters remain exact.
+`fleet_agent_telemetry_mode` reports `ebpf` or `procfs`.
 
 #### Incus bootstrap through the agent
 

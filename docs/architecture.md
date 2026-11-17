@@ -149,8 +149,9 @@ extra privileges. Optional eBPF adds host TCP retransmit/OOM counters, cgroup-at
 and OOM counters, and a per-cgroup block-latency histogram. A sockops program maps IPv4/IPv6
 flow→cgroup in process context so retransmit tracepoints resolve the owning container even when the
 timer runs in softirq context. Sockops is attached with `BPF_F_ALLOW_MULTI` and never replaces an
-existing program. Root-context OOM events carry the victim pid to userspace for `/proc` cgroup
-resolution. Cgroup ids are resolved through each
+existing program. The OOM tracepoint resolves the victim task's cgroup with `bpf_task_from_pid` and a
+CO-RE read of the task/cgroup path, so root-context global OOM is attributed exactly; kernels without
+these kfuncs keep the ring-buffer `/proc` fallback. Cgroup ids are resolved through each
 cgroup directory's kernel file handle, including nested systemd cgroups. When the object, BTF, or
 capabilities are missing it logs the reason and falls back to procfs/cgroup.
 

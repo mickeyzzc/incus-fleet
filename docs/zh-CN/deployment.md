@@ -523,8 +523,10 @@ sudo incus-fleet-agent ebpf-self-test \
 
 归因异常时用 `--debug-cgroups` 打印观测到的 cgroup id 和映射。人为丢包时 `tcp_retransmits`
 有增量说明主机 tracepoint 已挂载；容器内 block I/O 或重传应增加 `instance=<name> ...
-tcp_retransmits=...` 行。selftest 还会打印 `socket_cgroups`，表示 sockops 已学习的 flow 映射数量。
-IPv4 和 IPv6 的 loopback/容器 flow 均受支持。
+tcp_retransmits=...` 行。selftest 还会打印 `socket_cgroups`（sockops 已学习的 flow 映射数量）、
+`oom_exact`/`oom_fallback` 和 `oom_debug` 计数。IPv4 和 IPv6 的 loopback/容器 flow 均受支持。
+在隔离 VM 中制造受控全局 OOM 时，应看到 `oom_exact=1`、`oom_fallback=0` 和
+`instance=<name> ... oom_kills=1`。
 
 per-cgroup eBPF 指标通过读取每个 cgroup 的内核 file handle（包括嵌套的 systemd cgroup）归因，
 容器 block I/O 会变成 `fleet_instance_block_latency_seconds_*`，以及重传/OOM 计数器。block 延迟
@@ -532,8 +534,10 @@ bucket 使用 2 的幂纳秒。VM 只做宿主侧 cgroup 指标。TCP 重传归�
 通过 sockops 维护的 IPv4/IPv6 flow→cgroup 映射归因，softirq 中的重传定时器仍能保持容器归因。
 sockops 使用 `BPF_PROG_ATTACH` + `BPF_F_ALLOW_MULTI` 挂载，可与其他 sockops 程序共存；如果内核不
 支持该模式，agent 会跳过 sockops 而不是替换现有程序，并回退当前任务归因。OOM kill 按实例聚合
-嵌套 cgroup；主机触发的全局 OOM 若当前 cgroup 为 root，会通过 ring buffer 携带 victim pid，在
-进程消失前解析 `/proc/<pid>/cgroup` 归因到实例，否则只保留主机计数。主机计数器保持精确。
+嵌套 cgroup。OOM tracepoint 在内核态通过 `bpf_task_from_pid` 和 CO-RE 读取
+`task_struct->cgroups->dfl_cgrp->kn->id`，把 victim pid 精确归因到所属 cgroup，因此 root 上下文的
+全局 OOM 会归到被杀的容器而不是 OOM killer。没有这些 kfunc 的内核使用当前 cgroup 路径，并通过
+ring buffer 携带 victim pid，以 `/proc/<pid>/cgroup` 回退。主机计数器保持精确。
 `fleet_agent_telemetry_mode` 报告 `ebpf` 或 `procfs`。
 
 #### 通过 agent 引导 Incus

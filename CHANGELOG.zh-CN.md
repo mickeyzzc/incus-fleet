@@ -55,7 +55,8 @@
   新增 `agent.bootstrap` 与 `agent.snapshot` handler。
 - sockops flow→cgroup 映射实现可靠的 IPv4/IPv6 TCP 重传归因，并用容器丢包验证；使用
   `BPF_F_ALLOW_MULTI` 挂载，不会替换已有 sockops 程序。OOM 计数按实例聚合；root 上下文的全局
-  OOM 通过 ring buffer 解析 victim pid，失败时才回退主机计数。
+  OOM 通过 `bpf_task_from_pid` 和 CO-RE cgroup-id 读取精确归因，并在隔离 VM 中受控验证；没有
+  这些 kfunc 的内核保留 ring-buffer `/proc` 回退。
 - Linux 原生 netlink 链路/地址/fleet 路由写入、可选 detach 网络回滚计时器，以及现有 UI 的
   agent 后端节点网络路由。
 

@@ -419,9 +419,9 @@ series（`fleet_instance_tcp_retransmits_total`、`fleet_instance_oom_kills_tota
 `fleet_instance_block_latency_seconds_bucket|_sum|_count`）。
 `fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}` 表示当前路径。block 延迟 bucket 使用 2 的幂
 纳秒（约 2ns 到 1s）加 `+Inf`。TCP 重传通过 sockops 维护的 IPv4/IPv6 flow→cgroup 映射归因，
-因此即使重传定时器在 softirq 上下文运行也能找到所属容器。OOM kill 从 memcg/OOM 上下文归因，
-并按实例聚合嵌套 cgroup；root 上下文的全局 OOM 会通过 ring buffer 解析 victim pid，解析失败时
-只保留主机计数。
+因此即使重传定时器在 softirq 上下文运行也能找到所属容器。OOM kill 通过 `bpf_task_from_pid` 和
+CO-RE cgroup-id 读取从 victim pid 归因，memcg OOM 和 root 上下文的全局 OOM 都会落到被杀的实例，
+并按实例聚合嵌套 cgroup。没有这些 kfunc 的内核回退当前 cgroup 和 ring-buffer `/proc` 路径。
 
 ## 外部指标
 

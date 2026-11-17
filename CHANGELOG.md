@@ -61,8 +61,9 @@ All notable changes to this project are documented here. The format follows
   `agent.bootstrap` and `agent.snapshot` handlers.
 - Reliable IPv4/IPv6 TCP retransmit attribution through a sockops flow→cgroup map, validated with
   container packet loss, attached with `BPF_F_ALLOW_MULTI` so existing sockops programs are kept.
-  OOM counters are aggregated per instance; root-context global OOM resolves the victim pid through
-  a ring-buffer event before falling back to the host counter.
+  OOM counters are aggregated per instance; root-context global OOM is attributed exactly through
+  `bpf_task_from_pid` and a CO-RE cgroup-id read, validated with a controlled global OOM in an
+  isolated VM. Kernels without the kfuncs keep the ring-buffer `/proc` fallback.
 - Native Linux netlink for link/address/fleet-route writes, an opt-in detached network rollback
   timer, and agent-backed node network routing for the existing UI.
 
