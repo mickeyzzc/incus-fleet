@@ -90,6 +90,9 @@ enum Command {
         /// Keep the programs attached for this many seconds before exiting.
         #[arg(long, default_value_t = 0)]
         hold_secs: u64,
+        /// Print observed cgroup ids and the inode mapping.
+        #[arg(long)]
+        debug_cgroups: bool,
     },
     /// Print the persisted identity.
     Status {
@@ -166,7 +169,11 @@ async fn main() -> Result<()> {
                 upgrade::restart_service();
             }
         }
-        Command::EbpfSelfTest { object, hold_secs } => {
+        Command::EbpfSelfTest {
+            object,
+            hold_secs,
+            debug_cgroups,
+        } => {
             if !ebpf::available(Some(&object)) {
                 bail!("eBPF object or kernel BTF is unavailable");
             }
@@ -176,9 +183,33 @@ async fn main() -> Result<()> {
             println!("initial_oom_kills={}", initial.oom_kills);
             if hold_secs > 0 {
                 tokio::time::sleep(std::time::Duration::from_secs(hold_secs)).await;
+                if debug_cgroups {
+                    let observed = collector.observed_cgroup_ids();
+                    println!("observed_cgroup_ids={observed:?}");
+                    for (id, name, kind) in collector.cgroup_table_debug() {
+                        println!("cgroup_id={id} instance={name} type={kind}");
+                    }
+                }
                 let final_snapshot = collector.collect();
                 println!("tcp_retransmits={}", final_snapshot.tcp_retransmits);
                 println!("oom_kills={}", final_snapshot.oom_kills);
+                for item in &final_snapshot.instances {
+                    println!(
+                        "instance={} type={} tcp_retransmits={} oom_kills={} block_latency_count={} block_latency_sum_seconds={:.6}",
+                        item.instance,
+                        item.kind,
+                        item.tcp_retransmits,
+                        item.oom_kills,
+                        item.block.count(),
+                        item.block.sum_ns as f64 / 1_000_000_000.0,
+                    );
+                    for (index, count) in item.block.buckets.iter().enumerate() {
+                        if *count > 0 {
+                            let bound = (1u64 << index) as f64 / 1_000_000_000.0;
+                            println!("  block_bucket_le_seconds={bound} count={count}");
+                        }
+                    }
+                }
             }
         }
         Command::Status { state_dir } => {

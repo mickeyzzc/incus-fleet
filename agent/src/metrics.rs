@@ -114,6 +114,7 @@ impl Collector {
 
         let ebpf_snapshot = self.ebpf.as_ref().map(|collector| collector.collect());
         if let Some(snapshot) = ebpf_snapshot {
+            series.extend(snapshot.series(now));
             series.push(counter(
                 "fleet_host_tcp_retransmits_total",
                 HashMap::new(),
