@@ -146,3 +146,79 @@ func mapInstanceState(name string, state *api.InstanceState) *InstanceMetrics {
 
 	return metrics
 }
+
+// TrafficInstance carries the network counters of one instance.
+type TrafficInstance struct {
+	Name      string `json:"name"`
+	Location  string `json:"location,omitempty"`
+	RxBytes   int64  `json:"rx_bytes"`
+	TxBytes   int64  `json:"tx_bytes"`
+	RxPackets int64  `json:"rx_packets"`
+	TxPackets int64  `json:"tx_packets"`
+}
+
+// TrafficTotals aggregates network counters across every running instance
+// of one cluster. Counters are cumulative since boot; callers poll and
+// derive rates from consecutive samples.
+type TrafficTotals struct {
+	At             time.Time         `json:"at"`
+	TotalRxBytes   int64             `json:"total_rx_bytes"`
+	TotalTxBytes   int64             `json:"total_tx_bytes"`
+	TotalRxPackets int64             `json:"total_rx_packets"`
+	TotalTxPackets int64             `json:"total_tx_packets"`
+	Instances      []TrafficInstance `json:"instances"`
+}
+
+// ClusterTraffic samples the network counters of every running instance on
+// one cluster.
+func (s *Service) ClusterTraffic(clusterName string) (*TrafficTotals, error) {
+	summaries, err := s.List(clusterName, api.InstanceTypeAny)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := s.client(clusterName)
+	if err != nil {
+		return nil, err
+	}
+
+	totals := &TrafficTotals{
+		At:        time.Now(),
+		Instances: []TrafficInstance{},
+	}
+
+	for _, item := range summaries {
+		if item.Status != "Running" {
+			continue
+		}
+
+		state, _, err := client.GetInstanceState(item.Name)
+		if err != nil {
+			continue
+		}
+
+		instance := TrafficInstance{Name: item.Name, Location: item.Location}
+		for iface, net := range state.Network {
+			if iface == "lo" {
+				continue
+			}
+
+			instance.RxBytes += int64(net.Counters.BytesReceived)
+			instance.TxBytes += int64(net.Counters.BytesSent)
+			instance.RxPackets += int64(net.Counters.PacketsReceived)
+			instance.TxPackets += int64(net.Counters.PacketsSent)
+		}
+
+		totals.TotalRxBytes += instance.RxBytes
+		totals.TotalTxBytes += instance.TxBytes
+		totals.TotalRxPackets += instance.RxPackets
+		totals.TotalTxPackets += instance.TxPackets
+		totals.Instances = append(totals.Instances, instance)
+	}
+
+	sort.Slice(totals.Instances, func(i, j int) bool {
+		return totals.Instances[i].Name < totals.Instances[j].Name
+	})
+
+	return totals, nil
+}

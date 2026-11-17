@@ -127,3 +127,14 @@ func TestSPICEBridge(t *testing.T) {
 		t.Fatalf("bridge echo = %q", string(reply))
 	}
 }
+
+func TestInstanceSPICERequiresPort(t *testing.T) {
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	cookie := f.login(t)
+
+	// Without the port query parameter the handler rejects before upgrading.
+	rec := f.request(t, http.MethodGet, "/api/v1/clusters/c1/instances/vm-01/spice", nil, cookie, "")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "spice port required") {
+		t.Fatalf("SPICE without port = %d body=%s", rec.Code, rec.Body.String())
+	}
+}

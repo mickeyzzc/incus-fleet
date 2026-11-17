@@ -1,0 +1,23 @@
+# Sudo whitelist for incus-fleet node network management.
+#
+# Install as /etc/sudoers.d/incus-fleet-nodesudoers with mode 0440 root:root:
+#   install -m 0440 -o root -g root deploy/nodesudoers /etc/sudoers.d/incus-fleet-nodesudoers
+#
+# The incus-fleet service runs unprivileged. The node network page performs a
+# narrow set of host operations through `sudo -n` against exactly these
+# binaries; anything else the service tries to exec fails closed.
+#
+# `tee` is restricted to the two configuration files nodenet writes: the
+# ifupdown snippet per interface and the fleet-managed wpa_supplicant config.
+# Interface names are validated against ^[a-zA-Z0-9._@-]{1,15}$ before use, so
+# the wildcard cannot be steered outside /etc/network/interfaces.d.
+
+incus-fleet ALL=(root) NOPASSWD: \
+    /usr/bin/ip, \
+    /usr/sbin/nft, \
+    /usr/sbin/iw, \
+    /usr/sbin/dhcpcd, \
+    /usr/sbin/wpa_supplicant, \
+    /usr/bin/hostname, \
+    /usr/bin/tee /etc/network/interfaces.d/*, \
+    /usr/bin/tee /etc/wpa_supplicant/fleet.conf

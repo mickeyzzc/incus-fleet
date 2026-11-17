@@ -690,3 +690,54 @@ describe('ApiClient remaining documented endpoints', () => {
     )
   })
 })
+
+describe('ApiClient node network and cluster registration endpoints', () => {
+  it('hits every node network endpoint', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ host: 'n1', nics: [] }))
+
+    await client.nodeSnapshot()
+    await client.nodeSnapshot('wlan0')
+    await client.nodeNICState('eth0', false)
+    await client.nodeApplyAddress('eth0', { dhcp: false, address: '10.62.0.50', persist: true })
+    await client.nodeWifiConnect('wlan0', 'OfficeWiFi', 'secret')
+    await client.nodeAddRoute('10.63.0.0/24', '10.62.0.1', 'eth0')
+    await client.nodeDeleteRoute('10.63.0.0/24')
+    await client.nodeAddFirewallRule({ port: 22, proto: 'tcp', action: 'accept', comment: 'ssh' })
+    await client.nodeDeleteFirewallRule('42')
+
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0]))
+    expect(urls).toContain('https://fleet.local/api/v1/node')
+    expect(urls).toContain('https://fleet.local/api/v1/node?wifi=wlan0')
+    expect(urls).toContain('https://fleet.local/api/v1/node/networks/eth0/state')
+    expect(urls).toContain('https://fleet.local/api/v1/node/networks/eth0')
+    expect(urls).toContain('https://fleet.local/api/v1/node/networks/wlan0/wifi')
+    expect(urls).toContain('https://fleet.local/api/v1/node/routes')
+    expect(urls).toContain('https://fleet.local/api/v1/node/routes/10.63.0.0%2F24')
+    expect(urls).toContain('https://fleet.local/api/v1/node/firewall')
+    expect(urls).toContain('https://fleet.local/api/v1/node/firewall/42')
+
+    const methods = fetchImpl.mock.calls.map((c) => (c[1] as RequestInit | undefined)?.method)
+    expect(methods).toContain('PATCH')
+    expect(methods).toContain('DELETE')
+  })
+
+  it('hits traffic and cluster registration endpoints', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ rx_bytes: 1, tx_bytes: 2 }))
+
+    const traffic = await client.clusterTraffic('c1')
+    expect(traffic).toMatchObject({ rx_bytes: 1, tx_bytes: 2 })
+
+    await client.registerCluster({
+      name: 'c64',
+      endpoint: 'https://10.0.0.1:8443',
+      tls_cert: 'cert',
+      tls_key: 'key',
+    })
+    await client.unregisterCluster('c64')
+
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0]))
+    expect(urls).toContain('https://fleet.local/api/v1/clusters/c1/traffic')
+    expect(urls).toContain('https://fleet.local/api/v1/clusters')
+    expect(urls).toContain('https://fleet.local/api/v1/clusters/c64')
+  })
+})

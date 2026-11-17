@@ -584,3 +584,32 @@ func TestClampUint64ToInt64(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateRootDiskFallsBackToDefaultPool(t *testing.T) {
+	// The instance has no root device entry; the update must synthesize one
+	// and fall back to the default pool (expandedValue fallback branch).
+	srv := &incusfake.Server{
+		Instance: &api.Instance{
+			Name:            "vm1",
+			Type:            "virtual-machine",
+			Status:          "Stopped",
+			StatusCode:      api.Stopped,
+			ExpandedDevices: api.DevicesMap{},
+		},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	size := "30GiB"
+	if _, err := svc.Update(context.Background(), "c1", "vm1", UpdateRequest{RootDiskSize: &size}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	args := srv.UpdateArgs()
+	if len(args) != 1 {
+		t.Fatalf("UpdateArgs() = %#v", args)
+	}
+	root := args[0].Instance.Devices["root"]
+	if root["size"] != "30GiB" || root["pool"] != "default" || root["path"] != "/" {
+		t.Fatalf("root = %#v", root)
+	}
+}

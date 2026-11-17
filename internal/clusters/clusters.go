@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 
 	incus "github.com/lxc/incus/v7/client"
@@ -616,4 +617,67 @@ func (c *Connection) Summary() Summary {
 	}
 
 	return summary
+}
+
+// Register connects to a new cluster at runtime and adds it to the manager.
+// The caller persists the cluster configuration.
+func (m *Manager) Register(ctx context.Context, cfg config.Cluster) (Summary, error) {
+	if strings.TrimSpace(cfg.Name) == "" {
+		return Summary{}, fmt.Errorf("clusters: name is required")
+	}
+
+	m.mu.Lock()
+	if _, exists := m.conns[cfg.Name]; exists {
+		m.mu.Unlock()
+		return Summary{}, fmt.Errorf("clusters: duplicate cluster %q", cfg.Name)
+	}
+	m.mu.Unlock()
+
+	conn := &Connection{cfg: cfg}
+	srv, err := m.dial(ctx, cfg)
+	if err != nil {
+		conn.err = err
+		m.mu.Lock()
+		m.order = append(m.order, cfg.Name)
+		m.conns[cfg.Name] = conn
+		m.mu.Unlock()
+		m.logger.Warn("cluster connection failed", "cluster", cfg.Name, "error", err)
+		return conn.Summary(), fmt.Errorf("clusters: register %s: %w", cfg.Name, err)
+	}
+
+	conn.reconnect(ctx, srv)
+
+	m.mu.Lock()
+	m.order = append(m.order, cfg.Name)
+	m.conns[cfg.Name] = conn
+	m.mu.Unlock()
+
+	m.logger.Info("cluster registered", "cluster", cfg.Name)
+	return conn.Summary(), nil
+}
+
+// Unregister removes one cluster from the manager. The caller handles
+// persistence.
+func (m *Manager) Unregister(name string) error {
+	m.mu.Lock()
+	conn, exists := m.conns[name]
+	if !exists {
+		m.mu.Unlock()
+		return fmt.Errorf("clusters: %w: %s", ErrUnknownCluster, name)
+	}
+
+	order := make([]string, 0, len(m.order))
+	for _, item := range m.order {
+		if item != name {
+			order = append(order, item)
+		}
+	}
+	m.order = order
+	delete(m.conns, name)
+	m.mu.Unlock()
+
+	conn.disconnect()
+	m.logger.Info("cluster unregistered", "cluster", name)
+
+	return nil
 }

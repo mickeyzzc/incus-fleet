@@ -20,6 +20,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
+	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 
 	"github.com/lxc/incus/v7/shared/api"
@@ -36,6 +37,8 @@ type Deps struct {
 	Instances  *instances.Service
 	Assets     *assets.Service
 	Migrations *migrations.Service
+	Store      *store.SQLStore
+	NodeNet    *nodenet.Service
 	Auth       *auth.Authenticator
 	StaticFS   fs.FS
 	Logger     *slog.Logger
@@ -48,6 +51,8 @@ type API struct {
 	instances  *instances.Service
 	assets     *assets.Service
 	migrations *migrations.Service
+	store      *store.SQLStore
+	nodenet    *nodenet.Service
 	auth       *auth.Authenticator
 	logger     *slog.Logger
 	version    string
@@ -66,6 +71,8 @@ func New(deps Deps) *API {
 		instances:  deps.Instances,
 		assets:     deps.Assets,
 		migrations: deps.Migrations,
+		store:      deps.Store,
+		nodenet:    deps.NodeNet,
 		auth:       deps.Auth,
 		logger:     logger,
 		version:    deps.Version,
@@ -105,6 +112,19 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /api/v1/clusters/{cluster}/images/{fingerprint}/copy", a.requireAuth(http.HandlerFunc(a.copyImage)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/images/{fingerprint}", a.requireAuth(http.HandlerFunc(a.deleteImage)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/resources", a.requireAuth(http.HandlerFunc(a.getResources)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/traffic", a.requireAuth(http.HandlerFunc(a.clusterTraffic)))
+	mux.Handle("POST /api/v1/clusters", a.requireAuth(http.HandlerFunc(a.registerCluster)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}", a.requireAuth(http.HandlerFunc(a.unregisterCluster)))
+	mux.Handle("GET /api/v1/node", a.requireAuth(http.HandlerFunc(a.nodeSnapshot)))
+	mux.Handle("POST /api/v1/node/networks/{name}/state", a.requireAuth(http.HandlerFunc(a.nodeNICState)))
+	mux.Handle("PATCH /api/v1/node/networks/{name}", a.requireAuth(http.HandlerFunc(a.nodeApplyAddress)))
+	mux.Handle("POST /api/v1/node/networks/{name}/wifi", a.requireAuth(http.HandlerFunc(a.nodeWifiConnect)))
+	mux.Handle("GET /api/v1/node/routes", a.requireAuth(http.HandlerFunc(a.nodeRoutes)))
+	mux.Handle("POST /api/v1/node/routes", a.requireAuth(http.HandlerFunc(a.nodeAddRoute)))
+	mux.Handle("DELETE /api/v1/node/routes/{destination}", a.requireAuth(http.HandlerFunc(a.nodeDeleteRoute)))
+	mux.Handle("GET /api/v1/node/firewall", a.requireAuth(http.HandlerFunc(a.nodeFirewall)))
+	mux.Handle("POST /api/v1/node/firewall", a.requireAuth(http.HandlerFunc(a.nodeAddFirewallRule)))
+	mux.Handle("DELETE /api/v1/node/firewall/{handle}", a.requireAuth(http.HandlerFunc(a.nodeDeleteFirewallRule)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.listSnapshots)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.createSnapshot)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore", a.requireAuth(http.HandlerFunc(a.restoreSnapshot)))
@@ -781,7 +801,8 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 
 	switch {
 	case errors.Is(err, migrations.ErrInvalidRequest),
-		errors.Is(err, instances.ErrInvalidRequest):
+		errors.Is(err, instances.ErrInvalidRequest),
+		errors.Is(err, nodenet.ErrInvalidRequest):
 		status, code = http.StatusBadRequest, "invalid_request"
 	case errors.Is(err, migrations.ErrConflict):
 		status, code = http.StatusConflict, "conflict"
@@ -792,6 +813,8 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, clusters.ErrUnavailable):
 		status, code = http.StatusServiceUnavailable, "cluster_unavailable"
+	case errors.Is(err, nodenet.ErrUnavailable):
+		status, code = http.StatusServiceUnavailable, "node_unavailable"
 	}
 
 	if status >= 500 {

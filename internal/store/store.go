@@ -143,6 +143,10 @@ CREATE TABLE IF NOT EXISTS migrations (
 		return fmt.Errorf("store: create asset schema: %w", err)
 	}
 
+	if err := s.migrateClusters(ctx); err != nil {
+		return err
+	}
+
 	return nil
 }
 

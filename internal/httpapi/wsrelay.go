@@ -72,6 +72,29 @@ func relayTerminal(ctx context.Context, browser *websocket.Conn, op incus.Operat
 
 	first := <-done
 
+	// Best-effort teardown of the remote operation. When a client vanishes
+	// the container-side console session can outlive the websocket and leave
+	// a forkconsole process behind; that leaked process holds the console
+	// tty and makes every future attach fail with "attaching to the
+	// container failed". Cancelling the operation kills it.
+	if cancelErr := op.Cancel(); cancelErr != nil {
+		debugf("relay: operation cancel: %v", cancelErr)
+	}
+
+	// Send websocket close frames before dropping the sockets. A bare TCP
+	// FIN looks like an abnormal closure (1006) to incusd, and its console
+	// handler then leaves the container-side forkconsole process running.
+	closeFrame := func(conn *websocket.Conn) {
+		deadline := time.Now().Add(time.Second)
+		_ = conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), deadline)
+	}
+	closeFrame(data)
+	closeFrame(browser)
+	if controlConn != nil {
+		closeFrame(controlConn)
+	}
+
 	_ = browser.Close()
 	_ = data.Close()
 	if controlConn != nil {

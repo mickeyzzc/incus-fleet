@@ -28,6 +28,10 @@ function submitButton(wrapper: ReturnType<typeof mountDialog>) {
   return button
 }
 
+function vmOf(wrapper: { vm: unknown }): any {
+  return wrapper.vm
+}
+
 describe('MigrateDialog', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -187,7 +191,7 @@ describe('MigrateDialog', () => {
     await flushPromises()
 
     expect(wrapper.findComponent({ name: 'ElSelect' }).props('modelValue')).toBe('c2')
-    wrapper.vm.$emit('update:modelValue', false)
+    vmOf(wrapper).$emit('update:modelValue', false)
     await wrapper.setProps({ modelValue: false })
     await wrapper.setProps({ modelValue: true })
     await flushPromises()

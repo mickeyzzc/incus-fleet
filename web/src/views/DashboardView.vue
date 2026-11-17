@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Refresh, QuestionFilled } from '@element-plus/icons-vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Refresh, QuestionFilled } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
+import ClusterRegisterDialog from '@/components/ClusterRegisterDialog.vue'
 import HelpDialog from '@/components/HelpDialog.vue'
 import StorageBar from '@/components/StorageBar.vue'
-import type { ClusterSummary } from '@/api/types'
+import type { ClusterSummary, ClusterTraffic } from '@/api/types'
+import { api } from '@/api'
 import { useClustersStore } from '@/stores/clusters'
 import { useInstancesStore } from '@/stores/instances'
 import { useMigrationsStore } from '@/stores/migrations'
@@ -19,6 +21,67 @@ const migrations = useMigrationsStore()
 const { t } = useI18n()
 
 const helpDialogOpen = ref(false)
+const registerDialogOpen = ref(false)
+
+// Fleet network traffic: per-cluster cumulative counters with derived rates.
+interface TrafficState {
+  rxRate: number
+  txRate: number
+  rxPacketsRate: number
+  txPacketsRate: number
+  last: ClusterTraffic | null
+  lastAt: number
+}
+
+const traffic = reactive<Record<string, TrafficState>>({})
+let trafficTimer: number | null = null
+const prevSamples: Record<string, { at: number; traffic: ClusterTraffic }> = {}
+
+async function pollTraffic(): Promise<void> {
+  const now = performance.now()
+  for (const cluster of clusters.items) {
+    if (!cluster.online) {
+      continue
+    }
+
+    try {
+      const sample = await api.clusterTraffic(cluster.name)
+      const previous = prevSamples[cluster.name]
+      const state: TrafficState = traffic[cluster.name] ??= { rxRate: 0, txRate: 0, rxPacketsRate: 0, txPacketsRate: 0, last: sample, lastAt: now }
+
+      if (previous) {
+        const seconds = (now - previous.at) / 1000
+        if (seconds >= 1) {
+          state.rxRate = Math.max(0, (sample.total_rx_bytes - previous.traffic.total_rx_bytes) / seconds)
+          state.txRate = Math.max(0, (sample.total_tx_bytes - previous.traffic.total_tx_bytes) / seconds)
+          state.rxPacketsRate = Math.max(0, (sample.total_rx_packets - previous.traffic.total_rx_packets) / seconds)
+          state.txPacketsRate = Math.max(0, (sample.total_tx_packets - previous.traffic.total_tx_packets) / seconds)
+        }
+      }
+      prevSamples[cluster.name] = { at: now, traffic: sample }
+      state.last = sample
+      state.lastAt = now
+    } catch {
+      // A cluster going offline mid-poll is reported by the cards themselves.
+    }
+  }
+}
+
+function startTrafficPolling(): void {
+  if (trafficTimer === null) {
+    void pollTraffic()
+    trafficTimer = window.setInterval(() => void pollTraffic(), 3000)
+  }
+}
+
+function stopTrafficPolling(): void {
+  if (trafficTimer !== null) {
+    window.clearInterval(trafficTimer)
+    trafficTimer = null
+  }
+}
+
+onBeforeUnmount(stopTrafficPolling)
 
 const totalInstances = computed(
   () => clusters.items.reduce((total, cluster) => total + cluster.instances.total, 0),
@@ -80,12 +143,30 @@ const fleetMembers = computed(() =>
   clusters.items.reduce((total, cluster) => total + cluster.members.length, 0),
 )
 
+/** Latest cumulative counters across all online clusters. */
+const trafficTotals = computed(() => {
+  const totals = { rxBytes: 0, txBytes: 0, rxPackets: 0, txPackets: 0 }
+  for (const cluster of clusters.items) {
+    const sample = traffic[cluster.name]?.last
+    if (!sample) {
+      continue
+    }
+    totals.rxBytes += sample.total_rx_bytes
+    totals.txBytes += sample.total_tx_bytes
+    totals.rxPackets += sample.total_rx_packets
+    totals.txPackets += sample.total_tx_packets
+  }
+
+  return totals
+})
+
 onMounted(async () => {
   await Promise.all([
     clusters.fetchAll(),
     instances.fetchAll('any'),
     migrations.fetchAll(20),
   ])
+  startTrafficPolling()
 })
 
 async function refresh(): Promise<void> {
@@ -94,6 +175,27 @@ async function refresh(): Promise<void> {
     instances.fetchAll('any'),
     migrations.fetchAll(20),
   ])
+  startTrafficPolling()
+}
+
+async function removeCluster(name: string): Promise<void> {
+  try {
+    await ElMessageBox.confirm(t('clusterRegister.removeConfirm', { name }), t('clusterRegister.add'), {
+      type: 'warning',
+      confirmButtonText: t('common.delete'),
+      cancelButtonText: t('common.cancel'),
+    })
+  } catch {
+    return
+  }
+
+  try {
+    await api.unregisterCluster(name)
+    ElMessage.success(t('clusterRegister.removed', { name }))
+    await clusters.fetchAll()
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  }
 }
 
 async function reconnect(name: string): Promise<void> {
@@ -132,6 +234,9 @@ function memoryShare(cluster: ClusterSummary): string {
       <div class="page-actions">
         <el-button :icon="Refresh" :loading="clusters.loading" @click="refresh">
           {{ t('common.refresh') }}
+        </el-button>
+        <el-button :icon="Plus" type="primary" @click="registerDialogOpen = true">
+          {{ t('clusterRegister.add') }}
         </el-button>
         <el-button :icon="QuestionFilled" @click="helpDialogOpen = true">
           {{ t('common.help') }}
@@ -245,6 +350,12 @@ function memoryShare(cluster: ClusterSummary): string {
           </el-tag>
         </div>
 
+        <div v-if="traffic[cluster.name]" class="cluster-traffic">
+          <span class="traffic-item">↓ {{ formatBytes(traffic[cluster.name]?.rxRate ?? 0) }}/s</span>
+          <span class="traffic-item">↑ {{ formatBytes(traffic[cluster.name]?.txRate ?? 0) }}/s</span>
+          <span class="traffic-item muted">{{ t('traffic.rxPackets') }} {{ (traffic[cluster.name]?.rxPacketsRate ?? 0).toFixed(0) }}/s · {{ t('traffic.txPackets') }} {{ (traffic[cluster.name]?.txPacketsRate ?? 0).toFixed(0) }}/s</span>
+        </div>
+
         <div class="cluster-actions">
           <router-link :to="{ name: 'cluster', params: { cluster: cluster.name } }">
             <el-button type="primary" plain>{{ t('dashboard.openCluster') }}</el-button>
@@ -254,6 +365,9 @@ function memoryShare(cluster: ClusterSummary): string {
             @click="reconnect(cluster.name)"
           >
             {{ t('common.reconnect') }}
+          </el-button>
+          <el-button link type="danger" @click="removeCluster(cluster.name)">
+            {{ t('common.delete') }}
           </el-button>
         </div>
       </article>
@@ -300,9 +414,15 @@ function memoryShare(cluster: ClusterSummary): string {
             <span class="resource-hint">{{ t('dashboard.running', { count: runningInstances }) }}</span>
           </div>
         </div>
+
+        <div v-if="trafficTotals.rxBytes > 0 || trafficTotals.txBytes > 0" class="traffic-totals">
+          <span class="traffic-item">↓ {{ formatBytes(trafficTotals.rxBytes) }} · {{ trafficTotals.rxPackets.toLocaleString() }} {{ t('traffic.rxPackets') }}</span>
+          <span class="traffic-item">↑ {{ formatBytes(trafficTotals.txBytes) }} · {{ trafficTotals.txPackets.toLocaleString() }} {{ t('traffic.txPackets') }}</span>
+        </div>
       </div>
     </section>
 
+    <ClusterRegisterDialog v-model="registerDialogOpen" @registered="clusters.fetchAll()" />
     <HelpDialog v-model="helpDialogOpen" />
   </div>
 </template>
