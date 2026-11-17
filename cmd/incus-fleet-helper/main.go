@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 )
@@ -39,6 +40,7 @@ type request struct {
 	SSID           string `json:"ssid,omitempty"`
 	Password       string `json:"password,omitempty"`
 	Spec           string `json:"spec,omitempty"`
+	RollbackAfter  int    `json:"rollback_after_seconds,omitempty"`
 }
 
 type response struct {
@@ -67,6 +69,10 @@ type savedState struct {
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
 		fmt.Fprintln(os.Stderr, "usage: incus-fleet-helper < request.json")
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "net-watchdog" {
+		runWatchdog(os.Args[2:])
 		return
 	}
 	if os.Geteuid() != 0 && os.Getenv("INCUS_FLEET_HELPER_ALLOW_NONROOT") != "1" {
@@ -112,7 +118,13 @@ func handleReader(input io.Reader) (response, int) {
 				return failure(req, err), 1
 			}
 		}
-		if err := service.SetNICState(req.Interface, *req.Up); err != nil {
+		var err error
+		if runtime.GOOS == "linux" {
+			err = netlinkSetLink(req.Interface, *req.Up)
+		} else {
+			err = service.SetNICState(req.Interface, *req.Up)
+		}
+		if err != nil {
 			return failure(req, err), 1
 		}
 		return success(req, ""), 0
@@ -128,7 +140,16 @@ func handleReader(input io.Reader) (response, int) {
 		manager := managerFor(req)
 		apply := req
 		apply.Persist = false
-		if err := service.ApplyAddress(ctx, req.Interface, nodenet.AddressRequest{
+		if runtime.GOOS == "linux" && !req.DHCP {
+			if err := netlinkAddAddress(req.Interface, req.Address); err != nil {
+				return failure(req, err), 1
+			}
+			if req.Gateway != "" {
+				if err := netlinkAddDefaultRoute(req.Interface, req.Gateway); err != nil {
+					return failure(req, err), 1
+				}
+			}
+		} else if err := service.ApplyAddress(ctx, req.Interface, nodenet.AddressRequest{
 			DHCP: apply.DHCP, Address: apply.Address, Gateway: apply.Gateway,
 		}); err != nil {
 			return failure(req, err), 1
@@ -148,7 +169,13 @@ func handleReader(input io.Reader) (response, int) {
 				return failure(req, err), 1
 			}
 		}
-		if err := service.AddFleetRoute(req.Destination, req.Gateway, req.Device); err != nil {
+		var err error
+		if runtime.GOOS == "linux" {
+			err = netlinkAddFleetRoute(req.Destination, req.Gateway, req.Device)
+		} else {
+			err = service.AddFleetRoute(req.Destination, req.Gateway, req.Device)
+		}
+		if err != nil {
 			return failure(req, err), 1
 		}
 		return success(req, ""), 0
@@ -158,7 +185,13 @@ func handleReader(input io.Reader) (response, int) {
 				return failure(req, err), 1
 			}
 		}
-		if err := service.DeleteFleetRoute(req.Destination); err != nil {
+		var err error
+		if runtime.GOOS == "linux" {
+			err = netlinkDeleteFleetRoute(req.Destination)
+		} else {
+			err = service.DeleteFleetRoute(req.Destination)
+		}
+		if err != nil {
 			return failure(req, err), 1
 		}
 		return success(req, ""), 0
@@ -207,7 +240,19 @@ func managerFor(req request) nodenet.Manager {
 }
 
 func success(req request, persistence string) response {
+	if isMutation(req.Action) && req.TaskID != "" {
+		startWatchdog(req.TaskID, req.RollbackAfter)
+	}
 	return response{OK: true, Action: req.Action, TaskID: req.TaskID, Backend: "helper", Persistence: persistence}
+}
+
+func isMutation(action string) bool {
+	switch action {
+	case "link-state", "address", "route-add", "route-delete", "firewall-add", "firewall-delete", "wifi-connect":
+		return true
+	default:
+		return false
+	}
 }
 
 func failure(req request, err error) response {

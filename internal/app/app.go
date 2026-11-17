@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mickeyzzc/incus-fleet/internal/agentgw"
+	"github.com/mickeyzzc/incus-fleet/internal/agentops"
 	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
@@ -172,6 +173,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		}
 		agentGW = agentgw.New(st, ca, logger, options...)
 		agentTLS = agentGW.TLSConfig(serverCert)
+		nodeAccess.SetAgentResolver(agentops.New(agentGW, st).Resolve)
 	}
 
 	// Clusters registered at runtime through the web UI persist in the

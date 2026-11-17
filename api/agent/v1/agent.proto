@@ -143,6 +143,7 @@ message NodenetApplySpec {
   string ssid = 16;
   string password = 17;
   string task_id = 18;
+  int32 rollback_after_seconds = 19;
 }
 
 message NodenetApplyResult {

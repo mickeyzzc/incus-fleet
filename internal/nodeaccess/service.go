@@ -40,6 +40,17 @@ func WithDialer(dialer remote.Dialer) Option {
 	return func(s *Service) { s.dialer = dialer }
 }
 
+// WithAgentResolver attaches the optional agent backend.
+func WithAgentResolver(resolver AgentResolver) Option {
+	return func(s *Service) { s.agentResolver = resolver }
+}
+
+// SetAgentResolver attaches the agent backend after construction.
+func (s *Service) SetAgentResolver(resolver AgentResolver) { s.agentResolver = resolver }
+
+// AgentResolver resolves an online agent operator for one member.
+type AgentResolver func(ctx context.Context, cluster, member string) (hostops.Operator, bool)
+
 // Service exposes node network operations for cluster members.
 type Service struct {
 	lookup           ClusterLookup
@@ -47,6 +58,7 @@ type Service struct {
 	localMember      string
 	access           config.NodeAccess
 	dialer           remote.Dialer
+	agentResolver    AgentResolver
 	mode             hostops.Mode
 	sshWriteFallback bool
 }
@@ -91,12 +103,29 @@ func (s *Service) Service(clusterName, memberName string) (*nodenet.Service, str
 }
 
 // Resolve implements hostops.Resolver.
-func (s *Service) Resolve(_ context.Context, clusterName, memberName string, kind hostops.Kind) (hostops.Operator, hostops.Backend, func(), error) {
+func (s *Service) Resolve(ctx context.Context, clusterName, memberName string, kind hostops.Kind) (hostops.Operator, hostops.Backend, func(), error) {
+	member, err := s.findMember(clusterName, memberName)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if member.Name == s.localMember {
+		return s.local, hostops.BackendLocal, func() {}, nil
+	}
+	if s.mode != hostops.ModeSSH && s.mode != hostops.ModeLocal && s.agentResolver != nil {
+		if operator, ok := s.agentResolver(ctx, clusterName, member.Name); ok {
+			return operator, hostops.BackendAgent, func() {}, nil
+		}
+		if s.mode == hostops.ModeAgent {
+			return nil, "", nil, fmt.Errorf("%w: no online agent for %s/%s", hostops.ErrAgentUnavailable, clusterName, member.Name)
+		}
+	} else if s.mode == hostops.ModeAgent {
+		return nil, "", nil, fmt.Errorf("%w: no agent resolver configured", hostops.ErrAgentUnavailable)
+	}
+
 	node, _, backend, closeNode, err := s.resolveNode(clusterName, memberName)
 	if err != nil {
 		return nil, "", nil, err
 	}
-
 	if kind == hostops.Write && backend == hostops.BackendSSH && s.mode == hostops.ModeAuto && !s.sshWriteFallback {
 		closeNode()
 		return nil, "", nil, fmt.Errorf("%w: configure node_access.ssh_write_fallback=true or install the host agent", hostops.ErrSSHWriteDisabled)
@@ -105,27 +134,27 @@ func (s *Service) Resolve(_ context.Context, clusterName, memberName string, kin
 	return node, backend, closeNode, nil
 }
 
-func (s *Service) resolveNode(clusterName, memberName string) (*nodenet.Service, string, hostops.Backend, func(), error) {
+func (s *Service) findMember(clusterName, memberName string) (*clusters.Member, error) {
 	if s.lookup == nil {
-		return nil, "", "", nil, fmt.Errorf("%w: cluster lookup is not configured", nodenet.ErrUnavailable)
+		return nil, fmt.Errorf("%w: cluster lookup is not configured", nodenet.ErrUnavailable)
 	}
-
 	summary, err := s.lookup.Get(clusterName)
 	if err != nil {
-		return nil, "", "", nil, err
+		return nil, err
 	}
-
 	memberName = strings.TrimSpace(memberName)
-	var member *clusters.Member
 	for i := range summary.Members {
 		if summary.Members[i].Name == memberName {
-			member = &summary.Members[i]
-			break
+			return &summary.Members[i], nil
 		}
 	}
+	return nil, fmt.Errorf("%w: %s/%s", ErrUnknownMember, clusterName, memberName)
+}
 
-	if member == nil {
-		return nil, "", "", nil, fmt.Errorf("%w: %s/%s", ErrUnknownMember, clusterName, memberName)
+func (s *Service) resolveNode(clusterName, memberName string) (*nodenet.Service, string, hostops.Backend, func(), error) {
+	member, err := s.findMember(clusterName, memberName)
+	if err != nil {
+		return nil, "", "", nil, err
 	}
 
 	if member.Name == s.localMember {

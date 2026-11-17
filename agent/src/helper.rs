@@ -29,6 +29,7 @@ pub struct HelperRequest {
     pub ssid: String,
     pub password: String,
     pub spec: String,
+    pub rollback_after_seconds: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +72,7 @@ impl HelperRequest {
             ssid: spec.ssid.clone(),
             password: spec.password.clone(),
             spec: String::new(),
+            rollback_after_seconds: spec.rollback_after_seconds,
         }
     }
 }

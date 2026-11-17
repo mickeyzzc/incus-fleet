@@ -8,6 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/lxc/incus/v7 v7.0.2
 	github.com/pkg/sftp v1.13.11
+	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/crypto v0.58.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
@@ -54,6 +55,7 @@ require (
 	github.com/sirupsen/logrus v1.10.2 // indirect
 	github.com/urfave/cli v1.22.17 // indirect
 	github.com/vbatts/go-mtree v0.7.0 // indirect
+	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/zitadel/oidc/v3 v3.51.16 // indirect
 	github.com/zitadel/schema v1.3.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

@@ -493,3 +493,57 @@ func TestResolveUnknownMember(t *testing.T) {
 		t.Fatalf("Resolve(unknown) error = %v", err)
 	}
 }
+
+func TestResolvePrefersOnlineAgent(t *testing.T) {
+	access := testAccess()
+	access.Mode = "auto"
+	agentOperator := nodenet.NewService(&fakeRunner{})
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), access,
+		WithLocalMember("n1"),
+		WithAgentResolver(func(context.Context, string, string) (hostops.Operator, bool) {
+			return agentOperator, true
+		}))
+
+	operator, backend, closeNode, err := service.Resolve(context.Background(), "c1", "n2", hostops.Write)
+	if err != nil {
+		t.Fatalf("Resolve(agent) error = %v", err)
+	}
+	defer closeNode()
+	if operator != agentOperator || backend != hostops.BackendAgent {
+		t.Fatalf("Resolve(agent) = %v, %q", operator, backend)
+	}
+}
+
+func TestResolveAgentModeWithoutResolver(t *testing.T) {
+	access := testAccess()
+	access.Mode = "agent"
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), access, WithLocalMember("n1"))
+	if _, _, _, err := service.Resolve(context.Background(), "c1", "n2", hostops.Read); !errors.Is(err, hostops.ErrAgentUnavailable) {
+		t.Fatalf("Resolve(agent missing) error = %v", err)
+	}
+}
+
+func TestResolveAgentModeNoOnlineAgent(t *testing.T) {
+	access := testAccess()
+	access.Mode = "agent"
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), access,
+		WithLocalMember("n1"),
+		WithAgentResolver(func(context.Context, string, string) (hostops.Operator, bool) { return nil, false }))
+	if _, _, _, err := service.Resolve(context.Background(), "c1", "n2", hostops.Read); !errors.Is(err, hostops.ErrAgentUnavailable) {
+		t.Fatalf("Resolve(agent offline) error = %v", err)
+	}
+}
+
+func TestResolveAutoFallsBackToSSH(t *testing.T) {
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), testAccess(),
+		WithLocalMember("n1"), WithDialer(&fakeDialer{}),
+		WithAgentResolver(func(context.Context, string, string) (hostops.Operator, bool) { return nil, false }))
+	_, backend, closeNode, err := service.Resolve(context.Background(), "c1", "n2", hostops.Read)
+	if err != nil {
+		t.Fatalf("Resolve(auto fallback) error = %v", err)
+	}
+	defer closeNode()
+	if backend != hostops.BackendSSH {
+		t.Fatalf("backend = %q", backend)
+	}
+}

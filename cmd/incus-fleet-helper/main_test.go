@@ -36,3 +36,9 @@ func TestStatePathUsesEnv(t *testing.T) {
 		t.Fatal("rollbackState(missing) expected error")
 	}
 }
+
+func TestWatchdogDelay(t *testing.T) {
+	if watchdogDelay(0) != 0 || watchdogDelay(-1) != 0 || watchdogDelay(300) != 300 {
+		t.Fatalf("watchdogDelay() mismatch")
+	}
+}
