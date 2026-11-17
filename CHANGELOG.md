@@ -38,6 +38,8 @@ All notable changes to this project are documented here. The format follows
   and token-authenticated HTTP service discovery with a center-proxied scrape endpoint.
 - Host-task lease primitives for PostgreSQL/SQLite, agent certificate rotation/revocation APIs,
   signed agent upgrade with automatic rollback, and JSONL/CSV audit export.
+- The host metrics panel can switch between the center ring buffer and the Prometheus/VictoriaMetrics
+  query proxy.
 - Native Linux netlink for link/address/fleet-route writes, an opt-in detached network rollback
   timer, and agent-backed node network routing for the existing UI.
 

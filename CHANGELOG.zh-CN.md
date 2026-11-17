@@ -37,6 +37,7 @@
   鉴权的 HTTP 服务发现和中心代理抓取端点。
 - PostgreSQL/SQLite 主机任务 lease 原语、agent 证书轮换/吊销 API、带自动回滚的签名 agent
   升级，以及 JSONL/CSV 审计导出。
+- 主机指标面板可在中心环形缓冲和 Prometheus/VictoriaMetrics 查询代理之间切换。
 - Linux 原生 netlink 链路/地址/fleet 路由写入、可选 detach 网络回滚计时器，以及现有 UI 的
   agent 后端节点网络路由。
 

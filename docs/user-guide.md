@@ -398,7 +398,9 @@ created from official cloud images become ready a few seconds after boot).
 When the optional Rust host agent is installed, the node detail page adds a **Host metrics**
 panel with CPU, memory, load, uptime, and network counters for the last hour. The center keeps
 these samples in memory only (10-second interval, 360 points); restarting the center clears them.
-Use the API export (`json`, `prometheus`, or `csv`) for longer retention or external systems.
+The panel's **Source** selector can switch between **Center 1h** and **Prometheus/VM** when the
+external query proxy is configured. Use the API export (`json`, `prometheus`, or `csv`) for longer
+retention or external systems.
 
 ### Deeper metrics (roadmap)
 
