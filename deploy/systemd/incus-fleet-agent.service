@@ -8,24 +8,28 @@ Wants=network-online.target
 Type=simple
 User=incus-fleet-agent
 Group=incus-fleet-agent
-StateDirectory=incus-fleet-agent
+StateDirectory=incus-fleet-agent incus-fleet-helper
 StateDirectoryMode=0700
-ExecStart=/usr/local/bin/incus-fleet-agent run --state-dir /var/lib/incus-fleet-agent
+ExecStart=/usr/local/bin/incus-fleet-agent run --state-dir /var/lib/incus-fleet-agent --helper /usr/libexec/incus-fleet-helper
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
 KillSignal=SIGTERM
 
-NoNewPrivileges=yes
+# Keep this off: the helper is invoked through the sudo whitelist in
+# deploy/agent-sudoers. ReadWritePaths carve out the manager config paths and
+# the helper's rollback state directory.
+NoNewPrivileges=false
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=-/etc/network -/etc/systemd/network -/etc/netplan -/etc/NetworkManager/system-connections -/etc/sysconfig/network -/var/lib/incus-fleet-helper
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
-MemoryMax=64M
-CPUQuota=5%
+MemoryMax=128M
+CPUQuota=25%
 TasksMax=64
 
 [Install]

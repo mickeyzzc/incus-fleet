@@ -34,9 +34,10 @@ deps: ## Install Go modules and frontend dependencies
 frontend: ## Build the Vue frontend into web/dist
 	cd web && $(BUN) run build
 
-backend: ## Build the Go binary (requires web/dist)
+backend: ## Build the Go binaries (requires web/dist)
 	mkdir -p bin
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/incus-fleet ./cmd/incus-fleet
+	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/incus-fleet-helper ./cmd/incus-fleet-helper
 
 build: frontend backend ## Build the frontend and backend
 
@@ -103,6 +104,8 @@ release: frontend ## Cross-compile Linux binaries into dist/
 	mkdir -p dist
 	GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o dist/incus-fleet-linux-amd64 ./cmd/incus-fleet
 	GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o dist/incus-fleet-linux-arm64 ./cmd/incus-fleet
+	GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o dist/incus-fleet-helper-linux-amd64 ./cmd/incus-fleet-helper
+	GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o dist/incus-fleet-helper-linux-arm64 ./cmd/incus-fleet-helper
 
 clean: ## Remove build outputs but keep web/dist/.gitkeep
 	rm -rf bin dist coverage.out coverage.html

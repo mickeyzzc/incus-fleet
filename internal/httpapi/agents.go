@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/mickeyzzc/incus-fleet/internal/agentgw"
 	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
@@ -108,6 +110,81 @@ func (a *API) listAgents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 }
 
+// agentNetwork dispatches one allowlisted network mutation to an agent.
+func (a *API) agentNetwork(w http.ResponseWriter, r *http.Request) {
+	if a.agent == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "agent gateway is not enabled")
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "failed to read request body")
+		return
+	}
+	var spec agentpb.NodenetApplySpec
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(body, &spec); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid network request")
+		return
+	}
+	spec.Action = strings.TrimSpace(spec.Action)
+	taskType := agentpb.TaskType_TASK_TYPE_NODENET_APPLY
+	switch spec.Action {
+	case "link-state", "address", "route-add", "route-delete", "firewall-add", "firewall-delete", "wifi-connect":
+	case "confirm":
+		taskType = agentpb.TaskType_TASK_TYPE_NODENET_CONFIRM
+	case "rollback":
+		taskType = agentpb.TaskType_TASK_TYPE_NODENET_ROLLBACK
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", "unsupported network action")
+		return
+	}
+	if (spec.Action == "confirm" || spec.Action == "rollback") && spec.TaskId == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "task_id is required for confirm and rollback")
+		return
+	}
+
+	payload, err := proto.Marshal(&spec)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to encode network request")
+		return
+	}
+	result, err := a.agent.Dispatch(r.Context(), r.PathValue("id"), taskType, payload, 30*time.Second)
+	if err != nil {
+		if errors.Is(err, agentgw.ErrAgentOffline) {
+			writeError(w, http.StatusServiceUnavailable, "agent_offline", "agent is not connected")
+			return
+		}
+		writeError(w, http.StatusGatewayTimeout, "agent_timeout", err.Error())
+		return
+	}
+	if result.State != agentpb.TaskState_TASK_STATE_SUCCEEDED {
+		message := result.Error
+		if message == "" {
+			message = "agent network task failed"
+		}
+		writeError(w, http.StatusBadGateway, "agent_error", message)
+		return
+	}
+
+	var applied agentpb.NodenetApplyResult
+	if err := proto.Unmarshal(result.Payload, &applied); err != nil {
+		writeError(w, http.StatusBadGateway, "agent_error", "agent returned an invalid network result")
+		return
+	}
+	if !applied.Ok {
+		writeError(w, http.StatusBadGateway, "agent_error", applied.Error)
+		return
+	}
+	payloadJSON, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(&applied)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to encode network result")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"result": json.RawMessage(payloadJSON)})
+}
+
 // agentSnapshot dispatches a read-only network snapshot to one agent.
 func (a *API) agentSnapshot(w http.ResponseWriter, r *http.Request) {
 	if a.agent == nil {
@@ -135,7 +212,7 @@ func (a *API) agentSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var snapshot agentpb.NodenetSnapshot
-	if err := protojson.Unmarshal(result.Payload, &snapshot); err != nil {
+	if err := proto.Unmarshal(result.Payload, &snapshot); err != nil {
 		writeError(w, http.StatusBadGateway, "agent_error", "agent returned an invalid snapshot")
 		return
 	}

@@ -16,20 +16,23 @@ use tracing::{info, warn};
 
 use crate::facts;
 use crate::identity::Identity;
-use crate::proto::v1::{Envelope, Heartbeat, Hello, TaskResult, TaskState, envelope};
+use crate::proto::v1::{
+    Envelope, Heartbeat, Hello, NodenetApplyResult, NodenetApplySpec, TaskResult, TaskState,
+    TaskType, envelope,
+};
 use crate::snapshot;
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Run the agent forever, reconnecting with exponential backoff.
-pub async fn run(state_dir: &Path) -> Result<()> {
+pub async fn run(state_dir: &Path, helper: &Path) -> Result<()> {
     let (identity, files) = Identity::load(state_dir)?;
     let tls = client_tls(&files.ca_pem, &files.cert_pem, &files.key_pem)?;
     let connect_url = websocket_url(&identity.center_url)?;
 
     let mut backoff = Duration::from_secs(1);
     loop {
-        match session(&connect_url, &identity, tls.clone()).await {
+        match session(&connect_url, &identity, tls.clone(), helper).await {
             Ok(()) => {
                 info!("agent session closed");
                 backoff = Duration::from_secs(1);
@@ -80,7 +83,12 @@ fn websocket_url(center_url: &str) -> Result<String> {
     Ok(url.to_string())
 }
 
-async fn session(url: &str, identity: &Identity, tls: Arc<ClientConfig>) -> Result<()> {
+async fn session(
+    url: &str,
+    identity: &Identity,
+    tls: Arc<ClientConfig>,
+    helper: &Path,
+) -> Result<()> {
     let (mut ws, _) = tokio::time::timeout(
         Duration::from_secs(10),
         connect_async_tls_with_config(url, None, false, Some(Connector::Rustls(tls))),
@@ -131,7 +139,7 @@ async fn session(url: &str, identity: &Identity, tls: Arc<ClientConfig>) -> Resu
                     WsMessage::Binary(data) => {
                         let envelope = Envelope::decode(data.as_ref()).context("decode envelope")?;
                         if let Some(envelope::Body::Task(task)) = envelope.body {
-                            let result = handle_task(task).await;
+                            let result = handle_task(task, helper).await;
                             send(&mut ws, mk_envelope(envelope::Body::Result(result))).await?;
                         }
                     }
@@ -145,36 +153,95 @@ async fn session(url: &str, identity: &Identity, tls: Arc<ClientConfig>) -> Resu
     Ok(())
 }
 
-async fn handle_task(task: crate::proto::v1::TaskDispatch) -> TaskResult {
+async fn handle_task(task: crate::proto::v1::TaskDispatch, helper: &Path) -> TaskResult {
     let task_id = task.task_id.clone();
-    if task.r#type() != crate::proto::v1::TaskType::NodenetSnapshot {
-        return TaskResult {
+    match task.r#type() {
+        TaskType::NodenetSnapshot => match snapshot::collect().await {
+            Ok(snapshot) => TaskResult {
+                task_id,
+                state: TaskState::Succeeded as i32,
+                payload: snapshot.encode_to_vec(),
+                error_code: String::new(),
+                error: String::new(),
+                at_ms: now_ms(),
+                plan_hash: task.plan_hash,
+            },
+            Err(err) => TaskResult {
+                task_id,
+                state: TaskState::Failed as i32,
+                payload: Vec::new(),
+                error_code: "snapshot_failed".into(),
+                error: err.to_string(),
+                at_ms: now_ms(),
+                plan_hash: task.plan_hash,
+            },
+        },
+        TaskType::NodenetApply | TaskType::NodenetConfirm | TaskType::NodenetRollback => {
+            let mut spec = if task.payload.is_empty() {
+                NodenetApplySpec::default()
+            } else {
+                match NodenetApplySpec::decode(task.payload.as_slice()) {
+                    Ok(spec) => spec,
+                    Err(err) => {
+                        return TaskResult {
+                            task_id,
+                            state: TaskState::Failed as i32,
+                            payload: Vec::new(),
+                            error_code: "invalid_spec".into(),
+                            error: err.to_string(),
+                            at_ms: now_ms(),
+                            plan_hash: task.plan_hash,
+                        };
+                    }
+                }
+            };
+            if spec.task_id.is_empty() {
+                spec.task_id = task.task_id.clone();
+            }
+            let request = crate::helper::HelperRequest::from_spec(&spec);
+            let result =
+                match crate::helper::invoke(helper.to_string_lossy().as_ref(), &request).await {
+                    Ok(response) => NodenetApplyResult {
+                        ok: true,
+                        action: response.action,
+                        task_id: response.task_id,
+                        backend: response.backend,
+                        persistence: response.persistence,
+                        error: String::new(),
+                    },
+                    Err(err) => NodenetApplyResult {
+                        ok: false,
+                        action: spec.action,
+                        task_id: spec.task_id,
+                        backend: "helper".into(),
+                        persistence: String::new(),
+                        error: err.to_string(),
+                    },
+                };
+            TaskResult {
+                task_id,
+                state: if result.ok {
+                    TaskState::Succeeded as i32
+                } else {
+                    TaskState::Failed as i32
+                },
+                payload: result.encode_to_vec(),
+                error_code: if result.ok {
+                    String::new()
+                } else {
+                    "helper_failed".into()
+                },
+                error: result.error.clone(),
+                at_ms: now_ms(),
+                plan_hash: task.plan_hash,
+            }
+        }
+        _ => TaskResult {
             task_id,
             state: TaskState::Failed as i32,
             payload: Vec::new(),
             error_code: "unsupported_task".into(),
             error: "unsupported task type".into(),
-            at_ms: now_ms(),
-            plan_hash: task.plan_hash,
-        };
-    }
-
-    match snapshot::collect().await {
-        Ok(snapshot) => TaskResult {
-            task_id,
-            state: TaskState::Succeeded as i32,
-            payload: snapshot.encode_to_vec(),
-            error_code: String::new(),
-            error: String::new(),
-            at_ms: now_ms(),
-            plan_hash: task.plan_hash,
-        },
-        Err(err) => TaskResult {
-            task_id,
-            state: TaskState::Failed as i32,
-            payload: Vec::new(),
-            error_code: "snapshot_failed".into(),
-            error: err.to_string(),
             at_ms: now_ms(),
             plan_hash: task.plan_hash,
         },

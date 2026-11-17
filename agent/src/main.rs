@@ -1,5 +1,6 @@
 mod enroll;
 mod facts;
+mod helper;
 mod identity;
 mod proto;
 mod runtime;
@@ -44,6 +45,8 @@ enum Command {
     Run {
         #[arg(long, default_value = "/var/lib/incus-fleet-agent")]
         state_dir: PathBuf,
+        #[arg(long, default_value = "/usr/libexec/incus-fleet-helper")]
+        helper: PathBuf,
     },
     /// Print the persisted identity.
     Status {
@@ -75,8 +78,8 @@ async fn main() -> Result<()> {
             info!(agent = %agent_id, "enrolled");
             println!("{agent_id}");
         }
-        Command::Run { state_dir } => {
-            runtime::run(&state_dir).await?;
+        Command::Run { state_dir, helper } => {
+            runtime::run(&state_dir, &helper).await?;
         }
         Command::Status { state_dir } => {
             let (identity, _) = identity::Identity::load(&state_dir)?;

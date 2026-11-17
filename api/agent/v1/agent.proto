@@ -121,6 +121,38 @@ message Error {
   string message = 2;
 }
 
+// NodenetApplySpec is one allowlisted network mutation. The helper validates
+// every field again; the center never sends a shell command.
+message NodenetApplySpec {
+  string action = 1;
+  string interface = 2;
+  bool up = 3;
+  bool dhcp = 4;
+  string address = 5;
+  string gateway = 6;
+  bool persist = 7;
+  string manager = 8;
+  string destination = 9;
+  string device = 10;
+  int32 port = 11;
+  string proto = 12;
+  string firewall_action = 13;
+  string handle = 14;
+  string comment = 15;
+  string ssid = 16;
+  string password = 17;
+  string task_id = 18;
+}
+
+message NodenetApplyResult {
+  bool ok = 1;
+  string action = 2;
+  string task_id = 3;
+  string backend = 4;
+  string persistence = 5;
+  string error = 6;
+}
+
 // NodenetSnapshot is the read-only host network view returned by the agent.
 message NodenetSnapshot {
   string host = 1;

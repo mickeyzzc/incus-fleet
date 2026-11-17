@@ -1,0 +1,6 @@
+# Sudo whitelist for the Incus Fleet host agent.
+#
+# Install as /etc/sudoers.d/incus-fleet-agent with mode 0440 root:root.
+# The unprivileged agent invokes exactly this helper; the helper validates
+# every JSON field and never accepts a shell command.
+incus-fleet-agent ALL=(root) NOPASSWD: /usr/libexec/incus-fleet-helper

@@ -195,3 +195,16 @@ func TestHostHistoryStoreErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestHostTaskCreateError(t *testing.T) {
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	cookie := f.login(t)
+	if err := f.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.request(t, http.MethodPost, "/api/v1/clusters/c1/members/test-node/node/networks/eth0/state",
+		map[string]bool{"up": false}, cookie, "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("task create error = %d body=%s", rec.Code, rec.Body.String())
+	}
+}

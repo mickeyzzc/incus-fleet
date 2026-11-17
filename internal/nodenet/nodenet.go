@@ -34,6 +34,34 @@ type Runner interface {
 	RunStdin(name string, args []string, stdin string) error
 }
 
+// DirectRunner runs commands directly. The helper uses it after sudo has
+// already elevated the process.
+type DirectRunner struct{}
+
+// Run implements Runner.
+func (DirectRunner) Run(name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, resolveBinary(name), args...).CombinedOutput() //nolint:gosec // allowlisted network binary
+	if err != nil {
+		return string(out), err
+	}
+
+	return string(out), nil
+}
+
+// RunStdin implements Runner.
+func (DirectRunner) RunStdin(name string, args []string, stdin string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, resolveBinary(name), args...) //nolint:gosec // allowlisted network binary
+	cmd.Stdin = strings.NewReader(stdin)
+
+	return cmd.Run()
+}
+
 // SudoRunner runs commands through `sudo -n`.
 type SudoRunner struct{}
 
@@ -735,4 +763,45 @@ type TrafficSample struct {
 	Location string            `json:"location,omitempty"`
 	NICs     map[string]uint64 `json:"nics"` // nic -> rx bytes
 	TxBytes  map[string]uint64 `json:"tx"`   // nic -> tx bytes
+}
+
+// AddFleetRoute adds a route owned by fleet (protocol 99). It allows a
+// directly connected route when gateway is empty.
+func (s *Service) AddFleetRoute(destination, gateway, device string) error {
+	if net.ParseIP(strings.SplitN(destination, "/", 2)[0]) == nil {
+		return fmt.Errorf("%w: destination %q is invalid", ErrInvalidRequest, destination)
+	}
+	if device != "" {
+		if err := ValidateName(device); err != nil {
+			return err
+		}
+	}
+	args := []string{"route", "add", destination}
+	if gateway != "" {
+		if net.ParseIP(gateway) == nil {
+			return fmt.Errorf("%w: gateway %q is invalid", ErrInvalidRequest, gateway)
+		}
+		args = append(args, "via", gateway)
+	}
+	if device != "" {
+		args = append(args, "dev", device)
+	}
+	args = append(args, "proto", "99")
+	if _, err := s.run.Run("ip", args...); err != nil {
+		return fmt.Errorf("%w: add fleet route %s: %v", ErrUnavailable, destination, err)
+	}
+
+	return nil
+}
+
+// DeleteFleetRoute removes only a route owned by fleet (protocol 99).
+func (s *Service) DeleteFleetRoute(destination string) error {
+	if net.ParseIP(strings.SplitN(destination, "/", 2)[0]) == nil {
+		return fmt.Errorf("%w: destination %q is invalid", ErrInvalidRequest, destination)
+	}
+	if _, err := s.run.Run("ip", "route", "del", destination, "proto", "99"); err != nil {
+		return fmt.Errorf("%w: delete fleet route %s: %v", ErrUnavailable, destination, err)
+	}
+
+	return nil
 }

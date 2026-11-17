@@ -491,3 +491,46 @@ func TestRouteRunnerFailures(t *testing.T) {
 		t.Fatalf("DeleteRoute() bad destination error = %v", err)
 	}
 }
+
+func TestFleetRouteOwnership(t *testing.T) {
+	runner := &fakeRunner{outputs: map[string]string{}}
+	service := NewService(runner)
+	if err := service.AddFleetRoute("10.0.1.0/24", "10.0.0.1", "eth0"); err != nil {
+		t.Fatalf("AddFleetRoute() error = %v", err)
+	}
+	if len(runner.calls) != 1 || !strings.Contains(runner.calls[0], "proto 99") {
+		t.Fatalf("AddFleetRoute calls = %#v", runner.calls)
+	}
+	if err := service.DeleteFleetRoute("10.0.1.0/24"); err != nil {
+		t.Fatalf("DeleteFleetRoute() error = %v", err)
+	}
+	if !strings.Contains(runner.calls[len(runner.calls)-1], "proto 99") {
+		t.Fatalf("DeleteFleetRoute calls = %#v", runner.calls)
+	}
+	if err := service.AddFleetRoute("bad", "", "eth0"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("AddFleetRoute(bad) error = %v", err)
+	}
+}
+
+func TestDirectRunner(t *testing.T) {
+	out, err := (DirectRunner{}).Run("echo", "hello")
+	if err != nil || strings.TrimSpace(out) != "hello" {
+		t.Fatalf("DirectRunner.Run() = %q, %v", out, err)
+	}
+	if err := (DirectRunner{}).RunStdin("cat", nil, "stdin"); err != nil {
+		t.Fatalf("DirectRunner.RunStdin() error = %v", err)
+	}
+	if _, err := (DirectRunner{}).Run("false"); err == nil {
+		t.Fatal("DirectRunner.Run(false) expected error")
+	}
+}
+
+func TestResolveBinaryFallbackAndDeleteRouteValidation(t *testing.T) {
+	if got := resolveBinary("definitely-not-an-incus-fleet-binary"); got != "definitely-not-an-incus-fleet-binary" {
+		t.Fatalf("resolveBinary() = %q", got)
+	}
+	service := NewService(&fakeRunner{})
+	if err := service.DeleteFleetRoute("not-a-destination"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("DeleteFleetRoute(bad) error = %v", err)
+	}
+}
