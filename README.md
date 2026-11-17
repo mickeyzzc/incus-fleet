@@ -32,7 +32,8 @@ from the language switcher.*
   helper
 - Agent host and cgroup v2 instance metrics, optional eBPF counters, a one-hour center buffer,
   JSON/Prometheus/CSV export, Prometheus/VictoriaMetrics remote write and query proxy, HTTP SD,
-  database task leases, certificate rotation/revocation, signed agent upgrade, and audit export
+  database task leases, certificate rotation/revocation, signed agent upgrade, audit export,
+  native netlink writes, and agent-backed node network routing
 
 > Live migration preserves guest network state. When clusters use different subnets,
 > renew DHCP inside the guest after the move (or use matching subnets).

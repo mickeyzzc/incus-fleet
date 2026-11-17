@@ -163,6 +163,11 @@ or `local`. The fleet app host is always local; remote members use an online age
 otherwise SSH when configured. Reads may fall back to SSH; mutating operations fall back only when
 `node_access.ssh_write_fallback` is true (the default for deployments that predate the agent).
 
+On Linux the helper applies link state, static addresses, and fleet routes through native netlink;
+the command backend remains for non-Linux development/tests, and persistence still goes through
+the detected manager. The resolver prefers an online agent for remote members, so the node network
+page uses the agent automatically and falls back to SSH only when configured.
+
 Every mutation is persisted as a `host_task` with state transitions and a `host_audit` entry
 containing actor, source IP, backend, action, plan hash, result, and timestamps. `unknown` means
 the executor disconnected while the operation may have completed; it is not treated as a failure.

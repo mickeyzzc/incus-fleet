@@ -419,9 +419,11 @@ privileged helper. Supported actions are `link-state`, `address`, `route-add`, `
 ```json
 // bring eth0 down
 {"action": "link-state", "interface": "eth0", "up": false}
-// apply a static address and persist through the detected manager
+// apply a static address and persist through the detected manager;
+// rollback_after_seconds is optional and starts a detached rollback timer
 {"action": "address", "interface": "eth0", "address": "10.0.0.50/24",
- "gateway": "10.0.0.1", "persist": true, "task_id": "task-1"}
+ "gateway": "10.0.0.1", "persist": true, "task_id": "task-1",
+ "rollback_after_seconds": 120}
 // confirm or roll back a previous operation
 {"action": "confirm", "task_id": "task-1"}
 ```

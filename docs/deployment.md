@@ -204,8 +204,9 @@ different deployment directory.
 ### Node network management (optional)
 
 Each cluster member has its own **Node network** page (Cluster → Nodes → Manage node). The local
-app host is managed through `sudo -n`; other members are reached over SSH. Both need the sudo
-whitelist:
+app host is managed through `sudo -n`; remote members use an online host agent when available,
+otherwise SSH. The SSH path needs the sudo whitelist below; the agent path uses
+`deploy/agent-sudoers`.
 
 ```bash
 sudo install -m 0440 -o root -g root deploy/nodesudoers /etc/sudoers.d/incus-fleet-nodesudoers
@@ -250,6 +251,11 @@ node_access:
 The SSH account needs passwordless sudo for the whitelisted binaries. If the account already has
 passwordless sudo for everything, the whitelist is optional. The **Add node** workflow installs
 this whitelist automatically for the SSH account it uses.
+
+On Linux the agent helper uses native netlink for link state, static addresses, and fleet routes
+(protocol 99); the command fallback is only for non-Linux development/tests. Set
+`rollback_after_seconds` on an agent network request to start a detached rollback timer; `confirm`
+cancels it.
 
 The sample unit sets `NoNewPrivileges=false` and `PrivateDevices=false` because sudo is a setuid
 binary and `ip`/`iw`/`nft` need the real device view; `ReadWritePaths` grants the two `/etc`

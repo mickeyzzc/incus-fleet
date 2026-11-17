@@ -365,9 +365,10 @@ helper 按 task ID 幂等：已完成的 install/service/preseed/ready 步骤记
 ```json
 // 关闭 eth0
 {"action": "link-state", "interface": "eth0", "up": false}
-// 配置静态地址并按检测到的管理器持久化
+// 配置静态地址并按检测到的管理器持久化；rollback_after_seconds 可选，启动独立回滚计时器
 {"action": "address", "interface": "eth0", "address": "10.0.0.50/24",
- "gateway": "10.0.0.1", "persist": true, "task_id": "task-1"}
+ "gateway": "10.0.0.1", "persist": true, "task_id": "task-1",
+ "rollback_after_seconds": 120}
 // 确认或回滚之前的操作
 {"action": "confirm", "task_id": "task-1"}
 ```

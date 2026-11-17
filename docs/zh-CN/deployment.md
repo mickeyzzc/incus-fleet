@@ -206,7 +206,8 @@ curl -fsS http://127.0.0.1:8080/api/v1/version
 ### 节点网络管理（可选）
 
 每个集群成员都有自己的 **Node network** 页面（Cluster → Nodes → Manage node）。fleet 所在
-主机通过 `sudo -n` 本地执行；其他成员通过 SSH 访问。两条路径都需要 sudo 白名单：
+主机通过 `sudo -n` 本地执行；远程成员优先使用在线 host agent，否则走 SSH。SSH 路径需要下面的
+sudo 白名单；agent 路径使用 `deploy/agent-sudoers`。
 
 ```bash
 sudo install -m 0440 -o root -g root deploy/nodesudoers /etc/sudoers.d/incus-fleet-nodesudoers
@@ -249,6 +250,10 @@ node_access:
 
 SSH 账户需要对白名单中的二进制免密 sudo。如果该账户已经拥有全量免密 sudo，白名单是可选的。
 **Add node** 工作流会为它使用的 SSH 账户自动安装这份白名单。
+
+Linux 上 agent helper 对链路状态、静态地址和 fleet 路由（protocol 99）使用原生 netlink；命令
+回退只用于非 Linux 开发/测试。给 agent 网络请求设置 `rollback_after_seconds` 会启动独立的回滚
+计时器，`confirm` 会取消它。
 
 示例 systemd 单元设置 `NoNewPrivileges=false` 和 `PrivateDevices=false`，因为 sudo 是 setuid
 二进制，且 `ip`/`iw`/`nft` 需要真实的设备视图；`ReadWritePaths` 授予上面两个 `/etc` 目录。

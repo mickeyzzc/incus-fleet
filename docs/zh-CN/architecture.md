@@ -130,6 +130,10 @@ VictoriaMetrics remote write 端点，并代理 PromQL range 查询供 UI 使用
 远程成员优先使用在线 agent，否则在配置了 SSH 时走 SSH。读操作可以回退 SSH；变更操作只有在
 `node_access.ssh_write_fallback=true` 时才回退（对于尚未部署 agent 的旧部署，默认是 true）。
 
+Linux 上 helper 通过原生 netlink 应用链路状态、静态地址和 fleet 路由；非 Linux 开发/测试仍用命令
+后端，持久化仍交给检测到的管理器。resolver 对远程成员优先使用在线 agent，因此节点网络页面会
+自动走 agent，只有配置允许时才回退 SSH。
+
 每个变更都会持久化为 `host_task`（含状态事件）和一条 `host_audit`，记录 actor、来源 IP、
 backend、action、plan hash、result 和时间戳。`unknown` 表示执行器失联，但操作可能已经完成，
 不会被当作失败。Wi-Fi 密码、SSH/sudo 密码、Incus join token 和私钥永远不会存储。当前实现
