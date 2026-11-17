@@ -546,9 +546,14 @@ Per-cgroup eBPF metrics are attributed by reading each cgroup's kernel file hand
 systemd cgroups), so container block I/O becomes `fleet_instance_block_latency_seconds_*` and
 retransmit/OOM counters. Block-latency buckets are powers of two nanoseconds. VMs are host-side
 cgroup metrics only. TCP retransmits are attributed via a sockops-maintained IPv4/IPv6 flow→cgroup
-map, so softirq retransmit timers keep the container attribution. OOM kills are aggregated per
-instance across nested cgroups. The host counters remain exact. `fleet_agent_telemetry_mode`
-reports `ebpf` or `procfs`.
+map, so softirq retransmit timers keep the container attribution. The sockops program is attached
+with `BPF_PROG_ATTACH` + `BPF_F_ALLOW_MULTI`, so it coexists with other sockops programs; if that
+attach mode is unavailable the agent skips sockops instead of replacing anything and falls back to
+current-task attribution. OOM kills are aggregated per instance across nested cgroups. When a
+host-triggered OOM's current cgroup is root, a ring-buffer event carries the victim pid and the agent
+resolves `/proc/<pid>/cgroup` into an instance before the process disappears; otherwise the kill stays
+in the host counter. The host counters remain exact. `fleet_agent_telemetry_mode` reports `ebpf` or
+`procfs`.
 
 #### Incus bootstrap through the agent
 

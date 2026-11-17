@@ -480,7 +480,9 @@ optional eBPF object adds host counters (`fleet_host_tcp_retransmits_total`,
 reports the active path. Block-latency buckets use powers of two nanoseconds (roughly 2ns through
 1s) plus `+Inf`. TCP retransmits are attributed through a sockops-populated IPv4/IPv6 flow→cgroup
 map, so retransmit timers that run in softirq context still resolve the owning container. OOM kills
-are attributed from the memcg/OOM context and are aggregated per instance across nested cgroups.
+are attributed from the memcg/OOM context and are aggregated per instance across nested cgroups; a
+root-context global OOM resolves the victim pid through a ring-buffer event before falling back to
+the host counter.
 
 ## External metrics
 

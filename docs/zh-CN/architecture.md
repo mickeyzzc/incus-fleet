@@ -116,7 +116,9 @@ flowchart LR
 
 agent 无需额外权限即可采集 cgroup v2 容器指标（VM 只做宿主侧 cgroup 指标）。可选 eBPF 增加主机
 TCP 重传/OOM 计数、按 cgroup 归因的重传/OOM 计数，以及 per-cgroup block 延迟直方图。sockops 在
-进程上下文维护 IPv4/IPv6 flow→cgroup 映射，使 softirq 中的重传 tracepoint 仍能找到所属容器。cgroup id
+进程上下文维护 IPv4/IPv6 flow→cgroup 映射，使 softirq 中的重传 tracepoint 仍能找到所属容器。
+sockops 使用 `BPF_F_ALLOW_MULTI` 挂载，不会替换已有程序。root 上下文的 OOM 事件会把 victim pid
+传给用户态，通过 `/proc` 解析 cgroup。cgroup id
 通过每个 cgroup 目录的内核 file handle 解析，包含嵌套 systemd cgroup。对象、BTF 或权限缺失时
 记录原因并回退 procfs/cgroup。
 

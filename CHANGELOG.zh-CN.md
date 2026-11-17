@@ -53,8 +53,9 @@
 - remote-write 磁盘持久化 spool、重启重放、队列/字节上限、旧文件淘汰、按中心实例隔离的 spool
   分区，以及每分区 flock 所有权和过期分区接管。默认分区无冲突（`hostname-pid`）。HA dispatcher
   新增 `agent.bootstrap` 与 `agent.snapshot` handler。
-- sockops flow→cgroup 映射实现可靠的 IPv4/IPv6 TCP 重传归因，并用容器丢包验证；OOM 计数按
-  实例聚合嵌套 cgroup。
+- sockops flow→cgroup 映射实现可靠的 IPv4/IPv6 TCP 重传归因，并用容器丢包验证；使用
+  `BPF_F_ALLOW_MULTI` 挂载，不会替换已有 sockops 程序。OOM 计数按实例聚合；root 上下文的全局
+  OOM 通过 ring buffer 解析 victim pid，失败时才回退主机计数。
 - Linux 原生 netlink 链路/地址/fleet 路由写入、可选 detach 网络回滚计时器，以及现有 UI 的
   agent 后端节点网络路由。
 

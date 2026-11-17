@@ -530,8 +530,11 @@ per-cgroup eBPF 指标通过读取每个 cgroup 的内核 file handle（包括�
 容器 block I/O 会变成 `fleet_instance_block_latency_seconds_*`，以及重传/OOM 计数器。block 延迟
 bucket 使用 2 的幂纳秒。VM 只做宿主侧 cgroup 指标。TCP 重传归因是尽力而为，因为定时器可能在
 通过 sockops 维护的 IPv4/IPv6 flow→cgroup 映射归因，softirq 中的重传定时器仍能保持容器归因。
-OOM kill 按实例聚合嵌套 cgroup。主机计数器保持精确。`fleet_agent_telemetry_mode` 报告 `ebpf` 或
-`procfs`。
+sockops 使用 `BPF_PROG_ATTACH` + `BPF_F_ALLOW_MULTI` 挂载，可与其他 sockops 程序共存；如果内核不
+支持该模式，agent 会跳过 sockops 而不是替换现有程序，并回退当前任务归因。OOM kill 按实例聚合
+嵌套 cgroup；主机触发的全局 OOM 若当前 cgroup 为 root，会通过 ring buffer 携带 victim pid，在
+进程消失前解析 `/proc/<pid>/cgroup` 归因到实例，否则只保留主机计数。主机计数器保持精确。
+`fleet_agent_telemetry_mode` 报告 `ebpf` 或 `procfs`。
 
 #### 通过 agent 引导 Incus
 

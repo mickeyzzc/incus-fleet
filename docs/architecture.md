@@ -148,7 +148,9 @@ The agent collects cgroup v2 metrics for containers (and host-side cgroup metric
 extra privileges. Optional eBPF adds host TCP retransmit/OOM counters, cgroup-attributed retransmit
 and OOM counters, and a per-cgroup block-latency histogram. A sockops program maps IPv4/IPv6
 flow→cgroup in process context so retransmit tracepoints resolve the owning container even when the
-timer runs in softirq context. Cgroup ids are resolved through each
+timer runs in softirq context. Sockops is attached with `BPF_F_ALLOW_MULTI` and never replaces an
+existing program. Root-context OOM events carry the victim pid to userspace for `/proc` cgroup
+resolution. Cgroup ids are resolved through each
 cgroup directory's kernel file handle, including nested systemd cgroups. When the object, BTF, or
 capabilities are missing it logs the reason and falls back to procfs/cgroup.
 
