@@ -18,6 +18,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
+	"github.com/mickeyzzc/incus-fleet/internal/hostops"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
 	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
@@ -131,6 +132,9 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("GET /api/v1/clusters/{cluster}/members/{member}/node/firewall", a.requireAuth(http.HandlerFunc(a.nodeFirewall)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/firewall", a.requireAuth(http.HandlerFunc(a.nodeAddFirewallRule)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/members/{member}/node/firewall/{handle}", a.requireAuth(http.HandlerFunc(a.nodeDeleteFirewallRule)))
+	mux.Handle("GET /api/v1/audit", a.requireAuth(http.HandlerFunc(a.listHostAudit)))
+	mux.Handle("GET /api/v1/tasks", a.requireAuth(http.HandlerFunc(a.listHostTasks)))
+	mux.Handle("GET /api/v1/tasks/{id}", a.requireAuth(http.HandlerFunc(a.getHostTask)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.listSnapshots)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.createSnapshot)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore", a.requireAuth(http.HandlerFunc(a.restoreSnapshot)))
@@ -822,7 +826,9 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, clusters.ErrUnavailable):
 		status, code = http.StatusServiceUnavailable, "cluster_unavailable"
-	case errors.Is(err, nodenet.ErrUnavailable):
+	case errors.Is(err, nodenet.ErrUnavailable),
+		errors.Is(err, hostops.ErrSSHWriteDisabled),
+		errors.Is(err, hostops.ErrAgentUnavailable):
 		status, code = http.StatusServiceUnavailable, "node_unavailable"
 	}
 

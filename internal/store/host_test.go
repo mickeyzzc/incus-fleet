@@ -9,6 +9,17 @@ import (
 	"time"
 )
 
+func TestNewID(t *testing.T) {
+	first := NewID()
+	second := NewID()
+	if len(first) != 32 || len(second) != 32 {
+		t.Fatalf("NewID() lengths = %d, %d", len(first), len(second))
+	}
+	if first == second {
+		t.Fatal("NewID() returned the same value twice")
+	}
+}
+
 func TestSchemaMigrations(t *testing.T) {
 	s := openSQLite(t)
 
@@ -265,5 +276,74 @@ func TestAgentUpsertAndList(t *testing.T) {
 
 	if _, err := s.GetAgent(ctx, "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetAgent(missing) error = %v", err)
+	}
+}
+
+func TestClampLimit(t *testing.T) {
+	cases := map[int]int{-1: 50, 0: 50, 1: 1, 50: 50, 200: 200, 201: 200}
+	for input, want := range cases {
+		if got := clampLimit(input); got != want {
+			t.Fatalf("clampLimit(%d) = %d, want %d", input, got, want)
+		}
+	}
+}
+
+func TestHostStoreRejectsNil(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+
+	if err := s.CreateHostTask(ctx, nil); err == nil {
+		t.Fatal("CreateHostTask(nil) expected error")
+	}
+	if err := s.UpdateHostTask(ctx, nil); err == nil {
+		t.Fatal("UpdateHostTask(nil) expected error")
+	}
+	if err := s.AppendHostTaskEvent(ctx, nil); err == nil {
+		t.Fatal("AppendHostTaskEvent(nil) expected error")
+	}
+	if err := s.RecordHostAudit(ctx, nil); err == nil {
+		t.Fatal("RecordHostAudit(nil) expected error")
+	}
+	if err := s.UpsertAgent(ctx, nil); err == nil {
+		t.Fatal("UpsertAgent(nil) expected error")
+	}
+}
+
+func TestHostTaskFilterByMemberOnly(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+	now := time.Now().UTC()
+
+	for _, task := range []*HostTask{
+		{ID: "a", Cluster: "c1", Member: "node-a", Type: "x", State: HostTaskQueued, CreatedAt: now, UpdatedAt: now},
+		{ID: "b", Cluster: "c2", Member: "node-a", Type: "x", State: HostTaskQueued, CreatedAt: now.Add(time.Second), UpdatedAt: now},
+	} {
+		if err := s.CreateHostTask(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	list, err := s.ListHostTasks(ctx, "", "node-a", 0)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("ListHostTasks(member only) = %#v, %v", list, err)
+	}
+}
+
+func TestHostAuditFilterByCluster(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+
+	for _, entry := range []*HostAudit{
+		{ID: "a", At: time.Now().UTC(), Backend: "local", Cluster: "c1", Member: "node-a", Action: "x", Result: "succeeded"},
+		{ID: "b", At: time.Now().UTC().Add(time.Second), Backend: "ssh", Cluster: "c2", Member: "node-a", Action: "x", Result: "succeeded"},
+	} {
+		if err := s.RecordHostAudit(ctx, entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	list, err := s.ListHostAudit(ctx, "c1", "", 0)
+	if err != nil || len(list) != 1 || list[0].ID != "a" {
+		t.Fatalf("ListHostAudit(cluster only) = %#v, %v", list, err)
 	}
 }

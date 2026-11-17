@@ -234,6 +234,11 @@ Configure the identity in `/home/incus/config.yaml`:
 
 ```yaml
 node_access:
+  # auto: prefer agent, then local, then SSH. agent/ssh/local force one backend.
+  mode: auto
+  # Mutating operations may use SSH when no agent is available. Set false once
+  # every member runs an agent; reads still fall back for break-glass access.
+  ssh_write_fallback: true
   ssh_user: node-admin
   ssh_key: /home/incus/.ssh/id_ed25519
   ssh_port: 22
@@ -250,6 +255,11 @@ The sample unit sets `NoNewPrivileges=false` and `PrivateDevices=false` because 
 binary and `ip`/`iw`/`nft` need the real device view; `ReadWritePaths` grants the two `/etc`
 directories above. Keep the remaining hardening. Wi-Fi scan/connect additionally needs
 `wpasupplicant` installed on each node (`apt-get install -y wpasupplicant`).
+
+The first startup after upgrading creates the host task and audit tables through the schema
+migration; existing migration history is preserved. The API exposes `GET /api/v1/tasks`,
+`GET /api/v1/tasks/{id}`, and `GET /api/v1/audit`. Audit records are query-limited (maximum 200 per
+request); automatic retention/export is planned with the agent lifecycle work.
 
 #### Adding a node from the UI
 

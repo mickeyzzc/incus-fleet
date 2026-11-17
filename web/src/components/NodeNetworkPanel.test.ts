@@ -218,6 +218,7 @@ describe('NodeView', () => {
     ],
     wifi_device: 'wlan0',
     capabilities: ['nics', 'routes', 'firewall'],
+    backend: 'local',
   }
 
   const mountView = () => {
@@ -254,11 +255,12 @@ describe('NodeView', () => {
   })
 
   it('fetches snapshot on mount', async () => {
-    mountView()
+    const wrapper = mountView()
     await nextTick()
     await vi.dynamicImportSettled?.()
     await nextTick()
     expect(api.nodeSnapshot).toHaveBeenCalledWith('c1', 'n1', undefined)
+    expect(wrapper.text()).toContain('Backend: local')
   })
 
   it('stateTag returns correct tag types', async () => {

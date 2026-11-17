@@ -340,6 +340,55 @@ All paths below are relative to `/api/v1/clusters/{cluster}/members/{member}/nod
 Handler errors map to `400 invalid_request` (bad input), `404 not_found` (unknown cluster or
 member), and `503 node_unavailable` (missing SSH access, sudo rules, binaries, or host failure).
 
+The snapshot includes `backend` (`local`, `ssh`, or, when the agent is enabled, `agent`). Mutating
+responses set `X-Incus-Fleet-Backend` and, when the operation was recorded, `X-Incus-Fleet-Task`.
+The backend choice comes from `node_access.mode` (`auto`, `agent`, `ssh`, or `local`). With the
+default `auto`, reads may fall back to SSH; mutating operations fall back only when
+`node_access.ssh_write_fallback` is true (the default for deployments that predate the agent).
+
+## Host tasks and audit
+
+Every mutating node operation is recorded as a host task plus an immutable audit entry. Tasks and
+audit records live in the same SQLite/PostgreSQL database as migration history; the schema is
+created or upgraded automatically at startup.
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/v1/tasks?cluster=&member=&limit=` | recent tasks, newest first; `limit` 1-200, default 50 |
+| `GET /api/v1/tasks/{id}` | one task and its state-transition events |
+| `GET /api/v1/audit?cluster=&member=&limit=` | host audit records, newest first |
+
+```json
+// GET /api/v1/tasks/{id}
+{
+  "task": {
+    "id": "b4f0...",
+    "cluster": "c1",
+    "member": "node-a",
+    "type": "node.route.add",
+    "state": "succeeded",
+    "plan": "destination=10.0.1.0/24 gateway=192.0.2.1 device=eth0",
+    "plan_hash": "...",
+    "result": "succeeded",
+    "created_by": "admin",
+    "created_at": "2026-11-18T00:00:00Z",
+    "started_at": "2026-11-18T00:00:00Z",
+    "finished_at": "2026-11-18T00:00:01Z",
+    "updated_at": "2026-11-18T00:00:01Z"
+  },
+  "events": [
+    {"state": "running", "message": "started", "at": "2026-11-18T00:00:00Z"},
+    {"state": "succeeded", "message": "succeeded", "at": "2026-11-18T00:00:01Z"}
+  ]
+}
+```
+
+Task states are `queued`, `dispatched`, `accepted`, `running`, `succeeded`, `failed`, `canceled`,
+and `unknown`. `unknown` means the control plane lost contact with the executor while the
+operation may have completed; it is not treated as a failure. Audit records include actor, source
+IP, backend, action, task ID, result, and a redacted plan. Wi-Fi passwords, SSH passwords, sudo
+passwords, Incus join tokens, and private keys are never stored in tasks or audit records.
+
 ## Instances
 
 ```json

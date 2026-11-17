@@ -789,6 +789,7 @@ diskUnknown: 'Usage unknown',
   nodePage: {
     title: 'Node network',
     subtitle: 'Physical NICs, routes, firewall, and Wi-Fi of {host}.',
+    backend: 'Backend: {backend}',
     warning: 'These operations reconfigure host networking on {host}. Changing the management interface may interrupt access.',
     nicsTitle: 'Interfaces',
     configure: 'Configure',

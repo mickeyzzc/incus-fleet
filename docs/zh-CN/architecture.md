@@ -55,6 +55,9 @@ flowchart LR
 | `cmd/incus-fleet` | 参数解析、配置加载、结构化日志、信号处理 |
 | `internal/config` | YAML 解析、环境变量覆盖、默认值、校验、证书文件检查 |
 | `internal/clusters` | 连接 Incus 端点、维护使用固定证书的客户端、构建健康摘要、重新连接 |
+| `internal/hostops` | 类型化的主机操作接口与后端选择 |
+| `internal/nodeaccess` | 为集群成员解析本地或 SSH 主机操作器 |
+| `internal/nodejoin` | 通过 SSH 为新成员安装 Incus 并加入集群 |
 | `internal/instances` | 清单、生命周期、镜像、ISO、SPICE、文件、快照以及客户机操作 |
 | `internal/assets` | 共享的 SSH 密钥/脚本库，以及按实例批量执行 |
 | `internal/migrations` | 校验迁移请求、持久化任务、执行复制/移动、回滚 |
@@ -106,6 +109,20 @@ flowchart LR
 ## 资源监控
 
 宿主机 CPU、内存、存储和实例数量来自 Incus 集群资源 API。单实例指标来自实时实例状态 API：CPU 时间、内存使用量与峰值、各挂载点的磁盘占用，以及各网卡的流量计数。核心指标无需安装任何 agent；前端每 3 秒采样一次，并通过计数器差值推算速率。
+
+## 主机操作
+
+主机网络和节点准备操作通过类型化的 `hostops.Operator` 执行，由 resolver 选择后端。
+`node_access.mode` 可选 `auto`（默认）、`agent`、`ssh` 或 `local`。fleet 所在主机始终走本地；
+远程成员优先使用在线 agent，否则在配置了 SSH 时走 SSH。读操作可以回退 SSH；变更操作只有在
+`node_access.ssh_write_fallback=true` 时才回退（对于尚未部署 agent 的旧部署，默认是 true）。
+
+每个变更都会持久化为 `host_task`（含状态事件）和一条 `host_audit`，记录 actor、来源 IP、
+backend、action、plan hash、result 和时间戳。`unknown` 表示执行器失联，但操作可能已经完成，
+不会被当作失败。Wi-Fi 密码、SSH/sudo 密码、Incus join token 和私钥永远不会存储。当前实现
+同步执行并记录任务；agent 阶段会加入 queued、dispatched 和带 lease 的任务。
+
+`GET /api/v1/tasks`、`GET /api/v1/tasks/{id}` 和 `GET /api/v1/audit` 用于查询这些记录。
 
 ## 共享资产与批量操作
 

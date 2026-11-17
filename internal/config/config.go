@@ -27,11 +27,20 @@ type Config struct {
 // cluster members other than the host incus-fleet runs on. The account must
 // have passwordless sudo; deploy/nodesudoers provides the minimal whitelist.
 type NodeAccess struct {
+	Mode                     string `yaml:"mode"`
 	SSHUser                  string `yaml:"ssh_user"`
 	SSHKey                   string `yaml:"ssh_key"`
 	SSHPort                  int    `yaml:"ssh_port"`
 	SSHKnownHosts            string `yaml:"ssh_known_hosts"`
 	SSHInsecureIgnoreHostKey bool   `yaml:"ssh_insecure_ignore_host_key"`
+	SSHWriteFallback         *bool  `yaml:"ssh_write_fallback"`
+}
+
+// SSHWriteFallbackEnabled reports whether mutating host operations may fall
+// back to SSH when no agent is available. It defaults to true for backward
+// compatibility with deployments that predate the agent.
+func (n NodeAccess) SSHWriteFallbackEnabled() bool {
+	return n.SSHWriteFallback == nil || *n.SSHWriteFallback
 }
 
 // Server contains HTTP server settings.
@@ -100,6 +109,13 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("INCUS_FLEET_DATABASE_DSN"); v != "" {
 		c.Database.DSN = v
 	}
+	if v := os.Getenv("INCUS_FLEET_NODE_ACCESS_MODE"); v != "" {
+		c.NodeAccess.Mode = v
+	}
+	if v := os.Getenv("INCUS_FLEET_NODE_ACCESS_SSH_WRITE_FALLBACK"); v != "" {
+		enabled := v == "1" || strings.EqualFold(v, "true")
+		c.NodeAccess.SSHWriteFallback = &enabled
+	}
 }
 
 func (c *Config) applyDefaults() {
@@ -114,6 +130,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.NodeAccess.SSHPort == 0 {
 		c.NodeAccess.SSHPort = 22
+	}
+	if strings.TrimSpace(c.NodeAccess.Mode) == "" {
+		c.NodeAccess.Mode = "auto"
 	}
 
 	for i := range c.Clusters {
@@ -258,6 +277,12 @@ func (c *Config) ClusterByName(name string) (Cluster, bool) {
 }
 
 func (n NodeAccess) validate() error {
+	switch strings.ToLower(strings.TrimSpace(n.Mode)) {
+	case "", "auto", "agent", "ssh", "local":
+	default:
+		return fmt.Errorf("config: node_access.mode %q is invalid (want auto, agent, ssh, or local)", n.Mode)
+	}
+
 	user := strings.TrimSpace(n.SSHUser)
 	key := strings.TrimSpace(n.SSHKey)
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
+	"github.com/mickeyzzc/incus-fleet/internal/hostops"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/remote"
 )
@@ -41,12 +42,16 @@ func WithDialer(dialer remote.Dialer) Option {
 
 // Service exposes node network operations for cluster members.
 type Service struct {
-	lookup      ClusterLookup
-	local       *nodenet.Service
-	localMember string
-	access      config.NodeAccess
-	dialer      remote.Dialer
+	lookup           ClusterLookup
+	local            *nodenet.Service
+	localMember      string
+	access           config.NodeAccess
+	dialer           remote.Dialer
+	mode             hostops.Mode
+	sshWriteFallback bool
 }
+
+var _ hostops.Resolver = (*Service)(nil)
 
 // New builds a member-aware node network service.
 func New(lookup ClusterLookup, local *nodenet.Service, access config.NodeAccess, opts ...Option) *Service {
@@ -55,13 +60,19 @@ func New(lookup ClusterLookup, local *nodenet.Service, access config.NodeAccess,
 	}
 
 	hostname, _ := os.Hostname()
+	mode, err := hostops.ParseMode(access.Mode)
+	if err != nil {
+		mode = hostops.ModeAuto
+	}
 
 	service := &Service{
-		lookup:      lookup,
-		local:       local,
-		localMember: hostname,
-		access:      access,
-		dialer:      remote.SSHDialer{},
+		lookup:           lookup,
+		local:            local,
+		localMember:      hostname,
+		access:           access,
+		dialer:           remote.SSHDialer{},
+		mode:             mode,
+		sshWriteFallback: access.SSHWriteFallbackEnabled(),
 	}
 
 	for _, opt := range opts {
@@ -71,15 +82,37 @@ func New(lookup ClusterLookup, local *nodenet.Service, access config.NodeAccess,
 	return service
 }
 
-// Service resolves the node network service for one cluster member.
+// Service resolves the node network service for one cluster member. It is
+// kept for callers that need the concrete nodenet service; new code should
+// use Resolve so the backend is explicit.
 func (s *Service) Service(clusterName, memberName string) (*nodenet.Service, string, func(), error) {
+	node, host, _, closeNode, err := s.resolveNode(clusterName, memberName)
+	return node, host, closeNode, err
+}
+
+// Resolve implements hostops.Resolver.
+func (s *Service) Resolve(_ context.Context, clusterName, memberName string, kind hostops.Kind) (hostops.Operator, hostops.Backend, func(), error) {
+	node, _, backend, closeNode, err := s.resolveNode(clusterName, memberName)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	if kind == hostops.Write && backend == hostops.BackendSSH && s.mode == hostops.ModeAuto && !s.sshWriteFallback {
+		closeNode()
+		return nil, "", nil, fmt.Errorf("%w: configure node_access.ssh_write_fallback=true or install the host agent", hostops.ErrSSHWriteDisabled)
+	}
+
+	return node, backend, closeNode, nil
+}
+
+func (s *Service) resolveNode(clusterName, memberName string) (*nodenet.Service, string, hostops.Backend, func(), error) {
 	if s.lookup == nil {
-		return nil, "", nil, fmt.Errorf("%w: cluster lookup is not configured", nodenet.ErrUnavailable)
+		return nil, "", "", nil, fmt.Errorf("%w: cluster lookup is not configured", nodenet.ErrUnavailable)
 	}
 
 	summary, err := s.lookup.Get(clusterName)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", "", nil, err
 	}
 
 	memberName = strings.TrimSpace(memberName)
@@ -92,20 +125,27 @@ func (s *Service) Service(clusterName, memberName string) (*nodenet.Service, str
 	}
 
 	if member == nil {
-		return nil, "", nil, fmt.Errorf("%w: %s/%s", ErrUnknownMember, clusterName, memberName)
+		return nil, "", "", nil, fmt.Errorf("%w: %s/%s", ErrUnknownMember, clusterName, memberName)
 	}
 
 	if member.Name == s.localMember {
-		return s.local, member.Name, func() {}, nil
+		return s.local, member.Name, hostops.BackendLocal, func() {}, nil
+	}
+
+	switch s.mode {
+	case hostops.ModeLocal:
+		return nil, "", "", nil, fmt.Errorf("%w: node_access.mode=local only manages the fleet host", nodenet.ErrUnavailable)
+	case hostops.ModeAgent:
+		return nil, "", "", nil, fmt.Errorf("%w: no agent is registered for %s/%s", hostops.ErrAgentUnavailable, clusterName, member.Name)
 	}
 
 	if strings.TrimSpace(s.access.SSHUser) == "" || strings.TrimSpace(s.access.SSHKey) == "" {
-		return nil, "", nil, fmt.Errorf("%w: remote node access is not configured (node_access.ssh_user and node_access.ssh_key)", nodenet.ErrUnavailable)
+		return nil, "", "", nil, fmt.Errorf("%w: remote node access is not configured (node_access.ssh_user and node_access.ssh_key)", nodenet.ErrUnavailable)
 	}
 
 	host, err := remote.HostFromURL(member.URL)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("%w: %v", nodenet.ErrUnavailable, err)
+		return nil, "", "", nil, fmt.Errorf("%w: %v", nodenet.ErrUnavailable, err)
 	}
 
 	runner := &sshRunner{
@@ -120,7 +160,7 @@ func (s *Service) Service(clusterName, memberName string) (*nodenet.Service, str
 		sudo: s.access.SSHUser != "root",
 	}
 
-	return nodenet.NewService(runner), host, runner.Close, nil
+	return nodenet.NewService(runner), host, hostops.BackendSSH, runner.Close, nil
 }
 
 // Snapshot renders the physical network state of one cluster member.

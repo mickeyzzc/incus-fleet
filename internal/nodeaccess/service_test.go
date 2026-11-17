@@ -9,6 +9,7 @@ import (
 
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
+	"github.com/mickeyzzc/incus-fleet/internal/hostops"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/remote"
 )
@@ -408,5 +409,87 @@ func TestRootUserSkipsSudoAndRunStdin(t *testing.T) {
 	}
 	if len(stdin) == 0 || !strings.Contains(stdin[0], "ssid=") {
 		t.Fatalf("wpa config stdin = %#v", stdin)
+	}
+}
+
+func TestResolveLocalBackend(t *testing.T) {
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), testAccess(), WithLocalMember("n1"))
+
+	operator, backend, closeNode, err := service.Resolve(context.Background(), "c1", "n1", hostops.Write)
+	if err != nil {
+		t.Fatalf("Resolve(local) error = %v", err)
+	}
+	defer closeNode()
+	if operator == nil || backend != hostops.BackendLocal {
+		t.Fatalf("Resolve(local) = %v, %q", operator, backend)
+	}
+}
+
+func TestResolveSSHWriteFallback(t *testing.T) {
+	access := testAccess()
+	disabled := false
+	access.SSHWriteFallback = &disabled
+
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), access, WithLocalMember("n1"), WithDialer(&fakeDialer{}))
+
+	_, backend, closeNode, err := service.Resolve(context.Background(), "c1", "n2", hostops.Read)
+	if err != nil {
+		t.Fatalf("Resolve(read) error = %v", err)
+	}
+	closeNode()
+	if backend != hostops.BackendSSH {
+		t.Fatalf("Resolve(read) backend = %q", backend)
+	}
+
+	if _, _, _, err := service.Resolve(context.Background(), "c1", "n2", hostops.Write); !errors.Is(err, hostops.ErrSSHWriteDisabled) {
+		t.Fatalf("Resolve(write) error = %v", err)
+	}
+}
+
+func TestResolveExplicitSSHModeAllowsWrite(t *testing.T) {
+	access := testAccess()
+	access.Mode = "ssh"
+	disabled := false
+	access.SSHWriteFallback = &disabled
+
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), access, WithLocalMember("n1"), WithDialer(&fakeDialer{}))
+
+	_, backend, closeNode, err := service.Resolve(context.Background(), "c1", "n2", hostops.Write)
+	if err != nil {
+		t.Fatalf("Resolve(ssh write) error = %v", err)
+	}
+	defer closeNode()
+	if backend != hostops.BackendSSH {
+		t.Fatalf("Resolve(ssh write) backend = %q", backend)
+	}
+}
+
+func TestResolveAgentModeUnavailable(t *testing.T) {
+	access := testAccess()
+	access.Mode = "agent"
+
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), access, WithLocalMember("n1"), WithDialer(&fakeDialer{}))
+
+	if _, _, _, err := service.Resolve(context.Background(), "c1", "n2", hostops.Read); !errors.Is(err, hostops.ErrAgentUnavailable) {
+		t.Fatalf("Resolve(agent) error = %v", err)
+	}
+}
+
+func TestResolveLocalModeRejectsRemote(t *testing.T) {
+	access := testAccess()
+	access.Mode = "local"
+
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), access, WithLocalMember("n1"), WithDialer(&fakeDialer{}))
+
+	if _, _, _, err := service.Resolve(context.Background(), "c1", "n2", hostops.Read); !errors.Is(err, nodenet.ErrUnavailable) {
+		t.Fatalf("Resolve(local remote) error = %v", err)
+	}
+}
+
+func TestResolveUnknownMember(t *testing.T) {
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), testAccess(), WithLocalMember("n1"))
+
+	if _, _, _, err := service.Resolve(context.Background(), "c1", "missing", hostops.Read); !errors.Is(err, ErrUnknownMember) {
+		t.Fatalf("Resolve(unknown) error = %v", err)
 	}
 }

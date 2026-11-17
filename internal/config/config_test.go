@@ -310,6 +310,11 @@ func TestNodeAccessValidation(t *testing.T) {
 		{"no host policy", NodeAccess{SSHUser: "node-admin", SSHKey: "/key", SSHPort: 22}, true},
 		{"insecure", NodeAccess{SSHUser: "node-admin", SSHKey: "/key", SSHPort: 22, SSHInsecureIgnoreHostKey: true}, false},
 		{"known hosts", NodeAccess{SSHUser: "node-admin", SSHKey: "/key", SSHPort: 22, SSHKnownHosts: "/known"}, false},
+		{"auto mode", NodeAccess{Mode: "auto"}, false},
+		{"agent mode", NodeAccess{Mode: "agent"}, false},
+		{"ssh mode", NodeAccess{Mode: "ssh"}, false},
+		{"local mode", NodeAccess{Mode: "local"}, false},
+		{"bad mode", NodeAccess{Mode: "magic"}, true},
 	}
 
 	for _, tc := range cases {
@@ -337,6 +342,17 @@ func TestNodeAccessFilesAndDefaults(t *testing.T) {
 	cfg.applyDefaults()
 	if cfg.NodeAccess.SSHPort != 22 {
 		t.Fatalf("SSHPort default = %d", cfg.NodeAccess.SSHPort)
+	}
+	if cfg.NodeAccess.Mode != "auto" {
+		t.Fatalf("Mode default = %q", cfg.NodeAccess.Mode)
+	}
+	if !cfg.NodeAccess.SSHWriteFallbackEnabled() {
+		t.Fatal("SSH write fallback should default to enabled")
+	}
+	disabled := false
+	cfg.NodeAccess.SSHWriteFallback = &disabled
+	if cfg.NodeAccess.SSHWriteFallbackEnabled() {
+		t.Fatal("SSH write fallback should honor explicit false")
 	}
 	if err := cfg.ValidateFiles(); err == nil || !strings.Contains(err.Error(), "node_access.ssh_key") {
 		t.Fatalf("ValidateFiles() error = %v", err)

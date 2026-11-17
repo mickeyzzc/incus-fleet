@@ -170,6 +170,7 @@ type Snapshot struct {
 	WifiScan     []WiFiNetwork  `json:"wifi_scan,omitempty"`
 	WifiDevice   string         `json:"wifi_device,omitempty"`
 	Capabilities []string       `json:"capabilities"`
+	Backend      string         `json:"backend,omitempty"`
 }
 
 // isWireless reports whether the kernel exposes the interface as a Wi-Fi

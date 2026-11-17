@@ -288,6 +288,53 @@ POST /api/v1/auth/logout
 Handler 错误映射为 `400 invalid_request`（输入错误）、`404 not_found`（未知集群或成员）和
 `503 node_unavailable`（缺少 SSH 访问、sudo 规则、二进制，或主机故障）。
 
+快照包含 `backend`（`local`、`ssh`，启用 agent 后为 `agent`）。变更型响应会设置
+`X-Incus-Fleet-Backend`，如果操作被记录还会设置 `X-Incus-Fleet-Task`。后端由
+`node_access.mode`（`auto`、`agent`、`ssh` 或 `local`）决定。默认 `auto` 下，读操作可以回退
+SSH；写操作只有在 `node_access.ssh_write_fallback=true` 时才回退（对于尚未部署 agent 的旧
+部署，默认是 true）。
+
+## 主机任务与审计
+
+每个变更型节点操作都会记录为一个 host task 和一条不可变审计记录。任务和审计与迁移历史
+存放在同一个 SQLite/PostgreSQL 数据库；schema 在启动时自动创建或升级。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/tasks?cluster=&member=&limit=` | 最近的任务，按时间倒序；`limit` 1-200，默认 50 |
+| `GET /api/v1/tasks/{id}` | 一个任务及其状态事件 |
+| `GET /api/v1/audit?cluster=&member=&limit=` | 主机审计记录，按时间倒序 |
+
+```json
+// GET /api/v1/tasks/{id}
+{
+  "task": {
+    "id": "b4f0...",
+    "cluster": "c1",
+    "member": "node-a",
+    "type": "node.route.add",
+    "state": "succeeded",
+    "plan": "destination=10.0.1.0/24 gateway=192.0.2.1 device=eth0",
+    "plan_hash": "...",
+    "result": "succeeded",
+    "created_by": "admin",
+    "created_at": "2026-11-18T00:00:00Z",
+    "started_at": "2026-11-18T00:00:00Z",
+    "finished_at": "2026-11-18T00:00:01Z",
+    "updated_at": "2026-11-18T00:00:01Z"
+  },
+  "events": [
+    {"state": "running", "message": "started", "at": "2026-11-18T00:00:00Z"},
+    {"state": "succeeded", "message": "succeeded", "at": "2026-11-18T00:00:01Z"}
+  ]
+}
+```
+
+任务状态为 `queued`、`dispatched`、`accepted`、`running`、`succeeded`、`failed`、`canceled`
+和 `unknown`。`unknown` 表示控制面与执行器失联，但操作可能已经完成；它不会被当作失败。审计
+记录包含 actor、来源 IP、backend、action、task ID、result 和脱敏后的 plan。Wi-Fi 密码、SSH
+密码、sudo 密码、Incus join token 和私钥永远不会写入任务或审计。
+
 ## 实例
 
 ```json

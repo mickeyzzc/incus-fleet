@@ -581,6 +581,7 @@ export interface NodeSnapshot {
   wifi_scan?: NodeWiFiNetwork[]
   wifi_device?: string
   capabilities: string[]
+  backend?: string
 }
 
 export interface NodeAddressRequest {

@@ -16,7 +16,7 @@ const props = defineProps<{
 const { t } = useI18n()
 
 const loading = ref(false)
-const snapshot = ref<{ host: string; nics: NodeNIC[]; routes: { destination: string; gateway?: string; device?: string; metric?: string }[]; firewall: { handle: string; rule: string }[]; wifi_scan?: { ssid: string; signal: number; secure: boolean; frequency: number }[]; wifi_device?: string } | null>(null)
+const snapshot = ref<{ host: string; nics: NodeNIC[]; routes: { destination: string; gateway?: string; device?: string; metric?: string }[]; firewall: { handle: string; rule: string }[]; wifi_scan?: { ssid: string; signal: number; secure: boolean; frequency: number }[]; wifi_device?: string; backend?: string } | null>(null)
 
 const addressDialogOpen = ref(false)
 const addressTarget = ref<NodeNIC | null>(null)
@@ -224,6 +224,9 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         <p class="subtitle">
           {{ t('nodePage.subtitle', { host: displayHost }) }}
         </p>
+        <el-tag v-if="snapshot?.backend" size="small" type="info">
+          {{ t('nodePage.backend', { backend: snapshot.backend }) }}
+        </el-tag>
       </div>
       <div class="page-actions">
         <el-button :icon="Refresh" :loading="loading" @click="refresh">

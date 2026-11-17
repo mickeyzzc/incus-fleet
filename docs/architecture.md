@@ -59,6 +59,9 @@ other. Caddy load-balances browsers and pins each browser to one app instance (s
 | `cmd/incus-fleet` | Flags, config loading, structured logging, signal handling |
 | `internal/config` | YAML parsing, environment overrides, defaults, validation, cert file checks |
 | `internal/clusters` | Dials Incus endpoints, holds pinned-cert clients, builds health summaries, reconnect |
+| `internal/hostops` | Typed host operation interface and backend selection |
+| `internal/nodeaccess` | Resolves the local or SSH host operator for a cluster member |
+| `internal/nodejoin` | SSH-based Incus installation and cluster join for new members |
 | `internal/instances` | Inventory, lifecycle, images, ISO, SPICE, files, snapshots, and guest operations |
 | `internal/assets` | Shared SSH key/script library and per-instance batch execution |
 | `internal/migrations` | Validates migration requests, persists tasks, runs copy/move, rollback |
@@ -133,6 +136,23 @@ Host CPU, memory, storage, and instance counts come from the Incus cluster resou
 Per-instance metrics come from the live instance state API: CPU time, memory usage and peak,
 per-mountpoint disk usage, and per-interface network counters. No agent is installed for the
 core metrics; the frontend samples every 3 seconds and derives rates from counter deltas.
+
+## Host operations
+
+Host network and node provisioning operations go through a typed
+`hostops.Operator` selected by a resolver. `node_access.mode` is `auto` (default), `agent`, `ssh`,
+or `local`. The fleet app host is always local; remote members use an online agent when available,
+otherwise SSH when configured. Reads may fall back to SSH; mutating operations fall back only when
+`node_access.ssh_write_fallback` is true (the default for deployments that predate the agent).
+
+Every mutation is persisted as a `host_task` with state transitions and a `host_audit` entry
+containing actor, source IP, backend, action, plan hash, result, and timestamps. `unknown` means
+the executor disconnected while the operation may have completed; it is not treated as a failure.
+Wi-Fi passwords, SSH/sudo passwords, Incus join tokens, and private keys are never stored. The
+current implementation executes synchronously and records the task; the agent phase adds queued,
+dispatched, and leased tasks.
+
+`GET /api/v1/tasks`, `GET /api/v1/tasks/{id}`, and `GET /api/v1/audit` expose the records.
 
 ## Shared assets and batch operations
 

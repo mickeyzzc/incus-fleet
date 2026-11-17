@@ -783,6 +783,7 @@ diskUnknown: '用量未知',
   nodePage: {
     title: '节点网络',
     subtitle: '{host} 的物理网卡、路由、防火墙与 Wi-Fi。',
+    backend: '执行后端：{backend}',
     warning: '这些操作会重配置节点 {host} 的宿主网络。修改管理网卡可能中断访问。',
     nicsTitle: '网卡',
     configure: '配置',

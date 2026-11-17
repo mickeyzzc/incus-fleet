@@ -6,6 +6,24 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 未发布
+
+### 新增
+
+- 从 UI 添加集群成员：SSH 准备、可选安装 Incus、加入集群、sudo 白名单和 fleet SSH 公钥授权。
+- 本地应用主机与远程成员的按成员节点网络管理。
+- 类型化主机操作路由（`hostops`），支持 `node_access.mode`（`auto`、`agent`、`ssh`、`local`）
+  并显式报告后端。
+- 持久化 host task 与审计记录，提供 `GET /api/v1/tasks`、`GET /api/v1/tasks/{id}` 和
+  `GET /api/v1/audit`。
+- schema 迁移版本跟踪，以及 host task、审计、agent、注册 token 和证书表。
+- Wi-Fi 与节点网络任务计划已脱敏；密码和 join token 不会持久化。
+
+### 修复
+
+- 集群 TLS 证书字段同时接受内联 PEM 正文和文件路径。
+- `.gitignore` 排除 `*.crt` 证书文件。
+
 ## 0.1.0 - 2026-11-14
 
 多集群控制平面的首个 tag 发布。

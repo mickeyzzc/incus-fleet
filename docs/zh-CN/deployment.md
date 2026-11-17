@@ -234,6 +234,11 @@ ssh-copy-id -i /home/incus/.ssh/id_ed25519.pub node-admin@192.0.2.20
 
 ```yaml
 node_access:
+  # auto：优先 agent，其次 local，最后 SSH；agent/ssh/local 强制单一后端。
+  mode: auto
+  # 没有 agent 时，变更操作是否允许回退 SSH。所有成员都部署 agent 后设为 false；
+  # 读操作仍可用于 break-glass。
+  ssh_write_fallback: true
   ssh_user: node-admin
   ssh_key: /home/incus/.ssh/id_ed25519
   ssh_port: 22
@@ -249,6 +254,10 @@ SSH 账户需要对白名单中的二进制免密 sudo。如果该账户已经�
 二进制，且 `ip`/`iw`/`nft` 需要真实的设备视图；`ReadWritePaths` 授予上面两个 `/etc` 目录。
 请保留其余加固项。Wi-Fi 扫描/连接还需要在每个节点安装 `wpasupplicant`
 （`apt-get install -y wpasupplicant`）。
+
+升级后的首次启动会通过 schema 迁移创建主机任务和审计表；现有迁移历史会保留。API 提供
+`GET /api/v1/tasks`、`GET /api/v1/tasks/{id}` 和 `GET /api/v1/audit`。审计查询单次最多 200
+条；自动保留/导出会在 agent 生命周期工作中加入。
 
 #### 从 UI 添加节点
 
