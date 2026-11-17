@@ -146,7 +146,9 @@ CSV; metrics are not written to the control-plane database.
 
 The agent collects cgroup v2 metrics for containers (and host-side cgroup metrics for VMs) without
 extra privileges. Optional eBPF adds host TCP retransmit/OOM counters, cgroup-attributed retransmit
-and OOM counters, and a per-cgroup block-latency histogram. Cgroup ids are resolved through each
+and OOM counters, and a per-cgroup block-latency histogram. A sockops program maps IPv4
+flow→cgroup in process context so retransmit tracepoints resolve the owning container even when the
+timer runs in softirq context. Cgroup ids are resolved through each
 cgroup directory's kernel file handle, including nested systemd cgroups. When the object, BTF, or
 capabilities are missing it logs the reason and falls back to procfs/cgroup.
 

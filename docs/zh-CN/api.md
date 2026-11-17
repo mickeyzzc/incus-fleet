@@ -418,8 +418,9 @@ agent 导出主机指标（`fleet_host_cpu_usage_ratio`、`fleet_host_memory_byt
 series（`fleet_instance_tcp_retransmits_total`、`fleet_instance_oom_kills_total`、
 `fleet_instance_block_latency_seconds_bucket|_sum|_count`）。
 `fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}` 表示当前路径。block 延迟 bucket 使用 2 的幂
-纳秒（约 2ns 到 1s）加 `+Inf`。TCP 重传的 cgroup 归因是尽力而为：重传定时器可能在 softirq
-上下文运行；主机计数器是精确的。
+纳秒（约 2ns 到 1s）加 `+Inf`。TCP 重传通过 sockops 维护的 IPv4 flow→cgroup 映射归因，因此即使
+重传定时器在 softirq 上下文运行也能找到所属容器；IPv6 仍使用当前任务回退。OOM kill 从
+memcg/OOM 上下文归因，并按实例聚合嵌套 cgroup。
 
 ## 外部指标
 
