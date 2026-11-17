@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mickeyzzc/incus-fleet/internal/agentgw"
 	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
@@ -46,11 +48,14 @@ func WithDialer(dialer clusters.DialFunc) Option {
 
 // App is one running incus-fleet instance.
 type App struct {
-	config   *config.Config
-	logger   *slog.Logger
-	store    *store.SQLStore
-	clusters *clusters.Manager
-	server   *http.Server
+	config      *config.Config
+	logger      *slog.Logger
+	store       *store.SQLStore
+	clusters    *clusters.Manager
+	server      *http.Server
+	agentGW     *agentgw.Gateway
+	agentTLS    *tls.Config
+	agentServer *http.Server
 }
 
 // New builds all services and the HTTP handler.
@@ -100,6 +105,27 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	nodeJoin := nodejoin.New(manager, cfg.NodeAccess, logger)
 	authenticator := auth.New(cfg.Server.AuthToken, 12*time.Hour)
 
+	var (
+		agentGW  *agentgw.Gateway
+		agentTLS *tls.Config
+	)
+	if cfg.Agent.Enabled {
+		ca, err := agentgw.LoadCA(cfg.Agent.ClientCA, cfg.Agent.CAKey)
+		if err != nil {
+			manager.Close()
+			_ = st.Close()
+			return nil, err
+		}
+		serverCert, err := tls.LoadX509KeyPair(cfg.Agent.TLSCert, cfg.Agent.TLSKey)
+		if err != nil {
+			manager.Close()
+			_ = st.Close()
+			return nil, fmt.Errorf("app: load agent server certificate: %w", err)
+		}
+		agentGW = agentgw.New(st, ca, logger)
+		agentTLS = agentGW.TLSConfig(serverCert)
+	}
+
 	// Clusters registered at runtime through the web UI persist in the
 	// store and rejoin the manager on every startup.
 	registered, err := st.ListClusters(ctx)
@@ -131,6 +157,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		Store:      st,
 		NodeNet:    nodeAccess,
 		NodeJoin:   nodeJoin,
+		Agent:      agentGW,
 		Auth:       authenticator,
 		StaticFS:   o.staticFS,
 		Logger:     logger,
@@ -159,6 +186,8 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		store:    st,
 		clusters: manager,
 		server:   server,
+		agentGW:  agentGW,
+		agentTLS: agentTLS,
 	}, nil
 }
 
@@ -176,28 +205,61 @@ func (a *App) Run(ctx context.Context) error {
 
 	a.logger.Info("http server listening", "address", listener.Addr().String())
 
-	errCh := make(chan error, 1)
+	serverCount := 1
+	errCh := make(chan error, 2)
 	go func() {
 		errCh <- a.server.Serve(listener)
 	}()
 
-	select {
-	case <-ctx.Done():
+	if a.agentGW != nil && a.agentTLS != nil {
+		agentListener, err := tls.Listen("tcp", a.config.Agent.Listen, a.agentTLS)
+		if err != nil {
+			_ = listener.Close()
+			return fmt.Errorf("app: listen agent gateway: %w", err)
+		}
+		a.agentServer = &http.Server{
+			Handler:           a.agentGW.Handler(),
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second,
+			WriteTimeout:      60 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+		}
+		serverCount = 2
+		a.logger.Info("agent gateway listening", "address", agentListener.Addr().String())
+		go func() {
+			errCh <- a.agentServer.Serve(agentListener)
+		}()
+	}
+
+	shutdown := func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		if err := a.server.Shutdown(shutdownCtx); err != nil {
 			a.logger.Warn("http shutdown failed", "error", err)
 		}
-		serveErr := <-errCh
-		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			return fmt.Errorf("app: serve: %w", serveErr)
+		if a.agentServer != nil {
+			if err := a.agentServer.Shutdown(shutdownCtx); err != nil {
+				a.logger.Warn("agent gateway shutdown failed", "error", err)
+			}
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		shutdown()
+		for i := 0; i < serverCount; i++ {
+			serveErr := <-errCh
+			if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				return fmt.Errorf("app: serve: %w", serveErr)
+			}
 		}
 
 		return nil
-	case err := <-errCh:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("app: serve: %w", err)
+	case serveErr := <-errCh:
+		shutdown()
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			return fmt.Errorf("app: serve: %w", serveErr)
 		}
 
 		return nil

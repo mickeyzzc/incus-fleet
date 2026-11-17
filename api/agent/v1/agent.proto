@@ -1,0 +1,175 @@
+syntax = "proto3";
+
+package incusfleet.agent.v1;
+
+option go_package = "github.com/mickeyzzc/incus-fleet/internal/agentpb;agentpb";
+
+// TaskType is the allowlisted set of host operations.
+enum TaskType {
+  TASK_TYPE_UNSPECIFIED = 0;
+  TASK_TYPE_NODENET_SNAPSHOT = 1;
+  TASK_TYPE_NODENET_APPLY = 2;
+  TASK_TYPE_NODENET_CONFIRM = 3;
+  TASK_TYPE_NODENET_ROLLBACK = 4;
+  TASK_TYPE_INCUS_BOOTSTRAP = 5;
+  TASK_TYPE_INCUS_JOIN = 6;
+  TASK_TYPE_TELEMETRY_CONFIGURE = 7;
+  TASK_TYPE_AGENT_UPGRADE = 8;
+}
+
+// TaskState is the durable task state machine.
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  TASK_STATE_QUEUED = 1;
+  TASK_STATE_DISPATCHED = 2;
+  TASK_STATE_ACCEPTED = 3;
+  TASK_STATE_RUNNING = 4;
+  TASK_STATE_SUCCEEDED = 5;
+  TASK_STATE_FAILED = 6;
+  TASK_STATE_CANCELED = 7;
+  TASK_STATE_UNKNOWN = 8;
+}
+
+// Envelope is one WebSocket binary frame.
+message Envelope {
+  string message_id = 1;
+  int64 sent_at_ms = 2;
+  oneof body {
+    Hello hello = 10;
+    HelloAck hello_ack = 11;
+    Heartbeat heartbeat = 12;
+    HeartbeatAck heartbeat_ack = 13;
+    FactsReport facts = 14;
+    TaskDispatch task = 20;
+    TaskUpdate update = 21;
+    TaskResult result = 22;
+    Error error = 90;
+  }
+}
+
+message Hello {
+  string agent_id = 1;
+  string version = 2;
+  string os = 3;
+  string arch = 4;
+  string kernel = 5;
+  string hostname = 6;
+  repeated string capabilities = 7;
+  int64 started_at_ms = 8;
+}
+
+message HelloAck {
+  int64 server_time_ms = 1;
+  int32 protocol_version = 2;
+  int64 heartbeat_interval_ms = 3;
+}
+
+message Heartbeat {
+  int64 uptime_ms = 1;
+  double load1 = 2;
+  uint64 mem_total = 3;
+  uint64 mem_used = 4;
+  string incus_version = 5;
+  int32 running_tasks = 6;
+}
+
+message HeartbeatAck {
+  int64 server_time_ms = 1;
+}
+
+message FactsReport {
+  string hostname = 1;
+  string os = 2;
+  string os_version = 3;
+  string kernel = 4;
+  string arch = 5;
+  string network_manager = 6;
+  string incus_version = 7;
+  string incus_status = 8;
+  bool ebpf_available = 9;
+  string boot_id = 10;
+  map<string, string> extra = 11;
+}
+
+message TaskDispatch {
+  string task_id = 1;
+  TaskType type = 2;
+  bytes payload = 3;
+  int64 deadline_ms = 4;
+  string plan_hash = 5;
+}
+
+message TaskUpdate {
+  string task_id = 1;
+  TaskState state = 2;
+  string message = 3;
+  int64 at_ms = 4;
+}
+
+message TaskResult {
+  string task_id = 1;
+  TaskState state = 2;
+  bytes payload = 3;
+  string error_code = 4;
+  string error = 5;
+  int64 at_ms = 6;
+  string plan_hash = 7;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+}
+
+// NodenetSnapshot is the read-only host network view returned by the agent.
+message NodenetSnapshot {
+  string host = 1;
+  repeated NIC nics = 2;
+  repeated Route routes = 3;
+  repeated FirewallRule firewall = 4;
+  repeated WiFiNetwork wifi_scan = 5;
+  string wifi_device = 6;
+  repeated string capabilities = 7;
+}
+
+message NIC {
+  string name = 1;
+  string state = 2;
+  string kind = 3;
+  string mac = 4;
+  int32 mtu = 5;
+  repeated Address addresses = 6;
+  WiFiLink wifi = 7;
+}
+
+message Address {
+  string family = 1;
+  string address = 2;
+  int32 prefixlen = 3;
+}
+
+message Route {
+  string destination = 1;
+  string gateway = 2;
+  string device = 3;
+  string metric = 4;
+}
+
+message FirewallRule {
+  string handle = 1;
+  string rule = 2;
+}
+
+message WiFiNetwork {
+  string ssid = 1;
+  int32 signal = 2;
+  int32 frequency = 3;
+  bool secure = 4;
+}
+
+message WiFiLink {
+  bool connected = 1;
+  string ssid = 2;
+  int32 signal = 3;
+  int32 frequency = 4;
+}

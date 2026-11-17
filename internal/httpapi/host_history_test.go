@@ -181,3 +181,17 @@ func TestHostHistoryDisabled(t *testing.T) {
 		}
 	}
 }
+
+func TestHostHistoryStoreErrors(t *testing.T) {
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	cookie := f.login(t)
+	if err := f.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/v1/audit", "/api/v1/tasks", "/api/v1/tasks/missing"} {
+		rec := f.request(t, http.MethodGet, path, nil, cookie, "")
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("%s status = %d body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+}

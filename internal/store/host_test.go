@@ -27,8 +27,8 @@ func TestSchemaMigrations(t *testing.T) {
 	if err := s.db.QueryRowContext(context.Background(), `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if version != 2 {
-		t.Fatalf("schema version = %d, want 2", version)
+	if version != 3 {
+		t.Fatalf("schema version = %d, want 3", version)
 	}
 }
 
@@ -61,7 +61,7 @@ func TestSchemaMigrationFromLegacyDatabase(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	version, err := s.SchemaVersion(context.Background())
-	if err != nil || version != 2 {
+	if err != nil || version != 3 {
 		t.Fatalf("SchemaVersion() = %d, %v", version, err)
 	}
 	old, err := s.GetMigration(context.Background(), "old")
@@ -345,5 +345,111 @@ func TestHostAuditFilterByCluster(t *testing.T) {
 	list, err := s.ListHostAudit(ctx, "c1", "", 0)
 	if err != nil || len(list) != 1 || list[0].ID != "a" {
 		t.Fatalf("ListHostAudit(cluster only) = %#v, %v", list, err)
+	}
+}
+
+func TestEnrollmentTokenLifecycle(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+	now := time.Now().UTC()
+
+	token := &EnrollmentToken{
+		ID:        "token-1",
+		TokenHash: "hash-1",
+		Cluster:   "c1",
+		Member:    "node-a",
+		ExpiresAt: now.Add(15 * time.Minute),
+		CreatedBy: "admin",
+		CreatedAt: now,
+	}
+	if err := s.CreateEnrollmentToken(ctx, token); err != nil {
+		t.Fatalf("CreateEnrollmentToken() error = %v", err)
+	}
+	if err := s.CreateEnrollmentToken(ctx, token); err == nil {
+		t.Fatal("duplicate token hash expected error")
+	}
+
+	if _, err := s.ConsumeEnrollmentToken(ctx, "hash-1", "c2", "node-a", now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Consume(wrong cluster) error = %v", err)
+	}
+	got, err := s.ConsumeEnrollmentToken(ctx, "hash-1", "c1", "node-a", now)
+	if err != nil {
+		t.Fatalf("Consume() error = %v", err)
+	}
+	if got.UsedAt.IsZero() {
+		t.Fatal("Consume() did not mark used_at")
+	}
+	if _, err := s.ConsumeEnrollmentToken(ctx, "hash-1", "c1", "node-a", now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Consume(reused) error = %v", err)
+	}
+
+	expired := &EnrollmentToken{
+		ID:        "token-2",
+		TokenHash: "hash-2",
+		Cluster:   "c1",
+		Member:    "node-b",
+		ExpiresAt: now.Add(-time.Minute),
+		CreatedAt: now,
+	}
+	if err := s.CreateEnrollmentToken(ctx, expired); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConsumeEnrollmentToken(ctx, "hash-2", "c1", "node-b", now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Consume(expired) error = %v", err)
+	}
+}
+
+func TestGetAgentByMember(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+	now := time.Now().UTC()
+	agent := &Agent{
+		ID: "agent-1", Cluster: "c1", Member: "node-a", Status: AgentOnline,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.UpsertAgent(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetAgentByMember(ctx, "c1", "node-a")
+	if err != nil || got.ID != "agent-1" {
+		t.Fatalf("GetAgentByMember() = %#v, %v", got, err)
+	}
+	if _, err := s.GetAgentByMember(ctx, "c1", "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetAgentByMember(missing) error = %v", err)
+	}
+}
+
+func TestSchemaVersionAfterClose(t *testing.T) {
+	s := openSQLite(t)
+	_ = s.Close()
+	if _, err := s.SchemaVersion(context.Background()); err == nil {
+		t.Fatal("SchemaVersion() expected error after close")
+	}
+}
+
+func TestMigrationFailureLeavesVersionUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{migrationsSchema, assetSchema(), clusterSchema, hostSchema} {
+		if _, err := legacy.Exec(statement); err != nil {
+			_ = legacy.Close()
+			t.Fatal(err)
+		}
+	}
+	if _, err := legacy.Exec(`INSERT INTO enrollment_tokens
+		(id, token_hash, cluster, member, expires_at, used_at, created_by, created_at)
+		VALUES ('a', 'same', 'c1', 'n1', 1, 0, '', 1), ('b', 'same', 'c1', 'n2', 1, 0, '', 1)`); err != nil {
+		_ = legacy.Close()
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Open(context.Background(), "sqlite", path); err == nil {
+		t.Fatal("Open() expected migration failure")
 	}
 }

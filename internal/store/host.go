@@ -82,6 +82,18 @@ type HostAudit struct {
 	Detail     string    `json:"detail,omitempty"`
 }
 
+// EnrollmentToken is one single-use agent enrollment token.
+type EnrollmentToken struct {
+	ID        string    `json:"id"`
+	TokenHash string    `json:"-"`
+	Cluster   string    `json:"cluster"`
+	Member    string    `json:"member"`
+	ExpiresAt time.Time `json:"expires_at"`
+	UsedAt    time.Time `json:"used_at,omitempty"`
+	CreatedBy string    `json:"created_by,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // Agent is one enrolled host agent.
 type Agent struct {
 	ID              string    `json:"id"`
@@ -520,6 +532,23 @@ func (s *SQLStore) GetAgent(ctx context.Context, id string) (*Agent, error) {
 	return agent, nil
 }
 
+// GetAgentByMember loads one agent by cluster and member.
+func (s *SQLStore) GetAgentByMember(ctx context.Context, cluster, member string) (*Agent, error) {
+	const query = `SELECT id, cluster, member, hostname, status, cert_fingerprint,
+		cert_not_after, version, os, kernel, arch, capabilities, facts, last_seen,
+		created_at, updated_at FROM agents WHERE cluster = ? AND member = ?`
+	row := s.db.QueryRowContext(ctx, s.rebind(query), cluster, member)
+	agent, err := scanAgent(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: agent %s/%s: %w", cluster, member, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get agent by member: %w", err)
+	}
+
+	return agent, nil
+}
+
 // ListAgents returns all enrolled agents ordered by cluster and member.
 func (s *SQLStore) ListAgents(ctx context.Context) ([]*Agent, error) {
 	const query = `SELECT id, cluster, member, hostname, status, cert_fingerprint,
@@ -544,6 +573,68 @@ func (s *SQLStore) ListAgents(ctx context.Context) ([]*Agent, error) {
 	}
 
 	return out, nil
+}
+
+// CreateEnrollmentToken persists one single-use token.
+func (s *SQLStore) CreateEnrollmentToken(ctx context.Context, token *EnrollmentToken) error {
+	if token == nil {
+		return errors.New("store: enrollment token is nil")
+	}
+	now := time.Now().UTC()
+	if token.CreatedAt.IsZero() {
+		token.CreatedAt = now
+	}
+	const query = `INSERT INTO enrollment_tokens
+		(id, token_hash, cluster, member, expires_at, used_at, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	if _, err := s.db.ExecContext(ctx, s.rebind(query),
+		token.ID, token.TokenHash, token.Cluster, token.Member, unixNanos(token.ExpiresAt),
+		unixNanos(token.UsedAt), token.CreatedBy, unixNanos(token.CreatedAt)); err != nil {
+		return fmt.Errorf("store: create enrollment token: %w", err)
+	}
+
+	return nil
+}
+
+// ConsumeEnrollmentToken atomically marks a token used and returns it. The
+// cluster/member binding must match; expired and already-used tokens return
+// ErrNotFound.
+func (s *SQLStore) ConsumeEnrollmentToken(ctx context.Context, tokenHash, cluster, member string, now time.Time) (*EnrollmentToken, error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	const update = `UPDATE enrollment_tokens SET used_at = ?
+		WHERE token_hash = ? AND used_at = 0 AND expires_at > ? AND cluster = ? AND member = ?`
+	result, err := s.db.ExecContext(ctx, s.rebind(update), unixNanos(now), tokenHash, unixNanos(now), cluster, member)
+	if err != nil {
+		return nil, fmt.Errorf("store: consume enrollment token: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("store: consume enrollment token: %w", err)
+	}
+	if affected == 0 {
+		return nil, fmt.Errorf("store: enrollment token: %w", ErrNotFound)
+	}
+
+	const query = `SELECT id, token_hash, cluster, member, expires_at, used_at, created_by, created_at
+		FROM enrollment_tokens WHERE token_hash = ?`
+	row := s.db.QueryRowContext(ctx, s.rebind(query), tokenHash)
+	var (
+		token   EnrollmentToken
+		expires int64
+		used    int64
+		created int64
+	)
+	if err := row.Scan(&token.ID, &token.TokenHash, &token.Cluster, &token.Member, &expires,
+		&used, &token.CreatedBy, &created); err != nil {
+		return nil, fmt.Errorf("store: read enrollment token: %w", err)
+	}
+	token.ExpiresAt = timeFromNanos(expires)
+	token.UsedAt = timeFromNanos(used)
+	token.CreatedAt = timeFromNanos(created)
+
+	return &token, nil
 }
 
 func scanHostTask(row rowScanner) (*HostTask, error) {

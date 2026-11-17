@@ -419,3 +419,64 @@ func TestNodeAccessFilesAndDefaults(t *testing.T) {
 		t.Fatalf("ValidateFiles(known_hosts) error = %v", err)
 	}
 }
+
+func TestAgentEnabledRequiresTLSFiles(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.applyDefaults()
+	cfg.Agent.Enabled = true
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected error for missing agent TLS settings")
+	}
+	cfg.Agent.TLSCert = "/cert"
+	cfg.Agent.TLSKey = "/key"
+	cfg.Agent.ClientCA = "/ca"
+	cfg.Agent.CAKey = "/ca-key"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestAgentValidateFiles(t *testing.T) {
+	dir := t.TempDir()
+	cert := writeFile(t, dir, "agent-server.crt", "cert")
+	key := writeFile(t, dir, "agent-server.key", "key")
+	ca := writeFile(t, dir, "agent-ca.crt", "ca")
+	caKey := writeFile(t, dir, "agent-ca.key", "ca-key")
+
+	cfg := minimalConfig()
+	cfg.Clusters[0].TLSCert = "-----BEGIN CERTIFICATE-----\nYQ==\n-----END CERTIFICATE-----\n"
+	cfg.Clusters[0].TLSKey = "-----BEGIN PRIVATE KEY-----\nYQ==\n-----END PRIVATE KEY-----\n"
+	cfg.Agent = AgentConfig{
+		Enabled: true, Listen: "127.0.0.1:8444",
+		TLSCert: cert, TLSKey: key, ClientCA: ca, CAKey: caKey,
+	}
+	if err := cfg.ValidateFiles(); err != nil {
+		t.Fatalf("ValidateFiles() error = %v", err)
+	}
+	cfg.Agent.CAKey = filepath.Join(dir, "missing")
+	if err := cfg.ValidateFiles(); err == nil || !strings.Contains(err.Error(), "agent.ca_key") {
+		t.Fatalf("ValidateFiles(missing CA key) error = %v", err)
+	}
+}
+
+func TestApplyEnvAgentAndMetrics(t *testing.T) {
+	t.Setenv("INCUS_FLEET_NODE_ACCESS_MODE", "ssh")
+	t.Setenv("INCUS_FLEET_NODE_ACCESS_SSH_WRITE_FALLBACK", "false")
+	t.Setenv("INCUS_FLEET_AGENT_ENABLED", "true")
+	t.Setenv("INCUS_FLEET_AGENT_LISTEN", "127.0.0.1:9444")
+	t.Setenv("INCUS_FLEET_METRICS_ENABLED", "true")
+	t.Setenv("INCUS_FLEET_METRICS_RETENTION", "30m")
+	t.Setenv("INCUS_FLEET_METRICS_INTERVAL", "30s")
+
+	cfg := minimalConfig()
+	cfg.applyEnv()
+	if cfg.NodeAccess.Mode != "ssh" || cfg.NodeAccess.SSHWriteFallbackEnabled() {
+		t.Fatalf("node access env = %#v", cfg.NodeAccess)
+	}
+	if !cfg.Agent.Enabled || cfg.Agent.Listen != "127.0.0.1:9444" {
+		t.Fatalf("agent env = %#v", cfg.Agent)
+	}
+	if !cfg.Metrics.Enabled || cfg.Metrics.Retention != "30m" || cfg.Metrics.Interval != "30s" {
+		t.Fatalf("metrics env = %#v", cfg.Metrics)
+	}
+}

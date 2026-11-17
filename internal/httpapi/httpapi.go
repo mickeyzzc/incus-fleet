@@ -43,6 +43,7 @@ type Deps struct {
 	Store      *store.SQLStore
 	NodeNet    *nodeaccess.Service
 	NodeJoin   *nodejoin.Service
+	Agent      AgentDispatcher
 	Auth       *auth.Authenticator
 	StaticFS   fs.FS
 	Logger     *slog.Logger
@@ -58,6 +59,7 @@ type API struct {
 	store      *store.SQLStore
 	nodenet    *nodeaccess.Service
 	nodejoin   *nodejoin.Service
+	agent      AgentDispatcher
 	auth       *auth.Authenticator
 	logger     *slog.Logger
 	version    string
@@ -79,6 +81,7 @@ func New(deps Deps) *API {
 		store:      deps.Store,
 		nodenet:    deps.NodeNet,
 		nodejoin:   deps.NodeJoin,
+		agent:      deps.Agent,
 		auth:       deps.Auth,
 		logger:     logger,
 		version:    deps.Version,
@@ -135,6 +138,9 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("GET /api/v1/audit", a.requireAuth(http.HandlerFunc(a.listHostAudit)))
 	mux.Handle("GET /api/v1/tasks", a.requireAuth(http.HandlerFunc(a.listHostTasks)))
 	mux.Handle("GET /api/v1/tasks/{id}", a.requireAuth(http.HandlerFunc(a.getHostTask)))
+	mux.Handle("GET /api/v1/agents", a.requireAuth(http.HandlerFunc(a.listAgents)))
+	mux.Handle("POST /api/v1/agents/enrollment-tokens", a.requireAuth(http.HandlerFunc(a.createAgentEnrollmentToken)))
+	mux.Handle("GET /api/v1/agents/{id}/snapshot", a.requireAuth(http.HandlerFunc(a.agentSnapshot)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.listSnapshots)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.createSnapshot)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore", a.requireAuth(http.HandlerFunc(a.restoreSnapshot)))

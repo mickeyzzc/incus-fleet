@@ -291,6 +291,29 @@ func (c *Config) ValidateFiles() error {
 		}
 	}
 
+	if c.Agent.Enabled {
+		for _, p := range []struct {
+			label string
+			path  string
+		}{
+			{"agent.tls_cert", c.Agent.TLSCert},
+			{"agent.tls_key", c.Agent.TLSKey},
+			{"agent.client_ca", c.Agent.ClientCA},
+			{"agent.ca_key", c.Agent.CAKey},
+		} {
+			if p.path == "" || strings.Contains(p.path, "-----BEGIN ") {
+				continue
+			}
+			info, err := os.Stat(p.path)
+			if err != nil {
+				return fmt.Errorf("config: %s: %w", p.label, err)
+			}
+			if info.IsDir() {
+				return fmt.Errorf("config: %s is a directory", p.label)
+			}
+		}
+	}
+
 	for i := range c.Clusters {
 		cl := &c.Clusters[i]
 		for _, p := range []struct {
@@ -335,6 +358,19 @@ func (a AgentConfig) validate() error {
 	}
 	if _, _, err := net.SplitHostPort(listen); err != nil {
 		return fmt.Errorf("config: agent.listen %q is invalid", a.Listen)
+	}
+	if !a.Enabled {
+		return nil
+	}
+	for label, value := range map[string]string{
+		"agent.tls_cert":  a.TLSCert,
+		"agent.tls_key":   a.TLSKey,
+		"agent.client_ca": a.ClientCA,
+		"agent.ca_key":    a.CAKey,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("config: %s is required when agent.enabled is true", label)
+		}
 	}
 
 	return nil

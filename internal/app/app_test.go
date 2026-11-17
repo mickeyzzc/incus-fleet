@@ -2,15 +2,21 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"github.com/mickeyzzc/incus-fleet/internal/agentgw"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
@@ -174,4 +180,96 @@ func freeAddress(t *testing.T) string {
 	_ = listener.Close()
 
 	return address
+}
+
+func TestRunWithAgentGateway(t *testing.T) {
+	ca, err := agentgw.GenerateCA("app-test-ca")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := ca.IssueServer([]string{"127.0.0.1"}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	writePEM := func(name string, data []byte) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate[0]})
+	keyDER, err := x509.MarshalPKCS8PrivateKey(server.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+
+	cfg := testConfig(t)
+	cfg.Server.Listen = freeAddress(t)
+	cfg.Agent = config.AgentConfig{
+		Enabled:  true,
+		Listen:   freeAddress(t),
+		TLSCert:  writePEM("server.crt", certPEM),
+		TLSKey:   writePEM("server.key", keyPEM),
+		ClientCA: writePEM("ca.crt", ca.CertPEM()),
+		CAKey:    writePEM("ca.key", ca.KeyPEM()),
+	}
+
+	application, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatalf("New(agent) error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- application.Run(ctx) }()
+
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} //nolint:gosec // test listener
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := client.Post("https://"+cfg.Agent.Listen+"/api/v1/agent/enroll", "application/json", strings.NewReader("{}"))
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				cancel()
+				t.Fatalf("agent enroll status = %d", resp.StatusCode)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("agent gateway did not start: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() did not stop")
+	}
+}
+
+func TestNewAgentCAError(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Agent = config.AgentConfig{
+		Enabled: true, Listen: "127.0.0.1:9444",
+		TLSCert: "/missing/server.crt", TLSKey: "/missing/server.key",
+		ClientCA: "/missing/ca.crt", CAKey: "/missing/ca.key",
+	}
+	if _, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+	); err == nil {
+		t.Fatal("New(agent missing CA) expected error")
+	}
 }

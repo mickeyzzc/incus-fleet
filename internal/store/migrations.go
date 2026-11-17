@@ -44,6 +44,12 @@ var schemaMigrations = []schemaMigration{
 		version:    2,
 		statements: []string{hostSchema},
 	},
+	{
+		version: 3,
+		statements: []string{
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_enrollment_tokens_hash ON enrollment_tokens(token_hash)`,
+		},
+	},
 }
 
 func (s *SQLStore) migrate(ctx context.Context) error {
