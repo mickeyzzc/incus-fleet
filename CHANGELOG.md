@@ -55,8 +55,10 @@ All notable changes to this project are documented here. The format follows
 - Agent-first **Add node** flow in the UI: enrollment-token display with polling, signed agent
   bootstrap, step progress, and an explicit SSH fallback. `GET /api/v1/agents` accepts
   `cluster`/`member` filters.
-- Durable remote-write spool with restart replay, bounded queue/byte retention, and older-file
-  eviction. The HA dispatcher now also runs `agent.bootstrap` and `agent.snapshot` handlers.
+- Durable remote-write spool with restart replay, bounded queue/byte retention, older-file
+  eviction, and per-instance spool partitions so multiple center instances cannot replay or delete
+  each other's batches. The HA dispatcher now also runs `agent.bootstrap` and `agent.snapshot`
+  handlers.
 - Reliable IPv4/IPv6 TCP retransmit attribution through a sockops flow→cgroup map, validated with
   container packet loss; OOM counters are aggregated per instance across nested cgroups.
 - Native Linux netlink for link/address/fleet-route writes, an opt-in detached network rollback

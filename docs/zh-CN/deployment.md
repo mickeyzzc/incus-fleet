@@ -423,6 +423,7 @@ metrics:
     queue_size: 10000
     batch_size: 500
     spool_dir: /home/incus/data/remote-write
+    spool_partition: app-a     # 每个中心实例唯一
     max_bytes: 67108864
   query:
     enabled: true
@@ -436,10 +437,13 @@ metrics:
     public_url: https://fleet.example
 ```
 
-remote write 队列是磁盘持久化的。每个批次先写入 `spool_dir` 再进入内存队列；发送成功后删除文件，
-崩溃/重启遗留的文件会在启动时重放。`queue_size` 限制内存队列，`max_bytes` 限制 spool（默认
-64 MiB），任一上限超出时删除最旧文件。429/5xx 后退重试；4xx 批次作为永久拒绝丢弃。
-`spool_dir` 默认是文件型 SQLite 数据库旁的 `data/remote-write`。Prometheus 需要
+remote write 队列是磁盘持久化的。每个中心实例写入自己的分区 `spool_dir/<spool_partition>`；
+`spool_partition` 默认依次取 `ha.worker_id`、hostname，因此多个中心实例不会重放或删除彼此的批次。
+同一主机运行多个实例时应显式设置。每个批次先写入再进入内存队列；发送成功后删除文件，崩溃/重启
+遗留的文件会在该分区再次启动时重放。升级时 `spool_dir` 根目录下的旧文件会迁移进分区。
+`queue_size` 限制内存队列，`max_bytes` 限制每个分区（默认 64 MiB），任一上限超出时删除最旧文件。
+429/5xx 后退重试；4xx 批次作为永久拒绝丢弃。`spool_dir` 默认是文件型 SQLite 数据库旁的
+`data/remote-write`。Prometheus 需要
 `--web.enable-remote-write-receiver`；VictoriaMetrics 单机使用
 `http://vm:8428/api/v1/write`，集群使用
 `http://vminsert:8480/insert/<accountID>/prometheus/api/v1/write`。token 放在文件或环境变量中，

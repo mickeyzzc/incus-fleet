@@ -50,8 +50,9 @@
   用于独立抓取验证，并保持 bearer token 大小写敏感。
 - UI 的 **Add node** 支持 agent-first：显示一次性注册 token 并轮询上线、调用签名 agent
   bootstrap、展示步骤进度，并显式回退 SSH。`GET /api/v1/agents` 支持 `cluster`/`member` 过滤。
-- remote-write 磁盘持久化 spool、重启重放、队列/字节上限和旧文件淘汰。HA dispatcher 新增
-  `agent.bootstrap` 与 `agent.snapshot` handler。
+- remote-write 磁盘持久化 spool、重启重放、队列/字节上限、旧文件淘汰，以及按中心实例隔离的
+  spool 分区，多个中心实例不会重放或删除彼此的批次。HA dispatcher 新增 `agent.bootstrap` 与
+  `agent.snapshot` handler。
 - sockops flow→cgroup 映射实现可靠的 IPv4/IPv6 TCP 重传归因，并用容器丢包验证；OOM 计数按
   实例聚合嵌套 cgroup。
 - Linux 原生 netlink 链路/地址/fleet 路由写入、可选 detach 网络回滚计时器，以及现有 UI 的

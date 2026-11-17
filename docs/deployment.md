@@ -434,6 +434,7 @@ metrics:
     queue_size: 10000
     batch_size: 500
     spool_dir: /home/incus/data/remote-write
+    spool_partition: app-a     # unique per center instance
     max_bytes: 67108864
   query:
     enabled: true
@@ -447,12 +448,16 @@ metrics:
     public_url: https://fleet.example
 ```
 
-The remote write queue is disk-backed. Each batch is written to `spool_dir` before it is queued;
-successful writes delete the file, and files left by a crash/restart are replayed on startup.
-`queue_size` bounds the in-memory queue, `max_bytes` bounds the spool (64 MiB default), and the
-oldest files are removed when either limit is exceeded. 429/5xx responses retry with backoff; 4xx
-batches are dropped as permanently rejected. `spool_dir` defaults to `data/remote-write` next to a
-file-backed SQLite database. Prometheus needs
+The remote write queue is disk-backed. Each center instance writes to its own partition
+`spool_dir/<spool_partition>`; `spool_partition` defaults to `ha.worker_id`, then the hostname, so
+multiple app instances never replay or delete each other's batches. Set it explicitly when running
+more than one instance per host. Each batch is written before it is queued; successful writes delete
+the file, and files left by a crash/restart are replayed when that partition starts again. Legacy
+files directly under `spool_dir` are migrated into the partition on upgrade. `queue_size` bounds the
+in-memory queue, `max_bytes` bounds each partition (64 MiB default), and the oldest files are removed
+when either limit is exceeded. 429/5xx responses retry with backoff; 4xx batches are dropped as
+permanently rejected. `spool_dir` defaults to `data/remote-write` next to a file-backed SQLite
+database. Prometheus needs
 `--web.enable-remote-write-receiver`; VictoriaMetrics single-node uses
 `http://vm:8428/api/v1/write`, cluster uses
 `http://vminsert:8480/insert/<accountID>/prometheus/api/v1/write`. Keep tokens in files or
