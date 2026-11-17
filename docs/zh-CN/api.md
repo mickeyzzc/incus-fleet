@@ -336,6 +336,28 @@ token 只返回一次；数据库只存它的 SHA-256。注册请求本身是 ag
 `503 agent_offline` 表示 agent 没有在线 WebSocket；`504 agent_timeout` 表示派发超时前没有响应；
 `502 agent_error` 表示 agent 拒绝或执行任务失败。
 
+`POST /api/v1/agents/{id}/bootstrap` 构建、签名并向 agent 的特权 helper 派发 Incus
+安装/初始化/加入 spec。spec 使用 agent CA 私钥签名，helper 执行前用 agent identity 目录中的
+CA 证书验证。`mode=join` 会从现有集群申请一次性 token 并渲染 join preseed；`mode=init` 会
+渲染新集群 preseed（dir 存储池和 `incusbr0` 网桥）。
+
+```json
+// 加入现有集群；只有仓库已预配置时才安装 Incus
+{"mode": "join", "address": "198.51.100.11", "storage_source": "/srv/incus",
+ "install_mode": "package", "version_pin": "7.0", "packages": ["incus"]}
+// 初始化新集群
+{"mode": "init", "address": "192.0.2.10", "network_cidr": "10.0.0.1/24",
+ "install_mode": "existing"}
+// 200
+{"result": {"ok": true, "task_id": "...", "mode": "bootstrap",
+            "message": "Incus bootstrap complete", "steps": ["install", "service", "preseed", "ready"]}}
+```
+
+helper 按 task ID 幂等：已完成的 install/service/preseed/ready 步骤记录在
+`/var/lib/incus-fleet-helper/bootstrap-<task_id>.json`，重试时跳过。`install_mode=package` 使用
+发行版已配置的仓库，支持 apt、dnf、zypper、apk 和 pacman；当前 helper 会拒绝 `repo_url`，不会
+添加未验证仓库。安装后会校验 Incus 版本 pin。`confirm`/`rollback` 不会卸载软件包。
+
 `POST /api/v1/agents/{id}/network` 通过特权 helper 派发一个允许列表内的网络变更。支持的 action
 为 `link-state`、`address`、`route-add`、`route-delete`、`firewall-add`、`firewall-delete`、
 `wifi-connect`、`confirm` 和 `rollback`。

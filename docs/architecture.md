@@ -59,6 +59,8 @@ other. Caddy load-balances browsers and pins each browser to one app instance (s
 | `cmd/incus-fleet` | Flags, config loading, structured logging, signal handling |
 | `internal/config` | YAML parsing, environment overrides, defaults, validation, cert file checks |
 | `internal/clusters` | Dials Incus endpoints, holds pinned-cert clients, builds health summaries, reconnect |
+| `internal/bootstrap` | Signed Incus bootstrap spec and signature verification |
+| `internal/incusbootstrap` | Join/init Incus preseed rendering |
 | `internal/hostops` | Typed host operation interface and backend selection |
 | `internal/nodeaccess` | Resolves the local or SSH host operator for a cluster member |
 | `internal/nodejoin` | SSH-based Incus installation and cluster join for new members |
@@ -167,7 +169,11 @@ and heartbeat acknowledgements. The agent reports facts and `ip -j` based networ
 can apply allowlisted link/address/route/firewall/Wi-Fi changes through a short-lived privileged
 helper. The helper validates the JSON contract, records a rollback snapshot keyed by task ID, and
 persists addresses through the detected manager (ifupdown, systemd-networkd, netplan, wicked, or
-NetworkManager). Incus bootstrap, telemetry, and eBPF remain later phases.
+NetworkManager). Incus provisioning is a signed declarative spec: the center builds a join or init
+preseed and signs it with the agent CA key; the helper verifies the signature, installs through the
+host package manager when requested, runs `incus admin init --preseed`, waits for the local API,
+and records idempotent steps under `/var/lib/incus-fleet-helper`. Telemetry and eBPF remain later
+phases.
 
 ## Shared assets and batch operations
 

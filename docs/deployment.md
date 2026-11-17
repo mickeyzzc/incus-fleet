@@ -330,6 +330,27 @@ sample unit runs with `NoNewPrivileges=false` (sudo needs the setuid transition)
 `ProtectSystem=strict`, `MemoryMax=128M`, and `CPUQuota=25%`; verify the resource targets on the
 lowest-spec node before widening use.
 
+#### Incus bootstrap through the agent
+
+Once the agent is online, the center can provision Incus through
+`POST /api/v1/agents/{id}/bootstrap`. The spec is signed with the same CA key used for agent
+enrollment; the helper verifies it against `/var/lib/incus-fleet-agent/identity/ca.pem`. Keep the
+agent CA private key on the center only.
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"join","address":"192.0.2.11","storage_source":"/srv/incus",
+       "install_mode":"existing","version_pin":"7.0"}' \
+  https://fleet.example/api/v1/agents/AGENT_ID/bootstrap
+```
+
+For `install_mode=package`, configure the Incus package repository on the node first. The helper
+uses apt, dnf, zypper, apk, or pacman and refuses to add an unverified `repo_url`. For a new
+cluster use `"mode":"init"` and a `network_cidr`; the defaults create a dir pool at `/srv/incus`
+and an `incusbr0` bridge. Re-running the same request is safe: completed steps are recorded under
+`/var/lib/incus-fleet-helper/bootstrap-<task_id>.json`.
+
 #### Adding a node from the UI
 
 The **Add node** dialog can provision a bare host and join it to a cluster. It needs:

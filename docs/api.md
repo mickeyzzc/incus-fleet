@@ -388,6 +388,30 @@ to `GET /api/v1/agent/connect` with mTLS and sends protobuf `Envelope` frames ov
 `503 agent_offline` means the agent has no live WebSocket; `504 agent_timeout` means it did not
 answer before the dispatch timeout; `502 agent_error` means the agent rejected or failed the task.
 
+`POST /api/v1/agents/{id}/bootstrap` builds, signs, and dispatches an Incus install/init/join
+spec to the agent's privileged helper. The spec is signed with the agent CA key; the helper
+verifies it against the CA certificate in the agent identity directory before executing anything.
+`mode=join` requests a single-use token from the existing cluster and renders a join preseed;
+`mode=init` renders a new-cluster preseed with a directory pool and `incusbr0` bridge.
+
+```json
+// join an existing cluster; install Incus only if the repository is preconfigured
+{"mode": "join", "address": "198.51.100.11", "storage_source": "/srv/incus",
+ "install_mode": "package", "version_pin": "7.0", "packages": ["incus"]}
+// initialize a new cluster
+{"mode": "init", "address": "192.0.2.10", "network_cidr": "10.0.0.1/24",
+ "install_mode": "existing"}
+// 200
+{"result": {"ok": true, "task_id": "...", "mode": "bootstrap",
+            "message": "Incus bootstrap complete", "steps": ["install", "service", "preseed", "ready"]}}
+```
+
+The helper is idempotent per task ID: completed install/service/preseed/ready steps are recorded in
+`/var/lib/incus-fleet-helper/bootstrap-<task_id>.json` and skipped on retry. `install_mode=package`
+uses the distribution's configured repositories and supports apt, dnf, zypper, apk, and pacman;
+the current helper rejects `repo_url` rather than adding an unverified repository. Incus version
+pins are checked after installation. `confirm`/`rollback` do not undo package installation.
+
 `POST /api/v1/agents/{id}/network` dispatches one allowlisted network mutation through the
 privileged helper. Supported actions are `link-state`, `address`, `route-add`, `route-delete`,
 `firewall-add`, `firewall-delete`, `wifi-connect`, `confirm`, and `rollback`.

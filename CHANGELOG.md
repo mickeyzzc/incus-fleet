@@ -27,6 +27,9 @@ All notable changes to this project are documented here. The format follows
   changes, with protocol-99 fleet routes and per-task rollback snapshots.
 - Persistence adapters for ifupdown/ifupdown-ng, systemd-networkd, netplan, wicked, and
   NetworkManager; confirm/rollback actions restore the captured state.
+- Signed Incus bootstrap specs, join/init preseed generation, apt/dnf/zypper/apk/pacman install
+  adapters, version pinning, and idempotent bootstrap state recovery.
+- `POST /api/v1/agents/{id}/bootstrap` for agent-driven Incus provisioning.
 
 ### Fixed
 

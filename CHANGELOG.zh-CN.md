@@ -26,6 +26,9 @@
   protocol 99，并按任务保存回滚快照。
 - ifupdown/ifupdown-ng、systemd-networkd、netplan、wicked 和 NetworkManager 持久化适配器；
   confirm/rollback 恢复捕获的状态。
+- 签名 Incus bootstrap spec、join/init preseed 生成、apt/dnf/zypper/apk/pacman 安装适配器、
+  版本 pin 和幂等 bootstrap 状态恢复。
+- 用于 agent 驱动 Incus 准备的 `POST /api/v1/agents/{id}/bootstrap`。
 
 ### 修复
 

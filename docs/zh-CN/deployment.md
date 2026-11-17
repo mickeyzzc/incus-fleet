@@ -326,6 +326,25 @@ bootstrap 和指标持久化仍在后续阶段。示例单元使用 `NoNewPrivil
 转换）、`ProtectSystem=strict`、`MemoryMax=128M` 和 `CPUQuota=25%`；在最低配节点上验证资源
 目标后再扩大使用范围。
 
+#### 通过 agent 引导 Incus
+
+agent 上线后，中心可以通过 `POST /api/v1/agents/{id}/bootstrap` 准备 Incus。spec 使用与 agent
+注册相同的 CA 私钥签名；helper 用 `/var/lib/incus-fleet-agent/identity/ca.pem` 验证。CA 私钥
+只应保留在中心。
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"join","address":"192.0.2.11","storage_source":"/srv/incus",
+       "install_mode":"existing","version_pin":"7.0"}' \
+  https://fleet.example/api/v1/agents/AGENT_ID/bootstrap
+```
+
+`install_mode=package` 要求节点上已配置 Incus 软件仓库。helper 使用 apt、dnf、zypper、apk 或
+pacman，并拒绝添加未验证的 `repo_url`。新集群使用 `"mode":"init"` 和 `network_cidr`；默认创建
+`/srv/incus` 的 dir 存储池和 `incusbr0` 网桥。重复请求是安全的：已完成步骤记录在
+`/var/lib/incus-fleet-helper/bootstrap-<task_id>.json`。
+
 #### 从 UI 添加节点
 
 **Add node** 对话框可以准备一台裸机并加入集群。它需要：

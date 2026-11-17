@@ -55,6 +55,8 @@ flowchart LR
 | `cmd/incus-fleet` | 参数解析、配置加载、结构化日志、信号处理 |
 | `internal/config` | YAML 解析、环境变量覆盖、默认值、校验、证书文件检查 |
 | `internal/clusters` | 连接 Incus 端点、维护使用固定证书的客户端、构建健康摘要、重新连接 |
+| `internal/bootstrap` | 签名的 Incus bootstrap spec 与签名校验 |
+| `internal/incusbootstrap` | join/init Incus preseed 渲染 |
 | `internal/hostops` | 类型化的主机操作接口与后端选择 |
 | `internal/nodeaccess` | 为集群成员解析本地或 SSH 主机操作器 |
 | `internal/nodejoin` | 通过 SSH 为新成员安装 Incus 并加入集群 |
@@ -135,8 +137,10 @@ WebSocket。浏览器 API 负责创建注册 token，并通过 `GET /api/v1/agen
 agent 发送 Hello、Facts 和 Heartbeat；中心发送任务和心跳确认。agent 上报 facts 和基于
 `ip -j` 的网络快照，并可经短生命周期特权 helper 执行允许列表内的链路/地址/路由/防火墙/Wi-Fi
 变更。helper 校验 JSON 契约，按 task ID 记录回滚快照，并通过检测到的管理器（ifupdown、
-systemd-networkd、netplan、wicked 或 NetworkManager）持久化地址。Incus bootstrap、指标和
-eBPF 仍在后续阶段。
+systemd-networkd、netplan、wicked 或 NetworkManager）持久化地址。Incus 准备是签名的声明式
+spec：中心构建 join 或 init preseed，并用 agent CA 私钥签名；helper 验证签名，按需通过发行版
+包管理器安装，执行 `incus admin init --preseed`，等待本地 API，并把幂等步骤记录在
+`/var/lib/incus-fleet-helper`。指标和 eBPF 仍在后续阶段。
 
 ## 共享资产与批量操作
 
