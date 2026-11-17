@@ -531,15 +531,16 @@ sudo incus-fleet-agent ebpf-self-test \
 `--debug-cgroups` prints the observed cgroup ids and the inode mapping when attribution looks wrong.
 A non-zero `tcp_retransmits` delta confirms the host tracepoints are attached; block I/O or
 retransmits inside a container should add an `instance=<name> ... tcp_retransmits=...` line. The
-selftest also prints `socket_cgroups` to show how many flow mappings sockops has learned.
+selftest also prints `socket_cgroups` to show how many flow mappings sockops has learned. Both IPv4
+and IPv6 loopback/container flows are supported.
 
 Per-cgroup eBPF metrics are attributed by reading each cgroup's kernel file handle (including nested
 systemd cgroups), so container block I/O becomes `fleet_instance_block_latency_seconds_*` and
 retransmit/OOM counters. Block-latency buckets are powers of two nanoseconds. VMs are host-side
-cgroup metrics only. TCP retransmits are attributed via a sockops-maintained IPv4 flow→cgroup map,
-so softirq retransmit timers keep the container attribution; IPv6 falls back to the current task and
-is best-effort. OOM kills are aggregated per instance across nested cgroups. The host counters remain
-exact. `fleet_agent_telemetry_mode` reports `ebpf` or `procfs`.
+cgroup metrics only. TCP retransmits are attributed via a sockops-maintained IPv4/IPv6 flow→cgroup
+map, so softirq retransmit timers keep the container attribution. OOM kills are aggregated per
+instance across nested cgroups. The host counters remain exact. `fleet_agent_telemetry_mode`
+reports `ebpf` or `procfs`.
 
 #### Incus bootstrap through the agent
 

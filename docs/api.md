@@ -478,10 +478,9 @@ optional eBPF object adds host counters (`fleet_host_tcp_retransmits_total`,
 (`fleet_instance_tcp_retransmits_total`, `fleet_instance_oom_kills_total`, and
 `fleet_instance_block_latency_seconds_bucket|_sum|_count`). `fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}`
 reports the active path. Block-latency buckets use powers of two nanoseconds (roughly 2ns through
-1s) plus `+Inf`. TCP retransmits are attributed through a sockops-populated IPv4 flow→cgroup map,
-so retransmit timers that run in softirq context still resolve the owning container; IPv6 keeps the
-current-task fallback. OOM kills are attributed from the memcg/OOM context and are aggregated per
-instance across nested cgroups.
+1s) plus `+Inf`. TCP retransmits are attributed through a sockops-populated IPv4/IPv6 flow→cgroup
+map, so retransmit timers that run in softirq context still resolve the owning container. OOM kills
+are attributed from the memcg/OOM context and are aggregated per instance across nested cgroups.
 
 ## External metrics
 

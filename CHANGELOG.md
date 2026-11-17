@@ -57,7 +57,7 @@ All notable changes to this project are documented here. The format follows
   `cluster`/`member` filters.
 - Durable remote-write spool with restart replay, bounded queue/byte retention, and older-file
   eviction. The HA dispatcher now also runs `agent.bootstrap` and `agent.snapshot` handlers.
-- Reliable IPv4 TCP retransmit attribution through a sockops flow→cgroup map, validated with
+- Reliable IPv4/IPv6 TCP retransmit attribution through a sockops flow→cgroup map, validated with
   container packet loss; OOM counters are aggregated per instance across nested cgroups.
 - Native Linux netlink for link/address/fleet-route writes, an opt-in detached network rollback
   timer, and agent-backed node network routing for the existing UI.
