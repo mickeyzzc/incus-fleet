@@ -136,8 +136,14 @@ All lifecycle work is synchronous from the HTTP caller's perspective and bounded
 
 Host CPU, memory, storage, and instance counts come from the Incus cluster resources API.
 Per-instance metrics come from the live instance state API: CPU time, memory usage and peak,
-per-mountpoint disk usage, and per-interface network counters. No agent is installed for the
-core metrics; the frontend samples every 3 seconds and derives rates from counter deltas.
+per-mountpoint disk usage, and per-interface network counters. The frontend samples instances every
+3 seconds and derives rates from counter deltas.
+
+The optional host agent adds host telemetry every 10 seconds. The center stores it in a bounded
+in-memory ring buffer (360 points, one hour) with center-injected `cluster`, `member`, and
+`agent_id` labels. `GET /api/v1/metrics/query|snapshot|export` exposes JSON, Prometheus text, and
+CSV; metrics are not written to the control-plane database. Per-instance agent metrics, eBPF, and
+external TSDB integration are later phases.
 
 ## Host operations
 

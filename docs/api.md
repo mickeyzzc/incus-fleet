@@ -432,6 +432,42 @@ captured addresses, routes, link state, and persistence file for that interface.
 allowlisted; the helper rejects unknown actions, interface names, addresses, and task IDs. Wi-Fi
 passwords are passed only to the helper and are never stored in task/audit records.
 
+## Metrics
+
+The center keeps a **one-hour in-memory ring buffer** of agent telemetry (`fleet_` prefix,
+10-second interval). It does not persist metrics to the database. `cluster`, `member`, and
+`agent_id` labels are injected by the center and cannot be overridden by an agent.
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/v1/metrics/query?cluster=&member=&agent=&metric=&from=&to=` | series with points in range |
+| `GET /api/v1/metrics/snapshot` | latest point per matching series |
+| `GET /api/v1/metrics/export?format=prometheus\|json\|csv` | stream the current buffer |
+
+`from`/`to` accept RFC3339, a duration such as `1h` (relative to now), or Unix seconds. The default
+range is the last hour. Metrics are exposed as:
+
+```json
+{
+  "series": [
+    {
+      "name": "fleet_host_cpu_usage_ratio",
+      "labels": {"cluster": "c1", "member": "node-a", "agent_id": "..."},
+      "type": "gauge",
+      "points": [{"at": "2026-11-18T00:00:00Z", "value": 0.25}]
+    }
+  ]
+}
+```
+
+Prometheus export includes `# TYPE` lines and millisecond timestamps. CSV is long-form:
+`timestamp,metric,cluster,member,agent_id,value`. If `metrics.enabled` is false, all three endpoints
+return `503 unavailable`. Restarting the center resets the one-hour history; this is intentional.
+
+The agent currently exports `fleet_host_cpu_usage_ratio`, `fleet_host_memory_bytes`,
+`fleet_host_load`, `fleet_host_uptime_seconds`, and `fleet_host_network_bytes_total`. Per-instance
+and eBPF series are added in later phases.
+
 ## Host tasks and audit
 
 Every mutating node operation is recorded as a host task plus an immutable audit entry. Tasks and

@@ -30,6 +30,7 @@ from the language switcher.*
 - Optional Rust host agent (alpha): one-time enrollment, mTLS WebSocket, facts/heartbeats, and
   allowlisted host network changes and signed Incus bootstrap through a short-lived privileged
   helper
+- Agent host metrics with a one-hour center buffer and JSON/Prometheus/CSV export
 
 > Live migration preserves guest network state. When clusters use different subnets,
 > renew DHCP inside the guest after the move (or use matching subnets).

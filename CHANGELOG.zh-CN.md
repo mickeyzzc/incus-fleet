@@ -29,6 +29,8 @@
 - 签名 Incus bootstrap spec、join/init preseed 生成、apt/dnf/zypper/apk/pacman 安装适配器、
   版本 pin 和幂等 bootstrap 状态恢复。
 - 用于 agent 驱动 Incus 准备的 `POST /api/v1/agents/{id}/bootstrap`。
+- Agent 每 10 秒上报主机遥测，中心 1 小时环形缓冲，query/snapshot/export 端点，以及节点详情页
+  的主机指标图表。
 
 ### 修复
 

@@ -110,7 +110,9 @@ flowchart LR
 
 ## 资源监控
 
-宿主机 CPU、内存、存储和实例数量来自 Incus 集群资源 API。单实例指标来自实时实例状态 API：CPU 时间、内存使用量与峰值、各挂载点的磁盘占用，以及各网卡的流量计数。核心指标无需安装任何 agent；前端每 3 秒采样一次，并通过计数器差值推算速率。
+宿主机 CPU、内存、存储和实例数量来自 Incus 集群资源 API。单实例指标来自实时实例状态 API：CPU 时间、内存使用量与峰值、各挂载点的磁盘占用，以及各网卡的流量计数。前端每 3 秒采样一次，并通过计数器差值推算速率。
+
+可选主机 agent 每 10 秒上报主机遥测。中心把它保存在有界内存环形缓冲（360 个点，1 小时），并注入 `cluster`、`member`、`agent_id` 标签。`GET /api/v1/metrics/query|snapshot|export` 提供 JSON、Prometheus text 和 CSV；指标不写入控制面数据库。实例级 agent 指标、eBPF 和外部 TSDB 集成在后续阶段。
 
 ## 主机操作
 

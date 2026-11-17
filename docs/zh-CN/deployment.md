@@ -326,6 +326,21 @@ bootstrap 和指标持久化仍在后续阶段。示例单元使用 `NoNewPrivil
 转换）、`ProtectSystem=strict`、`MemoryMax=128M` 和 `CPUQuota=25%`；在最低配节点上验证资源
 目标后再扩大使用范围。
 
+#### 主机指标
+
+启用中心的 1 小时缓冲：
+
+```yaml
+metrics:
+  enabled: true
+  retention: 1h
+  interval: 10s
+```
+
+agent 每 10 秒上报主机 CPU/内存/负载/运行时间/网络计数器。中心不会把指标写入
+SQLite/PostgreSQL；重启中心会清空缓冲。节点详情页显示最近 1 小时，API 可导出 JSON、
+Prometheus text 或 CSV。Prometheus/VictoriaMetrics remote write 和 HTTP SD 在后续阶段。
+
 #### 通过 agent 引导 Incus
 
 agent 上线后，中心可以通过 `POST /api/v1/agents/{id}/bootstrap` 准备 Incus。spec 使用与 agent

@@ -330,6 +330,22 @@ sample unit runs with `NoNewPrivileges=false` (sudo needs the setuid transition)
 `ProtectSystem=strict`, `MemoryMax=128M`, and `CPUQuota=25%`; verify the resource targets on the
 lowest-spec node before widening use.
 
+#### Host metrics
+
+Enable the center's one-hour buffer:
+
+```yaml
+metrics:
+  enabled: true
+  retention: 1h
+  interval: 10s
+```
+
+The agent sends host CPU/memory/load/uptime/network counters every 10 seconds. The center never
+writes metrics to SQLite/PostgreSQL; restarting it clears the buffer. The node detail page shows
+the last hour, and the API exports JSON, Prometheus text, or CSV. Prometheus/VictoriaMetrics
+remote write and HTTP SD are later phases.
+
 #### Incus bootstrap through the agent
 
 Once the agent is online, the center can provision Incus through

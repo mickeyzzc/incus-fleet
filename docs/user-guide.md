@@ -393,11 +393,18 @@ The instance detail drawer has a **Monitoring** tab that samples every 3 seconds
 Stopped instances only show the status row. VM metrics depend on a running Incus agent (VMs
 created from official cloud images become ready a few seconds after boot).
 
+### Host agent metrics
+
+When the optional Rust host agent is installed, the node detail page adds a **Host metrics**
+panel with CPU, memory, load, uptime, and network counters for the last hour. The center keeps
+these samples in memory only (10-second interval, 360 points); restarting the center clears them.
+Use the API export (`json`, `prometheus`, or `csv`) for longer retention or external systems.
+
 ### Deeper metrics (roadmap)
 
-For guest-internal metrics such as per-process data, disk I/O, or custom collection, the plan
-is a lightweight **Rust** guest agent installed through Fleet that reports richer telemetry.
-The Incus state API already covers the core metrics needed for routine operations.
+For guest-internal metrics such as per-process data or custom collection, the plan is to extend
+the host agent with per-instance cgroups and optional eBPF. The Incus state API already covers the
+core metrics needed for routine operations.
 
 ## Storage pools and networks
 

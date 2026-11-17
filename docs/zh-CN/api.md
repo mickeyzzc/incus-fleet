@@ -377,6 +377,41 @@ helper 按 task ID 幂等：已完成的 install/service/preseed/ready 步骤记
 链路状态和持久化文件。任务走允许列表；helper 会拒绝未知 action、接口名、地址和 task ID。
 Wi-Fi 密码只传给 helper，不会写入任务/审计记录。
 
+## 指标
+
+中心在**内存中保留最近 1 小时**的 agent 遥测（`fleet_` 前缀，10 秒间隔），不会写入数据库。
+`cluster`、`member`、`agent_id` 标签由中心注入，agent 不能覆盖。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/metrics/query?cluster=&member=&agent=&metric=&from=&to=` | 返回时间范围内的 series |
+| `GET /api/v1/metrics/snapshot` | 返回每个匹配 series 的最新点 |
+| `GET /api/v1/metrics/export?format=prometheus\|json\|csv` | 导出当前缓冲 |
+
+`from`/`to` 支持 RFC3339、`1h` 这类相对时长（相对当前时间）或 Unix 秒；默认最近 1 小时。
+指标形状如下：
+
+```json
+{
+  "series": [
+    {
+      "name": "fleet_host_cpu_usage_ratio",
+      "labels": {"cluster": "c1", "member": "node-a", "agent_id": "..."},
+      "type": "gauge",
+      "points": [{"at": "2026-11-18T00:00:00Z", "value": 0.25}]
+    }
+  ]
+}
+```
+
+Prometheus 导出带 `# TYPE` 行和毫秒时间戳。CSV 为长表：
+`timestamp,metric,cluster,member,agent_id,value`。如果 `metrics.enabled=false`，三个端点都返回
+`503 unavailable`。重启中心会清空 1 小时历史，这是有意的设计。
+
+agent 当前导出 `fleet_host_cpu_usage_ratio`、`fleet_host_memory_bytes`、`fleet_host_load`、
+`fleet_host_uptime_seconds` 和 `fleet_host_network_bytes_total`。实例级指标和 eBPF 在后续阶段
+加入。
+
 ## 主机任务与审计
 
 每个变更型节点操作都会记录为一个 host task 和一条不可变审计记录。任务和审计与迁移历史
