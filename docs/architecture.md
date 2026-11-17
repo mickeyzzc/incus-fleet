@@ -145,9 +145,10 @@ in-memory ring buffer (360 points, one hour) with center-injected `cluster`, `me
 CSV; metrics are not written to the control-plane database.
 
 The agent collects cgroup v2 metrics for containers (and host-side cgroup metrics for VMs) without
-extra privileges. Optional eBPF adds host TCP retransmit and OOM-kill counters; when the object,
-BTF, or capabilities are missing it logs the reason and falls back to procfs/cgroup. Bounded
-histogram primitives are included for future eBPF latency metrics.
+extra privileges. Optional eBPF adds host TCP retransmit/OOM counters, cgroup-attributed retransmit
+and OOM counters, and a per-cgroup block-latency histogram. Cgroup ids are resolved through each
+cgroup directory's kernel file handle, including nested systemd cgroups. When the object, BTF, or
+capabilities are missing it logs the reason and falls back to procfs/cgroup.
 
 When external metrics are enabled, the center also forwards normalized series to a Prometheus or
 VictoriaMetrics remote-write endpoint through a bounded retry queue, and proxies PromQL range

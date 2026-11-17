@@ -473,9 +473,13 @@ The agent exports host series (`fleet_host_cpu_usage_ratio`, `fleet_host_memory_
 `fleet_host_load`, `fleet_host_uptime_seconds`, `fleet_host_network_bytes_total`) and, from the
 cgroup v2 fallback, per-instance series (`fleet_instance_cpu_seconds_total`,
 `fleet_instance_memory_bytes`, `fleet_instance_processes`, `fleet_instance_io_bytes_total`). The
-optional eBPF object adds `fleet_host_tcp_retransmits_total` and `fleet_host_oom_kills_total`;
-`fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}` reports the active path. Bounded histogram
-primitives are included in the agent for eBPF latency work; the current object exposes counters.
+optional eBPF object adds host counters (`fleet_host_tcp_retransmits_total`,
+`fleet_host_oom_kills_total`) and cgroup-attributed instance series
+(`fleet_instance_tcp_retransmits_total`, `fleet_instance_oom_kills_total`, and
+`fleet_instance_block_latency_seconds_bucket|_sum|_count`). `fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}`
+reports the active path. Block-latency buckets use powers of two nanoseconds (roughly 2ns through
+1s) plus `+Inf`. TCP retransmit cgroup attribution is best-effort because retransmit timers can run
+in softirq context; the host counter is exact.
 
 ## External metrics
 

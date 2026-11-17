@@ -507,10 +507,15 @@ sudo incus-fleet-agent ebpf-self-test \
 # oom_kills=...
 ```
 
-A non-zero `tcp_retransmits` delta under induced packet loss confirms the tracepoints are attached.
+`--debug-cgroups` prints the observed cgroup ids and the inode mapping when attribution looks wrong.
+A non-zero `tcp_retransmits` delta confirms the host tracepoints are attached; block I/O inside a
+container should add an `instance=<name> ... block_latency_count=...` line and bucket counts.
 
-Per-cgroup metrics are container-first; VMs are host-side cgroup metrics only. `fleet_agent_telemetry_mode`
-reports `ebpf` or `procfs`.
+Per-cgroup eBPF metrics are attributed by reading each cgroup's kernel file handle (including nested
+systemd cgroups), so container block I/O becomes `fleet_instance_block_latency_seconds_*` and
+retransmit/OOM counters. Block-latency buckets are powers of two nanoseconds. VMs are host-side
+cgroup metrics only. TCP retransmit attribution is best-effort because timers can run in softirq
+context; the host counter is exact. `fleet_agent_telemetry_mode` reports `ebpf` or `procfs`.
 
 #### Incus bootstrap through the agent
 

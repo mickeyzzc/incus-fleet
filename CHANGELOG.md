@@ -47,6 +47,9 @@ All notable changes to this project are documented here. The format follows
   center proxy mode.
 - `incus-fleet-agent ebpf-self-test` validates the aya loader and attached tracepoints; the eBPF
   object Makefile now finds Debian multiarch headers.
+- Per-cgroup eBPF attribution (including nested systemd cgroups) and block-latency histograms
+  emitted as `fleet_instance_tcp_retransmits_total`, `fleet_instance_oom_kills_total`, and
+  `fleet_instance_block_latency_seconds_*`.
 - Native Linux netlink for link/address/fleet-route writes, an opt-in detached network rollback
   timer, and agent-backed node network routing for the existing UI.
 

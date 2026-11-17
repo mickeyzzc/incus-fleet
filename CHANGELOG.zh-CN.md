@@ -43,6 +43,9 @@
 - 新增 agent `/metrics` 监听 + bearer token 的 direct HTTP SD 模式，保留中心 proxy 模式。
 - `incus-fleet-agent ebpf-self-test` 可验证 aya 加载器和 tracepoint 挂载；eBPF Makefile 现在能
   找到 Debian multiarch 头文件。
+- 按 cgroup（含嵌套 systemd cgroup）归因的 eBPF 指标和 block 延迟直方图，输出为
+  `fleet_instance_tcp_retransmits_total`、`fleet_instance_oom_kills_total` 和
+  `fleet_instance_block_latency_seconds_*`。
 - Linux 原生 netlink 链路/地址/fleet 路由写入、可选 detach 网络回滚计时器，以及现有 UI 的
   agent 后端节点网络路由。
 

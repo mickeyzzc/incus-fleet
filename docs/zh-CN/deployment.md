@@ -495,10 +495,14 @@ sudo incus-fleet-agent ebpf-self-test \
 # oom_kills=...
 ```
 
-在人为丢包时 `tcp_retransmits` 有增量，说明 tracepoint 已正确挂载。
+归因异常时用 `--debug-cgroups` 打印观测到的 cgroup id 和映射。人为丢包时 `tcp_retransmits`
+有增量说明主机 tracepoint 已挂载；容器内 block I/O 应增加 `instance=<name> ...
+block_latency_count=...` 行和 bucket 计数。
 
-实例指标以容器为主；VM 只做宿主侧 cgroup 指标。`fleet_agent_telemetry_mode` 报告 `ebpf` 或
-`procfs`。
+per-cgroup eBPF 指标通过读取每个 cgroup 的内核 file handle（包括嵌套的 systemd cgroup）归因，
+容器 block I/O 会变成 `fleet_instance_block_latency_seconds_*`，以及重传/OOM 计数器。block 延迟
+bucket 使用 2 的幂纳秒。VM 只做宿主侧 cgroup 指标。TCP 重传归因是尽力而为，因为定时器可能在
+softirq 上下文运行；主机计数器是精确的。`fleet_agent_telemetry_mode` 报告 `ebpf` 或 `procfs`。
 
 #### 通过 agent 引导 Incus
 

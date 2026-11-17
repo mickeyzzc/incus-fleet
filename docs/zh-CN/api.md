@@ -413,10 +413,13 @@ Prometheus 导出带 `# TYPE` 行和毫秒时间戳。CSV 为长表：
 agent 导出主机指标（`fleet_host_cpu_usage_ratio`、`fleet_host_memory_bytes`、
 `fleet_host_load`、`fleet_host_uptime_seconds`、`fleet_host_network_bytes_total`），以及 cgroup v2
 回退的实例指标（`fleet_instance_cpu_seconds_total`、`fleet_instance_memory_bytes`、
-`fleet_instance_processes`、`fleet_instance_io_bytes_total`）。可选 eBPF 对象增加
-`fleet_host_tcp_retransmits_total` 和 `fleet_host_oom_kills_total`；
-`fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}` 表示当前路径。agent 内置有界直方图原语，
-供后续 eBPF 延迟指标使用；当前对象只暴露计数器。
+`fleet_instance_processes`、`fleet_instance_io_bytes_total`）。可选 eBPF 对象增加主机计数器
+（`fleet_host_tcp_retransmits_total`、`fleet_host_oom_kills_total`）和按 cgroup 归因的实例
+series（`fleet_instance_tcp_retransmits_total`、`fleet_instance_oom_kills_total`、
+`fleet_instance_block_latency_seconds_bucket|_sum|_count`）。
+`fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}` 表示当前路径。block 延迟 bucket 使用 2 的幂
+纳秒（约 2ns 到 1s）加 `+Inf`。TCP 重传的 cgroup 归因是尽力而为：重传定时器可能在 softirq
+上下文运行；主机计数器是精确的。
 
 ## 外部指标
 
