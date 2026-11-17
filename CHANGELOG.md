@@ -50,6 +50,8 @@ All notable changes to this project are documented here. The format follows
 - Per-cgroup eBPF attribution (including nested systemd cgroups) and block-latency histograms
   emitted as `fleet_instance_tcp_retransmits_total`, `fleet_instance_oom_kills_total`, and
   `fleet_instance_block_latency_seconds_*`.
+- Direct HTTP SD validated end-to-end with Prometheus 3.8 scraping the agent `/metrics` listener;
+  add `metrics-serve` for standalone scrape validation and keep bearer tokens case-sensitive.
 - Native Linux netlink for link/address/fleet-route writes, an opt-in detached network rollback
   timer, and agent-backed node network routing for the existing UI.
 

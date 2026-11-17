@@ -478,6 +478,21 @@ With `metrics.http_sd.mode: direct`, the SD endpoint returns `metrics_address` t
 `__metrics_path__=/metrics`. Configure the Prometheus scrape job with the same bearer token. Agents
 without an advertised address are skipped; the SD endpoint only returns online agents.
 
+The scrape path can be validated without a center connection:
+
+```bash
+incus-fleet-agent metrics-serve \
+  --listen 127.0.0.1:19100 \
+  --token-file /etc/incus-fleet/agent-metrics.token \
+  --interval-secs 2
+curl -fsS -H 'Authorization: Bearer <token>' http://127.0.0.1:19100/metrics
+```
+
+A real Prometheus 3.x scrape job with `authorization.credentials` and
+`http_sd_configs.authorization.credentials` resolves the center SD response, scrapes
+`http://<metrics_address>/metrics`, and applies `cluster`/`member`/`agent_id` target labels. The
+bearer scheme is case-insensitive while the token stays case-sensitive.
+
 #### eBPF telemetry (optional)
 
 The agent always collects per-cgroup v2 instance metrics from `/sys/fs/cgroup` and host fallback

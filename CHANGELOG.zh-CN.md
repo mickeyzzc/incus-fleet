@@ -46,6 +46,8 @@
 - 按 cgroup（含嵌套 systemd cgroup）归因的 eBPF 指标和 block 延迟直方图，输出为
   `fleet_instance_tcp_retransmits_total`、`fleet_instance_oom_kills_total` 和
   `fleet_instance_block_latency_seconds_*`。
+- direct HTTP SD 已用 Prometheus 3.8 抓取 agent `/metrics` 做端到端验证；新增 `metrics-serve`
+  用于独立抓取验证，并保持 bearer token 大小写敏感。
 - Linux 原生 netlink 链路/地址/fleet 路由写入、可选 detach 网络回滚计时器，以及现有 UI 的
   agent 后端节点网络路由。
 

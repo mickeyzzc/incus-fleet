@@ -466,6 +466,21 @@ incus-fleet-agent run --state-dir /var/lib/incus-fleet-agent \
 `__metrics_path__=/metrics`。Prometheus 抓取任务使用同一个 bearer token。没有上报地址的 agent
 会被跳过；SD 端点只返回在线 agent。
 
+不连接中心也可以验证抓取路径：
+
+```bash
+incus-fleet-agent metrics-serve \
+  --listen 127.0.0.1:19100 \
+  --token-file /etc/incus-fleet/agent-metrics.token \
+  --interval-secs 2
+curl -fsS -H 'Authorization: Bearer <token>' http://127.0.0.1:19100/metrics
+```
+
+真实 Prometheus 3.x 抓取任务通过 `authorization.credentials` 和
+`http_sd_configs.authorization.credentials` 解析中心 SD 响应，抓取
+`http://<metrics_address>/metrics`，并附加 `cluster`/`member`/`agent_id` 目标标签。bearer scheme
+大小写不敏感，但 token 大小写敏感。
+
 #### eBPF 遥测（可选）
 
 agent 始终从 `/sys/fs/cgroup` 采集 cgroup v2 实例指标，并从 `/proc` 采集主机回退计数器。eBPF
