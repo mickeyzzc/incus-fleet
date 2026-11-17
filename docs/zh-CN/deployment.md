@@ -341,6 +341,51 @@ agent 每 10 秒上报主机 CPU/内存/负载/运行时间/网络计数器。�
 SQLite/PostgreSQL；重启中心会清空缓冲。节点详情页显示最近 1 小时，API 可导出 JSON、
 Prometheus text 或 CSV。Prometheus/VictoriaMetrics remote write 和 HTTP SD 在后续阶段。
 
+#### Prometheus/VictoriaMetrics
+
+启用 remote write 和查询代理：
+
+```yaml
+metrics:
+  enabled: true
+  remote_write:
+    enabled: true
+    url: https://prometheus.example/api/v1/write
+    bearer_token_file: /etc/incus-fleet/prom.token
+    timeout: 10s
+    queue_size: 10000
+    batch_size: 500
+  query:
+    enabled: true
+    url: https://prometheus.example
+    type: prometheus          # 或 victoriametrics
+    timeout: 15s
+  http_sd:
+    enabled: true
+    mode: proxy
+    token: replace-with-a-random-sd-token
+    public_url: https://fleet.example
+```
+
+remote write 队列在内存中有界；429/5xx 后退重试，4xx 丢弃，队列满时丢最旧 series。Prometheus
+需要 `--web.enable-remote-write-receiver`；VictoriaMetrics 单机使用
+`http://vm:8428/api/v1/write`，集群使用
+`http://vminsert:8480/insert/<accountID>/prometheus/api/v1/write`。token 放在文件或环境变量中，
+不要提交到 YAML。
+
+Prometheus 可以通过以下配置发现中心代理抓取目标：
+
+```yaml
+scrape_configs:
+  - job_name: incus-fleet
+    http_sd_configs:
+      - url: https://fleet.example/api/v1/sd/agents
+        authorization:
+          credentials_file: /etc/prometheus/fleet-sd.token
+```
+
+本版本只支持 `mode=proxy`；agent 直连监听在后续阶段。SD 端点只返回在线 agent。
+
 #### eBPF 遥测（可选）
 
 agent 始终从 `/sys/fs/cgroup` 采集 cgroup v2 实例指标，并从 `/proc` 采集主机回退计数器。eBPF

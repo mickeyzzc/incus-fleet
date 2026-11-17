@@ -116,7 +116,12 @@ flowchart LR
 
 agent 无需额外权限即可采集 cgroup v2 容器指标（VM 只做宿主侧 cgroup 指标）。可选 eBPF 增加
 主机 TCP 重传和 OOM kill 计数；对象、BTF 或权限缺失时记录原因并回退 procfs/cgroup。agent 内置
-有界直方图原语，供后续 eBPF 延迟指标使用。外部 TSDB 集成在后续阶段。
+有界直方图原语，供后续 eBPF 延迟指标使用。
+
+启用外部指标后，中心还会通过有界重试队列把标准化后的 series 转发到 Prometheus 或
+VictoriaMetrics remote write 端点，并代理 PromQL range 查询供 UI 使用。
+`GET /api/v1/sd/agents` 使用独立 token 提供 HTTP 服务发现；本版本中 Prometheus 抓取的是中心为
+每个在线 agent 提供的代理端点。agent 直连监听在后续阶段。
 
 ## 主机操作
 

@@ -346,6 +346,53 @@ writes metrics to SQLite/PostgreSQL; restarting it clears the buffer. The node d
 the last hour, and the API exports JSON, Prometheus text, or CSV. Prometheus/VictoriaMetrics
 remote write and HTTP SD are later phases.
 
+#### Prometheus/VictoriaMetrics
+
+Enable remote write and the query proxy:
+
+```yaml
+metrics:
+  enabled: true
+  remote_write:
+    enabled: true
+    url: https://prometheus.example/api/v1/write
+    bearer_token_file: /etc/incus-fleet/prom.token
+    timeout: 10s
+    queue_size: 10000
+    batch_size: 500
+  query:
+    enabled: true
+    url: https://prometheus.example
+    type: prometheus          # or victoriametrics
+    timeout: 15s
+  http_sd:
+    enabled: true
+    mode: proxy
+    token: replace-with-a-random-sd-token
+    public_url: https://fleet.example
+```
+
+The remote write queue is in memory and bounded; 429/5xx responses retry with backoff, 4xx samples
+are dropped, and a full queue drops the oldest series. Prometheus needs
+`--web.enable-remote-write-receiver`; VictoriaMetrics single-node uses
+`http://vm:8428/api/v1/write`, cluster uses
+`http://vminsert:8480/insert/<accountID>/prometheus/api/v1/write`. Keep tokens in files or
+environment variables, not committed YAML.
+
+Prometheus can discover the proxy scrape target with:
+
+```yaml
+scrape_configs:
+  - job_name: incus-fleet
+    http_sd_configs:
+      - url: https://fleet.example/api/v1/sd/agents
+        authorization:
+          credentials_file: /etc/prometheus/fleet-sd.token
+```
+
+`mode=proxy` is the only mode in this release; direct agent listeners are a later phase. The SD
+endpoint only returns online agents.
+
 #### eBPF telemetry (optional)
 
 The agent always collects per-cgroup v2 instance metrics from `/sys/fs/cgroup` and host fallback

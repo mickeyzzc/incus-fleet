@@ -33,6 +33,8 @@
   的主机指标图表。
 - cgroup v2 实例级 CPU/内存/pids/IO 指标、有界直方图原语，以及可选的 Linux eBPF 主机 TCP
   重传/OOM 计数器（procfs 回退）。
+- Prometheus/VictoriaMetrics remote write（有界重试队列）、PromQL range 查询代理，以及带 token
+  鉴权的 HTTP 服务发现和中心代理抓取端点。
 
 ### 修复
 

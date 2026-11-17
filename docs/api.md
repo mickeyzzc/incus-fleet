@@ -472,6 +472,49 @@ optional eBPF object adds `fleet_host_tcp_retransmits_total` and `fleet_host_oom
 `fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}` reports the active path. Bounded histogram
 primitives are included in the agent for eBPF latency work; the current object exposes counters.
 
+## External metrics
+
+The center can forward the same telemetry to Prometheus or VictoriaMetrics and proxy PromQL
+queries back for the UI. External integration is disabled by default; see
+[Deployment](deployment.md#prometheusvictoriametrics).
+
+| Method & path | Auth | Purpose |
+|---|---|---|
+| `GET /api/v1/metrics/query_range?query=&from=&to=&step=` | admin session/bearer | PromQL range query proxy |
+| `GET /api/v1/sd/agents` | HTTP SD token | Prometheus HTTP service discovery |
+| `GET /api/v1/agents/{id}/metrics/prometheus` | HTTP SD token | center-proxied agent metrics scrape |
+
+Remote write uses the Prometheus 1.0 wire format (snappy-compressed protobuf) at the configured
+`metrics.remote_write.url`. Prometheus requires `--web.enable-remote-write-receiver`; VictoriaMetrics
+accepts `/api/v1/write` (single-node) or `/insert/<accountID>/prometheus/api/v1/write` (cluster).
+
+`query_range` accepts `from`/`to` in RFC3339, relative duration (`1h`), or Unix seconds; `step` is a
+duration such as `1m`. The center forwards to Prometheus `/api/v1/query_range` or
+VictoriaMetrics `/prometheus/api/v1/query_range` and returns the upstream JSON. Queries are
+admin-only and bounded by the configured timeout.
+
+The HTTP SD response follows the Prometheus format:
+
+```json
+[
+  {
+    "targets": ["fleet.example"],
+    "labels": {
+      "__scheme__": "https",
+      "__metrics_path__": "/api/v1/agents/AGENT_ID/metrics/prometheus",
+      "cluster": "c1",
+      "member": "node-a",
+      "agent_id": "AGENT_ID"
+    }
+  }
+]
+```
+
+The SD token is configured separately from the admin token and is sent as
+`Authorization: Bearer <token>`. Only online agents are returned. The current release supports
+`mode=proxy`: Prometheus scrapes the center, which returns the latest in-memory sample plus
+`fleet_agent_up`. Direct agent listeners are a later phase.
+
 ## Host tasks and audit
 
 Every mutating node operation is recorded as a host task plus an immutable audit entry. Tasks and

@@ -416,6 +416,47 @@ agent 导出主机指标（`fleet_host_cpu_usage_ratio`、`fleet_host_memory_byt
 `fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}` 表示当前路径。agent 内置有界直方图原语，
 供后续 eBPF 延迟指标使用；当前对象只暴露计数器。
 
+## 外部指标
+
+中心可以把同一份遥测转发到 Prometheus 或 VictoriaMetrics，并代理 PromQL 查询供 UI 使用。
+外部集成默认关闭；参见[部署文档](deployment.md#prometheusvictoriametrics)。
+
+| 方法与路径 | 认证 | 用途 |
+|---|---|---|
+| `GET /api/v1/metrics/query_range?query=&from=&to=&step=` | 管理员会话/Bearer | PromQL range 查询代理 |
+| `GET /api/v1/sd/agents` | HTTP SD token | Prometheus HTTP 服务发现 |
+| `GET /api/v1/agents/{id}/metrics/prometheus` | HTTP SD token | 中心代理的 agent 指标抓取 |
+
+remote write 使用 Prometheus 1.0 线格式（snappy 压缩 protobuf），地址为
+`metrics.remote_write.url`。Prometheus 需要 `--web.enable-remote-write-receiver`；
+VictoriaMetrics 单机使用 `/api/v1/write`，集群使用
+`/insert/<accountID>/prometheus/api/v1/write`。
+
+`query_range` 的 `from`/`to` 支持 RFC3339、相对时长（`1h`）或 Unix 秒；`step` 是 `1m` 这样的
+时长。中心转发到 Prometheus `/api/v1/query_range` 或 VictoriaMetrics
+`/prometheus/api/v1/query_range` 并返回上游 JSON。查询仅限管理员，受配置超时限制。
+
+HTTP SD 响应遵循 Prometheus 格式：
+
+```json
+[
+  {
+    "targets": ["fleet.example"],
+    "labels": {
+      "__scheme__": "https",
+      "__metrics_path__": "/api/v1/agents/AGENT_ID/metrics/prometheus",
+      "cluster": "c1",
+      "member": "node-a",
+      "agent_id": "AGENT_ID"
+    }
+  }
+]
+```
+
+SD token 与管理员 token 分离，通过 `Authorization: Bearer <token>` 发送。只返回在线 agent。当前
+版本支持 `mode=proxy`：Prometheus 抓取中心，中心返回最新内存样本和 `fleet_agent_up`。agent
+直连监听在后续阶段。
+
 ## 主机任务与审计
 
 每个变更型节点操作都会记录为一个 host task 和一条不可变审计记录。任务和审计与迁移历史

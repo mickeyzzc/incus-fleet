@@ -31,7 +31,7 @@ from the language switcher.*
   allowlisted host network changes and signed Incus bootstrap through a short-lived privileged
   helper
 - Agent host and cgroup v2 instance metrics, optional eBPF counters, a one-hour center buffer,
-  and JSON/Prometheus/CSV export
+  JSON/Prometheus/CSV export, Prometheus/VictoriaMetrics remote write and query proxy, and HTTP SD
 
 > Live migration preserves guest network state. When clusters use different subnets,
 > renew DHCP inside the guest after the move (or use matching subnets).

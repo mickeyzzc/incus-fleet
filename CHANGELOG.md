@@ -34,6 +34,8 @@ All notable changes to this project are documented here. The format follows
   endpoints, and host metrics charts on the node detail page.
 - cgroup v2 per-instance CPU/memory/pids/IO metrics, bounded histogram primitives, and an optional
   Linux eBPF collector for host TCP retransmit/OOM counters with procfs fallback.
+- Prometheus/VictoriaMetrics remote write with a bounded retry queue, a PromQL range-query proxy,
+  and token-authenticated HTTP service discovery with a center-proxied scrape endpoint.
 
 ### Fixed
 

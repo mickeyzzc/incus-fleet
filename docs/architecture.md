@@ -147,8 +147,13 @@ CSV; metrics are not written to the control-plane database.
 The agent collects cgroup v2 metrics for containers (and host-side cgroup metrics for VMs) without
 extra privileges. Optional eBPF adds host TCP retransmit and OOM-kill counters; when the object,
 BTF, or capabilities are missing it logs the reason and falls back to procfs/cgroup. Bounded
-histogram primitives are included for future eBPF latency metrics. External TSDB integration is a
-later phase.
+histogram primitives are included for future eBPF latency metrics.
+
+When external metrics are enabled, the center also forwards normalized series to a Prometheus or
+VictoriaMetrics remote-write endpoint through a bounded retry queue, and proxies PromQL range
+queries for the UI. `GET /api/v1/sd/agents` provides HTTP service discovery using a separate token;
+in this release Prometheus scrapes a center-proxied endpoint for each online agent. Direct agent
+listeners are a later phase.
 
 ## Host operations
 
