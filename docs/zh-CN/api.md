@@ -303,7 +303,7 @@ SSH；写操作只有在 `node_access.ssh_write_fallback=true` 时才回退（�
 | 方法与路径 | 用途 |
 |---|---|
 | `POST /api/v1/agents/enrollment-tokens` | 创建一次性 token；要求集群已存在 |
-| `GET /api/v1/agents` | 列出已注册 agent 及其最后在线状态 |
+| `GET /api/v1/agents?cluster=&member=` | 列出已注册 agent，可按 cluster/member 过滤 |
 | `GET /api/v1/agents/{id}/snapshot` | 向在线 agent 派发只读 `nodenet.snapshot` |
 
 ```json

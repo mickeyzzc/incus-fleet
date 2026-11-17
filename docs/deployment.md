@@ -555,7 +555,22 @@ and an `incusbr0` bridge. Re-running the same request is safe: completed steps a
 
 #### Adding a node from the UI
 
-The **Add node** dialog can provision a bare host and join it to a cluster. It needs:
+The **Add node** dialog defaults to the **Host agent** flow and falls back to **SSH** when needed.
+
+For an agent-first join:
+
+1. Enter the exact member name and the cluster address.
+2. Click **Create enrollment token**. The dialog shows a one-time token and the `incus-fleet-agent
+   enroll` command. Run it on the node; the dialog polls for the agent to come online.
+3. Once the agent is online, click **Bootstrap via agent**. The center signs the join spec and the
+   agent helper installs Incus (only with **Install Incus through the package manager** enabled),
+   preseed the cluster join, and reports the completed steps.
+
+The member name must match the agent's `--member` value. Package installation uses the node's
+already-configured Incus repository; the helper does not add an unverified repository. Use **Use
+SSH instead** at any time to switch to the SSH/nodejoin path.
+
+The SSH path needs:
 
 - SSH connectivity to the target and an account that can run `sudo` (a one-time sudo password can
   be entered in the dialog).

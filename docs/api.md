@@ -355,7 +355,7 @@ not part of the browser API; only the admin endpoints below are exposed on the n
 | Method & path | Purpose |
 |---|---|
 | `POST /api/v1/agents/enrollment-tokens` | create a one-time token; requires an existing cluster |
-| `GET /api/v1/agents` | list enrolled agents and their last-seen state |
+| `GET /api/v1/agents?cluster=&member=` | list enrolled agents, optionally filtered by cluster/member |
 | `GET /api/v1/agents/{id}/snapshot` | dispatch a read-only `nodenet.snapshot` to a connected agent |
 
 ```json

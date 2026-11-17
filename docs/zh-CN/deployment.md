@@ -540,7 +540,20 @@ pacman，并拒绝添加未验证的 `repo_url`。新集群使用 `"mode":"init"
 
 #### 从 UI 添加节点
 
-**Add node** 对话框可以准备一台裸机并加入集群。它需要：
+**Add node** 对话框默认使用 **主机 agent** 流程，需要时回退到 **SSH**。
+
+agent-first 加入步骤：
+
+1. 填写精确的成员名称和集群地址。
+2. 点击 **创建注册 token**。对话框显示一次性 token 和 `incus-fleet-agent enroll` 命令；在节点上
+   执行后，对话框会轮询 agent 上线状态。
+3. agent 上线后点击 **通过 agent 引导**。中心签发 join spec，agent helper 安装 Incus（仅在勾选
+   **通过包管理器安装 Incus** 时）、执行 preseed 加入集群，并返回完成的步骤。
+
+成员名称必须与 agent 的 `--member` 一致。包安装使用节点上已配置的 Incus 仓库；helper 不会添加
+未验证的仓库。随时可以点击 **改用 SSH** 切换到 SSH/nodejoin 路径。
+
+SSH 路径需要：
 
 - 能通过 SSH 连接目标，且账户可以执行 `sudo`（可以在对话框中输入一次性的 sudo 密码）。
 - 目标能访问现有集群使用的 Incus apt 仓库。安装的 Incus 版本必须与集群版本一致。
