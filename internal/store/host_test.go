@@ -27,8 +27,8 @@ func TestSchemaMigrations(t *testing.T) {
 	if err := s.db.QueryRowContext(context.Background(), `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("schema version = %d, want 3", version)
+	if version != 4 {
+		t.Fatalf("schema version = %d, want 4", version)
 	}
 }
 
@@ -61,7 +61,7 @@ func TestSchemaMigrationFromLegacyDatabase(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	version, err := s.SchemaVersion(context.Background())
-	if err != nil || version != 3 {
+	if err != nil || version != 4 {
 		t.Fatalf("SchemaVersion() = %d, %v", version, err)
 	}
 	old, err := s.GetMigration(context.Background(), "old")
@@ -451,5 +451,116 @@ func TestMigrationFailureLeavesVersionUnchanged(t *testing.T) {
 
 	if _, err := Open(context.Background(), "sqlite", path); err == nil {
 		t.Fatal("Open() expected migration failure")
+	}
+}
+
+func TestHostTaskLeases(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+	now := time.Now().UTC()
+	task := &HostTask{ID: "task-1", Cluster: "c1", Member: "node-a", Type: "x",
+		State: HostTaskQueued, CreatedAt: now, UpdatedAt: now}
+	if err := s.CreateHostTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimHostTask(ctx, "worker-1", time.Second)
+	if err != nil || claimed.ID != "task-1" || claimed.LeaseOwner != "worker-1" || claimed.State != HostTaskDispatched {
+		t.Fatalf("ClaimHostTask() = %#v, %v", claimed, err)
+	}
+	if _, err := s.ClaimHostTask(ctx, "worker-2", time.Second); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second claim error = %v", err)
+	}
+	if err := s.RenewHostTaskLease(ctx, "task-1", "worker-2", time.Now().Add(time.Minute)); !errors.Is(err, ErrConflict) {
+		t.Fatalf("renew wrong owner error = %v", err)
+	}
+	if err := s.RenewHostTaskLease(ctx, "task-1", "worker-1", time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("renew error = %v", err)
+	}
+	if err := s.ReleaseHostTask(ctx, "task-1", "worker-2"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("release wrong owner error = %v", err)
+	}
+	if err := s.ReleaseHostTask(ctx, "task-1", "worker-1"); err != nil {
+		t.Fatal(err)
+	}
+	reclaimed, err := s.ClaimHostTask(ctx, "worker-2", time.Second)
+	if err != nil || reclaimed.LeaseOwner != "worker-2" {
+		t.Fatalf("reclaim = %#v, %v", reclaimed, err)
+	}
+	if err := s.ReleaseHostTask(ctx, "task-1", "worker-2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimHostTask(ctx, "worker-3", 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if _, err := s.ClaimHostTask(ctx, "worker-4", time.Second); err != nil {
+		t.Fatalf("expired lease not claimable: %v", err)
+	}
+}
+
+func TestAuditExportAndRevokeAgent(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+	now := time.Now().UTC()
+	if err := s.RecordHostAudit(ctx, &HostAudit{ID: "a1", At: now, Backend: "local", Cluster: "c1", Member: "n1", Action: "x", Result: "succeeded"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordHostAudit(ctx, &HostAudit{ID: "a2", At: now, Backend: "ssh", Cluster: "c2", Member: "n2", Action: "y", Result: "failed"}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := s.ExportHostAudit(ctx, "", "")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("ExportHostAudit() = %#v, %v", all, err)
+	}
+	one, err := s.ExportHostAudit(ctx, "c1", "")
+	if err != nil || len(one) != 1 || one[0].ID != "a1" {
+		t.Fatalf("ExportHostAudit(c1) = %#v, %v", one, err)
+	}
+	agent := &Agent{ID: "agent-1", Cluster: "c1", Member: "n1", Status: AgentOnline, CreatedAt: now, UpdatedAt: now}
+	if err := s.UpsertAgent(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokeAgent(ctx, "agent-1"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetAgent(ctx, "agent-1")
+	if got.Status != AgentRevoked {
+		t.Fatalf("status = %q", got.Status)
+	}
+	if err := s.RevokeAgent(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("RevokeAgent(missing) error = %v", err)
+	}
+}
+
+func TestClaimEmptyAndRenewMissing(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+	if _, err := s.ClaimHostTask(ctx, "worker", time.Second); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Claim(empty) error = %v", err)
+	}
+	if err := s.RenewHostTaskLease(ctx, "missing", "worker", time.Now()); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Renew(missing) error = %v", err)
+	}
+	if err := s.ReleaseHostTask(ctx, "missing", "worker"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Release(missing) error = %v", err)
+	}
+}
+
+func TestClaimDefaultLeaseAndAuditMemberFilter(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+	now := time.Now().UTC()
+	task := &HostTask{ID: "task-default", Cluster: "c1", Member: "n1", Type: "x", State: HostTaskQueued, CreatedAt: now, UpdatedAt: now}
+	if err := s.CreateHostTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimHostTask(ctx, "worker", 0); err != nil {
+		t.Fatalf("ClaimHostTask(default lease) error = %v", err)
+	}
+	if err := s.RecordHostAudit(ctx, &HostAudit{ID: "a", At: now, Backend: "local", Cluster: "c1", Member: "n1", Action: "x", Result: "succeeded"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.ExportHostAudit(ctx, "", "n1"); err != nil || len(got) != 1 {
+		t.Fatalf("ExportHostAudit(member) = %#v, %v", got, err)
 	}
 }

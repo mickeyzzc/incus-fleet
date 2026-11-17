@@ -46,6 +46,7 @@ type HostTask struct {
 	ErrorCode      string    `json:"error_code,omitempty"`
 	Error          string    `json:"error,omitempty"`
 	Attempt        int       `json:"attempt"`
+	LeaseOwner     string    `json:"lease_owner,omitempty"`
 	LeaseUntil     time.Time `json:"lease_until,omitempty"`
 	CreatedBy      string    `json:"created_by,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -258,13 +259,13 @@ func (s *SQLStore) CreateHostTask(ctx context.Context, task *HostTask) error {
 
 	const query = `INSERT INTO host_tasks
 		(id, agent_id, cluster, member, type, state, idempotency_key, plan, plan_hash,
-		 progress, result, error_code, error, attempt, lease_until, created_by,
+		 progress, result, error_code, error, attempt, lease_owner, lease_until, created_by,
 		 created_at, dispatched_at, started_at, finished_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	_, err := s.db.ExecContext(ctx, s.rebind(query),
 		task.ID, task.AgentID, task.Cluster, task.Member, task.Type, task.State,
 		task.IdempotencyKey, task.Plan, task.PlanHash, task.Progress, task.Result,
-		task.ErrorCode, task.Error, task.Attempt, unixNanos(task.LeaseUntil), task.CreatedBy,
+		task.ErrorCode, task.Error, task.Attempt, task.LeaseOwner, unixNanos(task.LeaseUntil), task.CreatedBy,
 		unixNanos(task.CreatedAt), unixNanos(task.DispatchedAt), unixNanos(task.StartedAt),
 		unixNanos(task.FinishedAt), unixNanos(task.UpdatedAt))
 	if err != nil {
@@ -285,12 +286,12 @@ func (s *SQLStore) UpdateHostTask(ctx context.Context, task *HostTask) error {
 
 	const query = `UPDATE host_tasks SET
 		agent_id = ?, state = ?, progress = ?, result = ?, error_code = ?, error = ?,
-		attempt = ?, lease_until = ?, dispatched_at = ?, started_at = ?, finished_at = ?,
+		attempt = ?, lease_owner = ?, lease_until = ?, dispatched_at = ?, started_at = ?, finished_at = ?,
 		updated_at = ?
 		WHERE id = ?`
 	result, err := s.db.ExecContext(ctx, s.rebind(query),
 		task.AgentID, task.State, task.Progress, task.Result, task.ErrorCode, task.Error,
-		task.Attempt, unixNanos(task.LeaseUntil), unixNanos(task.DispatchedAt),
+		task.Attempt, task.LeaseOwner, unixNanos(task.LeaseUntil), unixNanos(task.DispatchedAt),
 		unixNanos(task.StartedAt), unixNanos(task.FinishedAt), unixNanos(task.UpdatedAt),
 		task.ID)
 	if err != nil {
@@ -310,7 +311,7 @@ func (s *SQLStore) UpdateHostTask(ctx context.Context, task *HostTask) error {
 // GetHostTask loads one task by ID.
 func (s *SQLStore) GetHostTask(ctx context.Context, id string) (*HostTask, error) {
 	const query = `SELECT id, agent_id, cluster, member, type, state, idempotency_key,
-		plan, plan_hash, progress, result, error_code, error, attempt, lease_until,
+		plan, plan_hash, progress, result, error_code, error, attempt, lease_owner, lease_until,
 		created_by, created_at, dispatched_at, started_at, finished_at, updated_at
 		FROM host_tasks WHERE id = ?`
 	row := s.db.QueryRowContext(ctx, s.rebind(query), id)
@@ -328,7 +329,7 @@ func (s *SQLStore) GetHostTask(ctx context.Context, id string) (*HostTask, error
 // ListHostTasks returns tasks newest first, optionally filtered by member.
 func (s *SQLStore) ListHostTasks(ctx context.Context, cluster, member string, limit int) ([]*HostTask, error) {
 	query := `SELECT id, agent_id, cluster, member, type, state, idempotency_key,
-		plan, plan_hash, progress, result, error_code, error, attempt, lease_until,
+		plan, plan_hash, progress, result, error_code, error, attempt, lease_owner, lease_until,
 		created_by, created_at, dispatched_at, started_at, finished_at, updated_at
 		FROM host_tasks`
 	args := []any{}
@@ -478,6 +479,65 @@ func (s *SQLStore) ListHostAudit(ctx context.Context, cluster, member string, li
 	}
 
 	return out, nil
+}
+
+// ExportHostAudit returns all matching audit records, newest first. It is used
+// by the audit export endpoint rather than the bounded UI query.
+func (s *SQLStore) ExportHostAudit(ctx context.Context, cluster, member string) ([]*HostAudit, error) {
+	query := `SELECT id, at, actor, source_ip, backend, cluster, member, action,
+		task_id, before_hash, after_hash, result, detail FROM host_audit`
+	args := []any{}
+	clauses := make([]string, 0, 2)
+	if cluster != "" {
+		clauses = append(clauses, "cluster = ?")
+		args = append(args, cluster)
+	}
+	if member != "" {
+		clauses = append(clauses, "member = ?")
+		args = append(args, member)
+	}
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
+	}
+	query += " ORDER BY at DESC, id DESC"
+	rows, err := s.db.QueryContext(ctx, s.rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: export host audit: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]*HostAudit, 0)
+	for rows.Next() {
+		var entry HostAudit
+		var at int64
+		if err := rows.Scan(&entry.ID, &at, &entry.Actor, &entry.SourceIP, &entry.Backend,
+			&entry.Cluster, &entry.Member, &entry.Action, &entry.TaskID,
+			&entry.BeforeHash, &entry.AfterHash, &entry.Result, &entry.Detail); err != nil {
+			return nil, fmt.Errorf("store: scan host audit export: %w", err)
+		}
+		entry.At = timeFromNanos(at)
+		out = append(out, &entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: export host audit rows: %w", err)
+	}
+	return out, nil
+}
+
+// RevokeAgent marks an agent revoked. The gateway rejects revoked agents.
+func (s *SQLStore) RevokeAgent(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, s.rebind(`UPDATE agents SET status = ?, updated_at = ? WHERE id = ?`),
+		AgentRevoked, time.Now().UTC().UnixNano(), id)
+	if err != nil {
+		return fmt.Errorf("store: revoke agent: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: revoke agent: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: agent %q: %w", id, ErrNotFound)
+	}
+	return nil
 }
 
 // UpsertAgent inserts or updates one agent registration.
@@ -649,8 +709,8 @@ func scanHostTask(row rowScanner) (*HostTask, error) {
 	)
 	if err := row.Scan(&task.ID, &task.AgentID, &task.Cluster, &task.Member, &task.Type,
 		&task.State, &task.IdempotencyKey, &task.Plan, &task.PlanHash, &task.Progress,
-		&task.Result, &task.ErrorCode, &task.Error, &task.Attempt, &lease, &task.CreatedBy,
-		&created, &dispatched, &started, &finished, &updated); err != nil {
+		&task.Result, &task.ErrorCode, &task.Error, &task.Attempt, &task.LeaseOwner, &lease,
+		&task.CreatedBy, &created, &dispatched, &started, &finished, &updated); err != nil {
 		return nil, err
 	}
 	task.LeaseUntil = timeFromNanos(lease)
@@ -683,4 +743,75 @@ func scanAgent(row rowScanner) (*Agent, error) {
 	agent.UpdatedAt = timeFromNanos(updated)
 
 	return &agent, nil
+}
+
+// ClaimHostTask leases one queued/dispatched task to a worker. PostgreSQL uses
+// FOR UPDATE SKIP LOCKED; SQLite serializes through a transaction.
+func (s *SQLStore) ClaimHostTask(ctx context.Context, worker string, lease time.Duration) (*HostTask, error) {
+	if lease <= 0 {
+		lease = 30 * time.Second
+	}
+	now := time.Now().UTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("store: begin claim: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	query := `SELECT id FROM host_tasks
+		WHERE state IN (?, ?) AND (lease_until = 0 OR lease_until < ?)
+		ORDER BY created_at LIMIT 1`
+	if s.driver == "postgres" {
+		query += " FOR UPDATE SKIP LOCKED"
+	}
+	var id string
+	if err := tx.QueryRowContext(ctx, s.rebind(query), HostTaskQueued, HostTaskDispatched, unixNanos(now)).Scan(&id); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("store: host task: %w", ErrNotFound)
+		}
+		return nil, fmt.Errorf("store: claim host task: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, s.rebind(`UPDATE host_tasks SET state = ?, lease_owner = ?, lease_until = ?, updated_at = ? WHERE id = ?`),
+		HostTaskDispatched, worker, unixNanos(now.Add(lease)), unixNanos(now), id)
+	if err != nil {
+		return nil, fmt.Errorf("store: claim host task update: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("store: commit claim: %w", err)
+	}
+	return s.GetHostTask(ctx, id)
+}
+
+// RenewHostTaskLease extends a lease owned by worker.
+func (s *SQLStore) RenewHostTaskLease(ctx context.Context, id, worker string, until time.Time) error {
+	result, err := s.db.ExecContext(ctx, s.rebind(`UPDATE host_tasks SET lease_until = ?, updated_at = ? WHERE id = ? AND lease_owner = ?`),
+		unixNanos(until), unixNanos(time.Now().UTC()), id, worker)
+	if err != nil {
+		return fmt.Errorf("store: renew lease: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: renew lease: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: host task %q: %w", id, ErrConflict)
+	}
+	return nil
+}
+
+// ReleaseHostTask returns a claimed task to the queue.
+func (s *SQLStore) ReleaseHostTask(ctx context.Context, id, worker string) error {
+	result, err := s.db.ExecContext(ctx, s.rebind(`UPDATE host_tasks SET state = ?, lease_owner = '', lease_until = 0, updated_at = ? WHERE id = ? AND lease_owner = ?`),
+		HostTaskQueued, unixNanos(time.Now().UTC()), id, worker)
+	if err != nil {
+		return fmt.Errorf("store: release task: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: release task: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: host task %q: %w", id, ErrConflict)
+	}
+	return nil
 }

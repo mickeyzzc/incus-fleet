@@ -50,6 +50,7 @@ type Deps struct {
 	Telemetry    *telemetry.Store
 	MetricsSD    MetricsSDConfig
 	MetricsQuery *metricsquery.Proxy
+	CertIssuer   CertificateIssuer
 	Auth         *auth.Authenticator
 	StaticFS     fs.FS
 	Logger       *slog.Logger
@@ -70,6 +71,7 @@ type API struct {
 	telemetry    *telemetry.Store
 	metricsSD    MetricsSDConfig
 	metricsQuery *metricsquery.Proxy
+	certIssuer   CertificateIssuer
 	auth         *auth.Authenticator
 	logger       *slog.Logger
 	version      string
@@ -96,6 +98,7 @@ func New(deps Deps) *API {
 		telemetry:    deps.Telemetry,
 		metricsSD:    deps.MetricsSD,
 		metricsQuery: deps.MetricsQuery,
+		certIssuer:   deps.CertIssuer,
 		auth:         deps.Auth,
 		logger:       logger,
 		version:      deps.Version,
@@ -150,6 +153,7 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/firewall", a.requireAuth(http.HandlerFunc(a.nodeAddFirewallRule)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/members/{member}/node/firewall/{handle}", a.requireAuth(http.HandlerFunc(a.nodeDeleteFirewallRule)))
 	mux.Handle("GET /api/v1/audit", a.requireAuth(http.HandlerFunc(a.listHostAudit)))
+	mux.Handle("GET /api/v1/audit/export", a.requireAuth(http.HandlerFunc(a.exportHostAudit)))
 	mux.Handle("GET /api/v1/tasks", a.requireAuth(http.HandlerFunc(a.listHostTasks)))
 	mux.Handle("GET /api/v1/tasks/{id}", a.requireAuth(http.HandlerFunc(a.getHostTask)))
 	mux.Handle("GET /api/v1/agents", a.requireAuth(http.HandlerFunc(a.listAgents)))
@@ -157,6 +161,8 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents/{id}/snapshot", a.requireAuth(http.HandlerFunc(a.agentSnapshot)))
 	mux.Handle("POST /api/v1/agents/{id}/network", a.requireAuth(http.HandlerFunc(a.agentNetwork)))
 	mux.Handle("POST /api/v1/agents/{id}/bootstrap", a.requireAuth(http.HandlerFunc(a.agentBootstrap)))
+	mux.Handle("POST /api/v1/agents/{id}/certificate", a.requireAuth(http.HandlerFunc(a.rotateAgentCertificate)))
+	mux.Handle("POST /api/v1/agents/{id}/revoke", a.requireAuth(http.HandlerFunc(a.revokeAgent)))
 	mux.Handle("GET /api/v1/metrics/query", a.requireAuth(http.HandlerFunc(a.queryMetrics)))
 	mux.Handle("GET /api/v1/metrics/snapshot", a.requireAuth(http.HandlerFunc(a.snapshotMetrics)))
 	mux.Handle("GET /api/v1/metrics/export", a.requireAuth(http.HandlerFunc(a.exportMetrics)))

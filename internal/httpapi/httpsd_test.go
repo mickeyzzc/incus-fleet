@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -104,5 +105,45 @@ func TestMetricsSDUnavailableBranches(t *testing.T) {
 	sd := f.request(t, http.MethodGet, "/api/v1/sd/agents", nil, nil, "sd")
 	if sd.Code != http.StatusServiceUnavailable {
 		t.Fatalf("no store = %d", sd.Code)
+	}
+}
+
+func TestMetricsSDForwardedScheme(t *testing.T) {
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	now := time.Now().UTC()
+	if err := f.store.UpsertAgent(context.Background(), &store.Agent{
+		ID: "agent-1", Cluster: "c1", Member: "node-a", Status: store.AgentOnline,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.handler = New(Deps{
+		Clusters: f.manager, Store: f.store, Auth: f.auth, Version: "test",
+		MetricsSD: MetricsSDConfig{Enabled: true, Token: "sd"},
+	}).Handler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sd/agents", nil)
+	req.Host = "fleet.example:8443"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("Authorization", "Bearer sd")
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"__scheme__":"https"`) ||
+		!strings.Contains(rec.Body.String(), "fleet.example:8443") {
+		t.Fatalf("forwarded sd = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMetricsSDStoreError(t *testing.T) {
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	f.handler = New(Deps{
+		Auth: f.auth, Store: f.store, Version: "test",
+		MetricsSD: MetricsSDConfig{Enabled: true, Token: "sd"},
+	}).Handler()
+	if err := f.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.request(t, http.MethodGet, "/api/v1/sd/agents", nil, nil, "sd")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("store error = %d body=%s", rec.Code, rec.Body.String())
 	}
 }

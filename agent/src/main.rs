@@ -9,6 +9,7 @@ mod metrics;
 mod proto;
 mod runtime;
 mod snapshot;
+mod upgrade;
 
 use std::path::PathBuf;
 
@@ -55,6 +56,18 @@ enum Command {
         #[arg(long)]
         ebpf_object: Option<PathBuf>,
     },
+    /// Verify and install a signed agent binary with rollback on a failed health check.
+    Upgrade {
+        #[arg(long)]
+        binary: PathBuf,
+        #[arg(long)]
+        signature: PathBuf,
+        /// Raw 32-byte Ed25519 public key, hex or base64.
+        #[arg(long)]
+        public_key: PathBuf,
+        #[arg(long, default_value = "/usr/local/bin/incus-fleet-agent")]
+        target: PathBuf,
+    },
     /// Print the persisted identity.
     Status {
         #[arg(long, default_value = "/var/lib/incus-fleet-agent")]
@@ -91,6 +104,15 @@ async fn main() -> Result<()> {
             ebpf_object,
         } => {
             runtime::run(&state_dir, &helper, ebpf_object.as_deref()).await?;
+        }
+        Command::Upgrade {
+            binary,
+            signature,
+            public_key,
+            target,
+        } => {
+            upgrade::verify_and_install(&binary, &signature, &public_key, &target)?;
+            println!("installed {}", target.display());
         }
         Command::Status { state_dir } => {
             let (identity, _) = identity::Identity::load(&state_dir)?;

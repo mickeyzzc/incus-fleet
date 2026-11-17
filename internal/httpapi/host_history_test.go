@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
@@ -174,7 +175,7 @@ func TestHostHistoryDisabled(t *testing.T) {
 	f.handler = New(Deps{Auth: f.auth, Version: "test"}).Handler()
 	cookie := f.login(t)
 
-	for _, path := range []string{"/api/v1/audit", "/api/v1/tasks", "/api/v1/tasks/missing"} {
+	for _, path := range []string{"/api/v1/audit", "/api/v1/tasks", "/api/v1/tasks/missing", "/api/v1/audit/export"} {
 		rec := f.request(t, http.MethodGet, path, nil, cookie, "")
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("%s status = %d body=%s", path, rec.Code, rec.Body.String())
@@ -188,7 +189,7 @@ func TestHostHistoryStoreErrors(t *testing.T) {
 	if err := f.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/api/v1/audit", "/api/v1/tasks", "/api/v1/tasks/missing"} {
+	for _, path := range []string{"/api/v1/audit", "/api/v1/tasks", "/api/v1/tasks/missing", "/api/v1/audit/export"} {
 		rec := f.request(t, http.MethodGet, path, nil, cookie, "")
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("%s status = %d body=%s", path, rec.Code, rec.Body.String())
@@ -206,5 +207,39 @@ func TestHostTaskCreateError(t *testing.T) {
 		map[string]bool{"up": false}, cookie, "")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("task create error = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuditExport(t *testing.T) {
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	cookie := f.login(t)
+	if err := f.store.RecordHostAudit(context.Background(), &store.HostAudit{
+		ID: "audit-1", At: time.Now().UTC(), Backend: "local", Cluster: "c1", Member: "node-a",
+		Action: "node.route.add", Result: "succeeded", Detail: "destination=10.0.0.0/24",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	jsonl := f.request(t, http.MethodGet, "/api/v1/audit/export?cluster=c1", nil, cookie, "")
+	if jsonl.Code != http.StatusOK || !strings.Contains(jsonl.Body.String(), "node.route.add") {
+		t.Fatalf("jsonl = %d body=%s", jsonl.Code, jsonl.Body.String())
+	}
+	csv := f.request(t, http.MethodGet, "/api/v1/audit/export?format=csv&cluster=c1", nil, cookie, "")
+	if csv.Code != http.StatusOK || !strings.Contains(csv.Body.String(), "at,actor,source_ip") {
+		t.Fatalf("csv = %d body=%s", csv.Code, csv.Body.String())
+	}
+	bad := f.request(t, http.MethodGet, "/api/v1/audit/export?format=xml", nil, cookie, "")
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("bad format = %d", bad.Code)
+	}
+}
+
+func TestAuditExportDisabled(t *testing.T) {
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	cookie := f.login(t)
+	f.handler = New(Deps{Auth: f.auth, Version: "test"}).Handler()
+	rec := f.request(t, http.MethodGet, "/api/v1/audit/export", nil, cookie, "")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("disabled export = %d", rec.Code)
 	}
 }

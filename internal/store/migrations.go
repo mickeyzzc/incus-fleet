@@ -50,6 +50,12 @@ var schemaMigrations = []schemaMigration{
 			`CREATE UNIQUE INDEX IF NOT EXISTS idx_enrollment_tokens_hash ON enrollment_tokens(token_hash)`,
 		},
 	},
+	{
+		version: 4,
+		statements: []string{
+			`ALTER TABLE host_tasks ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''`,
+		},
+	},
 }
 
 func (s *SQLStore) migrate(ctx context.Context) error {

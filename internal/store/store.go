@@ -16,6 +16,9 @@ import (
 // ErrNotFound is returned when a requested record does not exist.
 var ErrNotFound = errors.New("store: not found")
 
+// ErrConflict marks a lease or unique-key conflict.
+var ErrConflict = errors.New("store: conflict")
+
 // Migration is a persisted migration task.
 type Migration struct {
 	ID            string    `json:"id"`

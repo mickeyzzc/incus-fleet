@@ -2,6 +2,7 @@ package agentgw
 
 import (
 	"context"
+	"crypto"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -103,6 +104,14 @@ func New(st *store.SQLStore, ca *CA, logger *slog.Logger, opts ...Option) *Gatew
 	}
 
 	return g
+}
+
+// IssueCertificate signs a new client certificate for an existing agent key.
+func (g *Gateway) IssueCertificate(agentID, cluster, member string, publicKey crypto.PublicKey, ttl time.Duration) ([]byte, string, time.Time, error) {
+	if g.ca == nil {
+		return nil, "", time.Time{}, errors.New("agentgw: CA is not configured")
+	}
+	return g.ca.IssueAgent(agentID, cluster, member, publicKey, ttl)
 }
 
 // SignBootstrap signs a bootstrap spec with the CA key.

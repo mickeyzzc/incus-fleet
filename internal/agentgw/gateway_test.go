@@ -529,3 +529,19 @@ func TestGatewayIngestsTelemetry(t *testing.T) {
 		t.Fatalf("telemetry = %#v", series)
 	}
 }
+
+func TestIssueCertificate(t *testing.T) {
+	ca := mustTestCA(t)
+	gw := New(openAgentStore(t), ca, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	pubPEM, _ := agentKeyPair(t)
+	block, _ := pem.Decode(pubPEM)
+	pub, _ := x509.ParsePKIXPublicKey(block.Bytes)
+	certPEM, fingerprint, expires, err := gw.IssueCertificate("agent-1", "c1", "node-a", pub, time.Hour)
+	if err != nil || len(certPEM) == 0 || fingerprint == "" || !expires.After(time.Now()) {
+		t.Fatalf("IssueCertificate() = %q, %q, %v, %v", certPEM, fingerprint, expires, err)
+	}
+	gw.ca = nil
+	if _, _, _, err := gw.IssueCertificate("agent-1", "c1", "node-a", pub, time.Hour); err == nil {
+		t.Fatal("IssueCertificate(nil CA) expected error")
+	}
+}

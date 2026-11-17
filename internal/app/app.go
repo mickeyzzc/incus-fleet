@@ -207,6 +207,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		NodeJoin:     nodeJoin,
 		Agent:        agentGW,
 		Bootstrap:    agentGW,
+		CertIssuer:   agentGW,
 		Telemetry:    telemetryStore,
 		MetricsQuery: queryProxy,
 		MetricsSD: httpapi.MetricsSDConfig{
