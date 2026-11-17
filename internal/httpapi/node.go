@@ -59,7 +59,7 @@ func (a *API) nodeNICState(w http.ResponseWriter, r *http.Request) {
 
 	name := r.PathValue("name")
 	plan := hostPlan("iface="+name, "up="+strconv.FormatBool(req.Up))
-	task, ok := a.beginHostTask(w, r, backend, actionNodeNICState, plan)
+	task, ok := a.beginHostTask(w, r, actionNodeNICState, plan)
 	if !ok {
 		return
 	}
@@ -91,7 +91,7 @@ func (a *API) nodeApplyAddress(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	plan := hostPlan("iface="+name, "dhcp="+strconv.FormatBool(req.DHCP), "address="+req.Address,
 		"gateway="+req.Gateway, "persist="+strconv.FormatBool(req.Persist))
-	task, ok := a.beginHostTask(w, r, backend, actionNodeAddress, plan)
+	task, ok := a.beginHostTask(w, r, actionNodeAddress, plan)
 	if !ok {
 		return
 	}
@@ -126,7 +126,7 @@ func (a *API) nodeWifiConnect(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	// Never put the Wi-Fi password in the task or audit record.
 	plan := hostPlan("iface="+name, "ssid="+req.SSID)
-	task, ok := a.beginHostTask(w, r, backend, actionNodeWifi, plan)
+	task, ok := a.beginHostTask(w, r, actionNodeWifi, plan)
 	if !ok {
 		return
 	}
@@ -177,7 +177,7 @@ func (a *API) nodeAddRoute(w http.ResponseWriter, r *http.Request) {
 	defer closeNode()
 
 	plan := hostPlan("destination="+req.Destination, "gateway="+req.Gateway, "device="+req.Device)
-	task, ok := a.beginHostTask(w, r, backend, actionNodeRouteAdd, plan)
+	task, ok := a.beginHostTask(w, r, actionNodeRouteAdd, plan)
 	if !ok {
 		return
 	}
@@ -202,7 +202,7 @@ func (a *API) nodeDeleteRoute(w http.ResponseWriter, r *http.Request) {
 
 	destination := r.PathValue("destination")
 	plan := hostPlan("destination=" + destination)
-	task, ok := a.beginHostTask(w, r, backend, actionNodeRouteDelete, plan)
+	task, ok := a.beginHostTask(w, r, actionNodeRouteDelete, plan)
 	if !ok {
 		return
 	}
@@ -249,7 +249,7 @@ func (a *API) nodeAddFirewallRule(w http.ResponseWriter, r *http.Request) {
 	defer closeNode()
 
 	plan := hostPlan("port="+strconv.Itoa(req.Port), "proto="+req.Proto, "action="+req.Action, "comment="+req.Comment)
-	task, ok := a.beginHostTask(w, r, backend, actionNodeFirewallAdd, plan)
+	task, ok := a.beginHostTask(w, r, actionNodeFirewallAdd, plan)
 	if !ok {
 		return
 	}
@@ -274,7 +274,7 @@ func (a *API) nodeDeleteFirewallRule(w http.ResponseWriter, r *http.Request) {
 
 	handle := r.PathValue("handle")
 	plan := hostPlan("handle=" + handle)
-	task, ok := a.beginHostTask(w, r, backend, actionNodeFirewallDelete, plan)
+	task, ok := a.beginHostTask(w, r, actionNodeFirewallDelete, plan)
 	if !ok {
 		return
 	}

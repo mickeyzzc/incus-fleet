@@ -39,7 +39,7 @@ func (a *API) resolveNode(w http.ResponseWriter, r *http.Request, kind hostops.K
 
 // beginHostTask records a mutating host operation before it starts. A nil
 // task means the operation is not persisted (tests or a disabled store).
-func (a *API) beginHostTask(w http.ResponseWriter, r *http.Request, backend hostops.Backend, action, plan string) (*store.HostTask, bool) {
+func (a *API) beginHostTask(w http.ResponseWriter, r *http.Request, action, plan string) (*store.HostTask, bool) {
 	if a.store == nil {
 		return nil, true
 	}

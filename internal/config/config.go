@@ -210,7 +210,7 @@ func ReadPEMOrFile(value string) ([]byte, error) {
 		return []byte(trimmed), nil
 	}
 
-	data, err := os.ReadFile(value)
+	data, err := os.ReadFile(value) //nolint:gosec // operator-supplied certificate path
 	if err != nil {
 		return nil, err
 	}
