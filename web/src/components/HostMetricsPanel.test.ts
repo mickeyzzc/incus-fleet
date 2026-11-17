@@ -56,6 +56,27 @@ describe('HostMetricsPanel', () => {
     expect(wrapper.text()).toContain('0.75')
   })
 
+  it('switches to the external Prometheus data source', async () => {
+    ;(api.metricQueryRange as any).mockResolvedValue([
+      {
+        name: 'fleet_host_load',
+        labels: { cluster: 'c1', member: 'node-a', window: '1' },
+        type: 'gauge',
+        points: [{ at: '2026-11-18T00:00:00Z', value: 2 }],
+      },
+    ])
+    const wrapper = mount(HostMetricsPanel, {
+      props: { cluster: 'c1', member: 'node-a' },
+      global: { stubs: { Sparkline: true, ElButton: true, ElProgress: true, ElAlert: true } },
+    })
+    await nextTick()
+    await wrapper.find('select').setValue('external')
+    await nextTick()
+    await nextTick()
+    expect(api.metricQueryRange).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('2.00')
+  })
+
   it('shows an empty state without telemetry', async () => {
     ;(api.hostMetrics as any).mockResolvedValue([])
     const wrapper = mount(HostMetricsPanel, {

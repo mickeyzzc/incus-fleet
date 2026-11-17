@@ -701,3 +701,17 @@ export interface TelemetrySeries {
   type: string
   points: TelemetryPoint[]
 }
+
+export interface PrometheusMatrixResult {
+  metric: Record<string, string>
+  values: Array<[number, string]>
+}
+
+export interface PrometheusQueryResponse {
+  status: string
+  data?: {
+    resultType: string
+    result: PrometheusMatrixResult[]
+  }
+  error?: string
+}

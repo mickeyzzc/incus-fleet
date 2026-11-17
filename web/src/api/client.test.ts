@@ -745,6 +745,17 @@ describe('ApiClient node network and cluster registration endpoints', () => {
     expect(urls).toContain('https://fleet.local/api/v1/tasks/task-1')
   })
 
+  it('queries the external PromQL proxy', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({
+      status: 'success',
+      data: { resultType: 'matrix', result: [{ metric: { __name__: 'fleet_host_load' }, values: [[1, '1.5']] }] },
+    }))
+    const series = await client.metricQueryRange('fleet_host_load', '1h', '30s')
+    expect(series[0]?.name).toBe('fleet_host_load')
+    expect(series[0]?.points[0]?.value).toBe(1.5)
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('/api/v1/metrics/query_range?')
+  })
+
   it('loads host metrics from the center buffer', async () => {
     const { client, fetchImpl } = clientWith(mockResponse({ series: [{ name: 'fleet_host_load' }] }))
     const series = await client.hostMetrics('c1', 'n1')

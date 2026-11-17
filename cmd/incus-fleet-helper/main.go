@@ -352,6 +352,10 @@ func rollbackState(taskID string) error {
 		}
 	}
 	for _, route := range state.Routes {
+		// Connected/kernel routes are recreated by adding the addresses above.
+		if route.Protocol != "" && route.Protocol != "99" {
+			continue
+		}
 		if err := service.AddFleetRoute(route.Destination, route.Gateway, state.Interface); err != nil {
 			return err
 		}

@@ -16,6 +16,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const REFRESH_MS = 10000
 
+const source = ref<'local' | 'external'>('local')
 const series = ref<TelemetrySeries[]>([])
 const loading = ref(false)
 const error = ref('')
@@ -75,7 +76,12 @@ function uptimeLabel(seconds: number | null): string {
 async function refresh(): Promise<void> {
   loading.value = true
   try {
-    series.value = (await api.hostMetrics(props.cluster, props.member)) ?? []
+    if (source.value === 'external') {
+      const selector = `{cluster="${props.cluster}",member="${props.member}",__name__=~"fleet_host_cpu_usage_ratio|fleet_host_memory_bytes|fleet_host_load|fleet_host_uptime_seconds"}`
+      series.value = await api.metricQueryRange(selector, '1h', '30s')
+    } else {
+      series.value = (await api.hostMetrics(props.cluster, props.member)) ?? []
+    }
     error.value = ''
   } catch (err) {
     error.value = errorMessage(err)
@@ -98,7 +104,7 @@ onBeforeUnmount(() => {
   }
 })
 
-watch([() => props.cluster, () => props.member], () => {
+watch([() => props.cluster, () => props.member, source], () => {
   series.value = []
   void refresh()
 })
@@ -113,6 +119,13 @@ watch([() => props.cluster, () => props.member], () => {
           <p class="subtitle">{{ t('hostMetrics.subtitle', { host: member }) }}</p>
         </div>
         <div class="page-actions">
+          <label class="source-select">
+            {{ t('hostMetrics.source') }}
+            <select v-model="source">
+              <option value="local">{{ t('hostMetrics.local') }}</option>
+              <option value="external">{{ t('hostMetrics.external') }}</option>
+            </select>
+          </label>
           <span class="metric-time">{{ lastSample ? formatDateTime(lastSample) : t('common.none') }}</span>
           <el-button :loading="loading" @click="refresh">{{ t('common.refresh') }}</el-button>
         </div>
@@ -191,6 +204,23 @@ watch([() => props.cluster, () => props.member], () => {
 .metric-time {
   color: var(--fleet-ink-soft, var(--el-text-color-secondary));
   font-size: 12px;
+}
+
+.source-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fleet-ink-soft, var(--el-text-color-secondary));
+  font-size: 12px;
+}
+
+.source-select select {
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  padding: 3px 6px;
+  font: inherit;
 }
 
 .metrics-empty {

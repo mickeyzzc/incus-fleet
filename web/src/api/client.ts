@@ -11,6 +11,7 @@ import type {
   NodeTask,
   NodeTaskEvent,
   TelemetrySeries,
+  PrometheusQueryResponse,
   BatchKeysRequest,
   BatchPowerRequest,
   BatchScriptsRequest,
@@ -903,6 +904,32 @@ export class ApiClient {
       `/api/v1/metrics/query?${query.toString()}`,
     )
     return data.series ?? []
+  }
+
+  /** Runs a PromQL range query through the center's external TSDB proxy. */
+  async metricQueryRange(query: string, from = '1h', step = '1m', to = ''): Promise<TelemetrySeries[]> {
+    const params = new URLSearchParams({ query, from, step })
+    if (to) {
+      params.set('to', to)
+    }
+    const data = await this.request<PrometheusQueryResponse>(
+      'GET',
+      `/api/v1/metrics/query_range?${params.toString()}`,
+    )
+    return (data.data?.result ?? []).map((result) => {
+      const labels = { ...result.metric }
+      const name = labels.__name__ ?? ''
+      delete labels.__name__
+      return {
+        name,
+        labels,
+        type: 'gauge',
+        points: result.values.map(([timestamp, value]) => ({
+          at: new Date(timestamp * 1000).toISOString(),
+          value: Number(value),
+        })),
+      }
+    })
   }
 
   /** Provisions a new host and joins it to a cluster. */

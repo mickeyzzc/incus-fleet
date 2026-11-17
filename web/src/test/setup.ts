@@ -146,6 +146,7 @@ vi.mock('@/api', async (importOriginal) => {
       nodeAddFirewallRule: vi.fn(),
       nodeDeleteFirewallRule: vi.fn(),
       hostMetrics: vi.fn(),
+      metricQueryRange: vi.fn(),
       clusterTraffic: vi.fn(),
       registerCluster: vi.fn(),
       joinClusterMember: vi.fn(),
