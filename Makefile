@@ -4,6 +4,7 @@ GO ?= go
 BUN ?= bun
 GOLANGCI_LINT ?= golangci-lint
 CONFIG ?= config.local.yaml
+MODULE ?= github.com/mickeyzzc/incus-fleet
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -17,11 +18,11 @@ LDFLAGS := -s -w \
 GO_PACKAGES := ./cmd/... ./internal/... ./web
 # main() calls os.Exit and web only embeds assets, so the coverage gate applies
 # to the internal packages that hold product behavior.
-COVERPKG := $(shell $(GO) list ./internal/... 2>/dev/null | grep -v '/internal/testutil' | paste -sd, -)
+COVERPKG := $(shell $(GO) list ./internal/... 2>/dev/null | grep -v -E '/internal/(testutil|agentpb)' | paste -sd, -)
 GO_FILES := $(shell find cmd internal web -name '*.go' -not -path '*/node_modules/*')
 
 .PHONY: help deps frontend backend build run test test-go test-web coverage coverage-go coverage-web \
-	lint lint-go lint-web fmt fmt-check vet tidy check release clean
+	lint lint-go lint-web fmt fmt-check vet tidy check release clean proto agent-test agent-lint agent-build
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -49,6 +50,19 @@ test-go: ## Run Go tests
 
 test-web: ## Run frontend tests
 	cd web && $(BUN) run test
+
+agent-test: ## Run Rust agent tests
+	cargo test --manifest-path agent/Cargo.toml
+
+agent-lint: ## Run Rust formatting and clippy
+	cargo fmt --manifest-path agent/Cargo.toml -- --check
+	cargo clippy --manifest-path agent/Cargo.toml -- -D warnings
+
+agent-build: ## Build the Rust agent in release mode
+	cargo build --manifest-path agent/Cargo.toml --release
+
+proto: ## Regenerate Go protobuf bindings
+	protoc -I api --go_out=. --go_opt=module=$(MODULE) api/agent/v1/agent.proto
 
 coverage: coverage-go coverage-web ## Run both coverage suites
 

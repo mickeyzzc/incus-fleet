@@ -1,0 +1,32 @@
+[Unit]
+Description=Incus Fleet host agent
+Documentation=https://github.com/mickeyzzc/incus-fleet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=incus-fleet-agent
+Group=incus-fleet-agent
+StateDirectory=incus-fleet-agent
+StateDirectoryMode=0700
+ExecStart=/usr/local/bin/incus-fleet-agent run --state-dir /var/lib/incus-fleet-agent
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+MemoryMax=64M
+CPUQuota=5%
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

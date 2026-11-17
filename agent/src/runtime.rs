@@ -1,0 +1,242 @@
+use std::io::BufReader;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result, bail};
+use futures_util::{SinkExt, StreamExt};
+use prost::Message;
+use rustls::ClientConfig;
+use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::Message as WsMessage;
+use tokio_tungstenite::{
+    Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
+};
+use tracing::{info, warn};
+
+use crate::facts;
+use crate::identity::Identity;
+use crate::proto::v1::{Envelope, Heartbeat, Hello, TaskResult, TaskState, envelope};
+use crate::snapshot;
+
+type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+/// Run the agent forever, reconnecting with exponential backoff.
+pub async fn run(state_dir: &Path) -> Result<()> {
+    let (identity, files) = Identity::load(state_dir)?;
+    let tls = client_tls(&files.ca_pem, &files.cert_pem, &files.key_pem)?;
+    let connect_url = websocket_url(&identity.center_url)?;
+
+    let mut backoff = Duration::from_secs(1);
+    loop {
+        match session(&connect_url, &identity, tls.clone()).await {
+            Ok(()) => {
+                info!("agent session closed");
+                backoff = Duration::from_secs(1);
+            }
+            Err(err) => {
+                warn!(error = %err, "agent session failed");
+            }
+        }
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(Duration::from_secs(60));
+    }
+}
+
+fn client_tls(ca_pem: &[u8], cert_pem: &[u8], key_pem: &[u8]) -> Result<Arc<ClientConfig>> {
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in rustls_pemfile::certs(&mut BufReader::new(ca_pem)) {
+        roots.add(cert.context("parse CA certificate")?)?;
+    }
+    let certs = rustls_pemfile::certs(&mut BufReader::new(cert_pem))
+        .collect::<Result<Vec<_>, _>>()
+        .context("parse client certificate")?;
+    let key = rustls_pemfile::private_key(&mut BufReader::new(key_pem))
+        .context("parse client key")?
+        .context("client key is empty")?;
+    let config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_client_auth_cert(certs, key)
+        .context("build TLS client config")?;
+
+    Ok(Arc::new(config))
+}
+
+fn websocket_url(center_url: &str) -> Result<String> {
+    let mut url = url::Url::parse(center_url).context("parse center URL")?;
+    match url.scheme() {
+        "https" => {
+            url.set_scheme("wss").expect("https to wss");
+        }
+        "http" => {
+            url.set_scheme("ws").expect("http to ws");
+        }
+        "wss" | "ws" => {}
+        other => bail!("unsupported center URL scheme {other}"),
+    }
+    url.set_path("/api/v1/agent/connect");
+    url.set_query(None);
+
+    Ok(url.to_string())
+}
+
+async fn session(url: &str, identity: &Identity, tls: Arc<ClientConfig>) -> Result<()> {
+    let (mut ws, _) = tokio::time::timeout(
+        Duration::from_secs(10),
+        connect_async_tls_with_config(url, None, false, Some(Connector::Rustls(tls))),
+    )
+    .await
+    .context("connect timeout")?
+    .context("connect to center")?;
+
+    let hello = Hello {
+        agent_id: identity.agent_id.clone(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        os: facts::collect().await.os,
+        arch: std::env::consts::ARCH.to_string(),
+        kernel: read_trim("/proc/sys/kernel/osrelease"),
+        hostname: identity.hostname.clone(),
+        capabilities: vec!["nodenet.snapshot".into()],
+        started_at_ms: now_ms(),
+    };
+    send(&mut ws, mk_envelope(envelope::Body::Hello(hello))).await?;
+
+    let current_facts = facts::collect().await;
+    send(
+        &mut ws,
+        mk_envelope(envelope::Body::Facts(current_facts.to_proto())),
+    )
+    .await?;
+
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let started = Instant::now();
+
+    loop {
+        tokio::select! {
+            _ = heartbeat.tick() => {
+                send(&mut ws, mk_envelope(envelope::Body::Heartbeat(Heartbeat {
+                        uptime_ms: started.elapsed().as_millis() as i64,
+                        load1: read_load(),
+                        mem_total: 0,
+                        mem_used: 0,
+                        incus_version: String::new(),
+                        running_tasks: 0,
+                    }))).await?;
+            }
+            message = ws.next() => {
+                let Some(message) = message else { break; };
+                let message = message.context("read websocket")?;
+                match message {
+                    WsMessage::Binary(data) => {
+                        let envelope = Envelope::decode(data.as_ref()).context("decode envelope")?;
+                        if let Some(envelope::Body::Task(task)) = envelope.body {
+                            let result = handle_task(task).await;
+                            send(&mut ws, mk_envelope(envelope::Body::Result(result))).await?;
+                        }
+                    }
+                    WsMessage::Close(_) => break,
+                    WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Text(_) | WsMessage::Frame(_) => {}
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_task(task: crate::proto::v1::TaskDispatch) -> TaskResult {
+    let task_id = task.task_id.clone();
+    if task.r#type() != crate::proto::v1::TaskType::NodenetSnapshot {
+        return TaskResult {
+            task_id,
+            state: TaskState::Failed as i32,
+            payload: Vec::new(),
+            error_code: "unsupported_task".into(),
+            error: "unsupported task type".into(),
+            at_ms: now_ms(),
+            plan_hash: task.plan_hash,
+        };
+    }
+
+    match snapshot::collect().await {
+        Ok(snapshot) => TaskResult {
+            task_id,
+            state: TaskState::Succeeded as i32,
+            payload: snapshot.encode_to_vec(),
+            error_code: String::new(),
+            error: String::new(),
+            at_ms: now_ms(),
+            plan_hash: task.plan_hash,
+        },
+        Err(err) => TaskResult {
+            task_id,
+            state: TaskState::Failed as i32,
+            payload: Vec::new(),
+            error_code: "snapshot_failed".into(),
+            error: err.to_string(),
+            at_ms: now_ms(),
+            plan_hash: task.plan_hash,
+        },
+    }
+}
+
+async fn send(ws: &mut Socket, envelope: Envelope) -> Result<()> {
+    ws.send(WsMessage::Binary(envelope.encode_to_vec().into()))
+        .await
+        .context("send websocket envelope")
+}
+
+fn read_trim(path: &str) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn read_load() -> f64 {
+    std::fs::read_to_string("/proc/loadavg")
+        .ok()
+        .and_then(|value| value.split_whitespace().next()?.parse().ok())
+        .unwrap_or(0.0)
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn mk_envelope(body: envelope::Body) -> Envelope {
+    Envelope {
+        message_id: String::new(),
+        sent_at_ms: now_ms(),
+        body: Some(body),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_websocket_url() {
+        assert_eq!(
+            websocket_url("https://fleet.example:8444/").unwrap(),
+            "wss://fleet.example:8444/api/v1/agent/connect"
+        );
+        assert_eq!(
+            websocket_url("http://127.0.0.1:8080").unwrap(),
+            "ws://127.0.0.1:8080/api/v1/agent/connect"
+        );
+        assert!(websocket_url("ftp://example.com").is_err());
+    }
+
+    #[test]
+    fn builds_tls_config() {
+        // Real PEMs are exercised by the Go enrollment tests; this asserts the
+        // parser fails cleanly on invalid material.
+        assert!(client_tls(b"not-pem", b"not-pem", b"not-pem").is_err());
+    }
+}
