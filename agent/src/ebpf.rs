@@ -153,7 +153,7 @@ mod platform {
     use std::path::Path;
 
     use aya::maps::{HashMap as AyaHashMap, MapData};
-    use aya::programs::{RawTracePoint, TracePoint};
+    use aya::programs::{CgroupAttachMode, RawTracePoint, SockOps, TracePoint};
     use aya::{Ebpf, Pod};
 
     use super::{BLOCK_BUCKETS, BlockHistogram, InstanceSnapshot, Snapshot};
@@ -168,6 +168,19 @@ mod platform {
 
     unsafe impl Pod for BlockKey {}
 
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug)]
+    pub struct FlowKey {
+        saddr: u32,
+        daddr: u32,
+        sport: u16,
+        dport: u16,
+        family: u16,
+        pad: u16,
+    }
+
+    unsafe impl Pod for FlowKey {}
+
     pub struct Collector {
         _ebpf: Ebpf,
         retransmits: aya::maps::PerCpuArray<MapData, u64>,
@@ -176,12 +189,21 @@ mod platform {
         cgroup_oom_kills: AyaHashMap<MapData, u64, u64>,
         block_latency: AyaHashMap<MapData, BlockKey, u64>,
         block_sum_ns: AyaHashMap<MapData, u64, u64>,
+        socket_cgroups: AyaHashMap<MapData, FlowKey, u64>,
     }
 
     impl Collector {
         pub fn open(path: &Path) -> Result<Self, String> {
             let mut ebpf =
                 Ebpf::load_file(path).map_err(|err| format!("load eBPF object: {err}"))?;
+            if let Err(err) =
+                attach_sockops(&mut ebpf, "fleet_sockops", Path::new("/sys/fs/cgroup"))
+            {
+                tracing::warn!(
+                    error = %err,
+                    "sockops attach failed; TCP cgroup attribution falls back to the current task"
+                );
+            }
             attach_tracepoint(&mut ebpf, "tcp_retransmit", "tcp", "tcp_retransmit_skb")?;
             attach_tracepoint(&mut ebpf, "oom_mark", "oom", "mark_victim")?;
             attach_raw_tracepoint(&mut ebpf, "block_issue", "block_rq_issue")?;
@@ -217,6 +239,11 @@ mod platform {
                     .ok_or_else(|| "missing BLOCK_SUM_NS map".to_string())?,
             )
             .map_err(|err| format!("open BLOCK_SUM_NS: {err}"))?;
+            let socket_cgroups = AyaHashMap::try_from(
+                ebpf.take_map("SOCKET_CGROUPS")
+                    .ok_or_else(|| "missing SOCKET_CGROUPS map".to_string())?,
+            )
+            .map_err(|err| format!("open SOCKET_CGROUPS: {err}"))?;
 
             Ok(Self {
                 _ebpf: ebpf,
@@ -226,7 +253,12 @@ mod platform {
                 cgroup_oom_kills,
                 block_latency,
                 block_sum_ns,
+                socket_cgroups,
             })
+        }
+
+        pub fn socket_cgroup_count(&self) -> usize {
+            self.socket_cgroups.iter().count()
         }
 
         pub fn observed_cgroup_ids(&self) -> Vec<u64> {
@@ -260,21 +292,21 @@ mod platform {
 
         pub fn collect(&self) -> Snapshot {
             let cgroups = cgroup_table();
-            let mut instances: BTreeMap<u64, InstanceSnapshot> = BTreeMap::new();
+            let mut instances: BTreeMap<(String, String), InstanceSnapshot> = BTreeMap::new();
 
             for entry in self.cgroup_retransmits.iter() {
                 let Ok((cgroup_id, value)) = entry else {
                     continue;
                 };
                 if let Some((name, kind)) = cgroups.get(&cgroup_id) {
-                    instances
-                        .entry(cgroup_id)
+                    let item = instances
+                        .entry((name.clone(), (*kind).to_string()))
                         .or_insert_with(|| InstanceSnapshot {
                             instance: name.clone(),
                             kind: (*kind).to_string(),
                             ..Default::default()
-                        })
-                        .tcp_retransmits = value;
+                        });
+                    item.tcp_retransmits += value;
                 }
             }
             for entry in self.cgroup_oom_kills.iter() {
@@ -282,18 +314,17 @@ mod platform {
                     continue;
                 };
                 if let Some((name, kind)) = cgroups.get(&cgroup_id) {
-                    instances
-                        .entry(cgroup_id)
+                    let item = instances
+                        .entry((name.clone(), (*kind).to_string()))
                         .or_insert_with(|| InstanceSnapshot {
                             instance: name.clone(),
                             kind: (*kind).to_string(),
                             ..Default::default()
-                        })
-                        .oom_kills = value;
+                        });
+                    item.oom_kills += value;
                 }
             }
 
-            let mut block_by_cgroup: BTreeMap<u64, BlockHistogram> = BTreeMap::new();
             for entry in self.block_latency.iter() {
                 let Ok((key, value)) = entry else {
                     continue;
@@ -301,33 +332,38 @@ mod platform {
                 if key.bucket as usize >= BLOCK_BUCKETS || !cgroups.contains_key(&key.cgroup_id) {
                     continue;
                 }
-                block_by_cgroup.entry(key.cgroup_id).or_default().buckets[key.bucket as usize] +=
-                    value;
+                let (name, kind) = cgroups.get(&key.cgroup_id).expect("checked above");
+                let item = instances
+                    .entry((name.clone(), (*kind).to_string()))
+                    .or_insert_with(|| InstanceSnapshot {
+                        instance: name.clone(),
+                        kind: (*kind).to_string(),
+                        ..Default::default()
+                    });
+                item.block.buckets[key.bucket as usize] += value;
             }
             for entry in self.block_sum_ns.iter() {
                 let Ok((cgroup_id, value)) = entry else {
                     continue;
                 };
-                if !cgroups.contains_key(&cgroup_id) {
-                    continue;
-                }
-                block_by_cgroup.entry(cgroup_id).or_default().sum_ns = value;
-            }
-            for (cgroup_id, block) in block_by_cgroup {
                 if let Some((name, kind)) = cgroups.get(&cgroup_id) {
-                    instances
-                        .entry(cgroup_id)
+                    let item = instances
+                        .entry((name.clone(), (*kind).to_string()))
                         .or_insert_with(|| InstanceSnapshot {
                             instance: name.clone(),
                             kind: (*kind).to_string(),
                             ..Default::default()
-                        })
-                        .block = block;
+                        });
+                    item.block.sum_ns += value;
                 }
             }
 
             let mut instances: Vec<_> = instances.into_values().collect();
-            instances.sort_by(|a, b| a.instance.cmp(&b.instance));
+            instances.sort_by(|a, b| {
+                a.instance
+                    .cmp(&b.instance)
+                    .then_with(|| a.kind.cmp(&b.kind))
+            });
 
             Snapshot {
                 tcp_retransmits: total(&self.retransmits),
@@ -419,6 +455,23 @@ mod platform {
         None
     }
 
+    fn attach_sockops(ebpf: &mut Ebpf, name: &str, cgroup_path: &Path) -> Result<(), String> {
+        let program: &mut SockOps = ebpf
+            .program_mut(name)
+            .ok_or_else(|| format!("missing eBPF program {name}"))?
+            .try_into()
+            .map_err(|err| format!("cast {name}: {err}"))?;
+        program
+            .load()
+            .map_err(|err| format!("load {name}: {err}"))?;
+        let cgroup = std::fs::File::open(cgroup_path)
+            .map_err(|err| format!("open {}: {err}", cgroup_path.display()))?;
+        program
+            .attach(&cgroup, CgroupAttachMode::Single)
+            .map_err(|err| format!("attach {name}: {err}"))?;
+        Ok(())
+    }
+
     fn attach_tracepoint(
         ebpf: &mut Ebpf,
         name: &str,
@@ -480,6 +533,10 @@ mod platform {
 
         pub fn observed_cgroup_ids(&self) -> Vec<u64> {
             Vec::new()
+        }
+
+        pub fn socket_cgroup_count(&self) -> usize {
+            0
         }
 
         pub fn cgroup_table_debug(&self) -> Vec<(u64, String, String)> {

@@ -233,6 +233,7 @@ async fn main() -> Result<()> {
             let initial = collector.collect();
             println!("initial_tcp_retransmits={}", initial.tcp_retransmits);
             println!("initial_oom_kills={}", initial.oom_kills);
+            println!("initial_socket_cgroups={}", collector.socket_cgroup_count());
             if hold_secs > 0 {
                 tokio::time::sleep(std::time::Duration::from_secs(hold_secs)).await;
                 if debug_cgroups {
@@ -245,6 +246,7 @@ async fn main() -> Result<()> {
                 let final_snapshot = collector.collect();
                 println!("tcp_retransmits={}", final_snapshot.tcp_retransmits);
                 println!("oom_kills={}", final_snapshot.oom_kills);
+                println!("socket_cgroups={}", collector.socket_cgroup_count());
                 for item in &final_snapshot.instances {
                     println!(
                         "instance={} type={} tcp_retransmits={} oom_kills={} block_latency_count={} block_latency_sum_seconds={:.6}",

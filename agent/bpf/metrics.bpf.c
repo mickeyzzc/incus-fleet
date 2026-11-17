@@ -25,6 +25,25 @@ struct {
     __type(value, __u64);
 } CGROUP_RETRANSMITS SEC(".maps");
 
+// IPv4 4-tuple -> cgroup id, populated by sockops in process context so
+// retransmit tracepoints can resolve the owning container even when the timer
+// runs in softirq context.
+struct flow_key {
+    __u32 saddr;
+    __u32 daddr;
+    __u16 sport;
+    __u16 dport;
+    __u16 family;
+    __u16 pad;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct flow_key);
+    __type(value, __u64);
+} SOCKET_CGROUPS SEC(".maps");
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
@@ -83,13 +102,61 @@ static __always_inline void bump_host(void *map)
         __sync_fetch_and_add(value, 1);
 }
 
-SEC("tracepoint/tcp/tcp_retransmit_skb")
-int tcp_retransmit(void *ctx)
+SEC("sockops")
+int fleet_sockops(struct bpf_sock_ops *skops)
 {
-    // Retransmit timers can run in softirq context; the cgroup attribution is
-    // best-effort and falls back to the root cgroup when current is not the
-    // socket owner. The host counter remains exact.
+    __u32 op = skops->op;
+    if (op != BPF_SOCK_OPS_TCP_CONNECT_CB &&
+        op != BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB)
+        return 0;
+
+    if (skops->family != 2)
+        return 0;
+    struct bpf_sock *sk = skops->sk;
+    if (!sk)
+        return 0;
+    struct flow_key key = {};
+    key.saddr = sk->src_ip4;
+    key.daddr = sk->dst_ip4;
+    key.sport = (__u16)sk->src_port;
+    key.dport = __builtin_bswap16(sk->dst_port);
+    key.family = 2;
     __u64 cgroup_id = bpf_get_current_cgroup_id();
+    if (cgroup_id)
+        bpf_map_update_elem(&SOCKET_CGROUPS, &key, &cgroup_id, BPF_NOEXIST);
+    return 0;
+}
+
+struct tcp_retransmit_ctx {
+    __u64 common;
+    void *skb;
+    void *sk;
+    int state;
+    __u16 sport;
+    __u16 dport;
+    __u16 family;
+    __u8 saddr[4];
+    __u8 daddr[4];
+};
+
+SEC("tracepoint/tcp/tcp_retransmit_skb")
+int tcp_retransmit(void *raw_ctx)
+{
+    struct tcp_retransmit_ctx *ctx = raw_ctx;
+    __u64 cgroup_id = 0;
+    if (ctx->family == 2) {
+        struct flow_key key = {};
+        __builtin_memcpy(&key.saddr, ctx->saddr, 4);
+        __builtin_memcpy(&key.daddr, ctx->daddr, 4);
+        key.sport = ctx->sport;
+        key.dport = ctx->dport;
+        key.family = 2;
+        __u64 *mapped = bpf_map_lookup_elem(&SOCKET_CGROUPS, &key);
+        if (mapped)
+            cgroup_id = *mapped;
+    }
+    if (!cgroup_id)
+        cgroup_id = bpf_get_current_cgroup_id();
     bump_host(&RETRANSMITS);
     bump_cgroup(&CGROUP_RETRANSMITS, cgroup_id);
     return 0;
