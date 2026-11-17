@@ -346,6 +346,58 @@ writes metrics to SQLite/PostgreSQL; restarting it clears the buffer. The node d
 the last hour, and the API exports JSON, Prometheus text, or CSV. Prometheus/VictoriaMetrics
 remote write and HTTP SD are later phases.
 
+#### Agent lifecycle, HA, and audit
+
+Certificate rotation and revocation are admin API calls. Export the agent's public key from its
+identity directory first:
+
+```bash
+sudo openssl pkey -in /var/lib/incus-fleet-agent/identity/client.key \
+  -pubout -out /tmp/agent-public.pem
+```
+
+```bash
+# Sign a new certificate for the agent's existing public key
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"public_key\":$(jq -Rs . < agent-public.pem)}" \
+  https://fleet.example/api/v1/agents/AGENT_ID/certificate
+# Revoke
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://fleet.example/api/v1/agents/AGENT_ID/revoke
+```
+
+The gateway checks revocation on every connection. The agent must write the returned certificate
+into its identity directory and reconnect; automated renewal is a later refinement.
+
+The audit history can be exported without the UI's 200-row limit:
+
+```bash
+curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'https://fleet.example/api/v1/audit/export?format=jsonl' > audit.jsonl
+curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'https://fleet.example/api/v1/audit/export?format=csv' > audit.csv
+```
+
+Host tasks have database-backed lease primitives (`lease_owner`, `lease_until`,
+`ClaimHostTask`/`RenewHostTaskLease`/`ReleaseHostTask`). PostgreSQL uses
+`FOR UPDATE SKIP LOCKED`; SQLite serializes through a transaction. These primitives are ready for
+a multi-instance task worker; the current center still executes synchronous HTTP operations.
+
+Upgrade an agent with a detached Ed25519 signature:
+
+```bash
+incus-fleet-agent upgrade \
+  --binary incus-fleet-agent-linux-amd64 \
+  --signature incus-fleet-agent-linux-amd64.sig \
+  --public-key release-ed25519.pub \
+  --target /usr/local/bin/incus-fleet-agent
+```
+
+The installer verifies the signature, keeps `incus-fleet-agent.prev`, installs the new binary with
+mode 0755, and runs `--version`; if the health check fails it restores the previous binary. Restart
+the service after a successful install.
+
 #### Prometheus/VictoriaMetrics
 
 Enable remote write and the query proxy:

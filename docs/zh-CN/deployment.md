@@ -341,6 +341,56 @@ agent 每 10 秒上报主机 CPU/内存/负载/运行时间/网络计数器。�
 SQLite/PostgreSQL；重启中心会清空缓冲。节点详情页显示最近 1 小时，API 可导出 JSON、
 Prometheus text 或 CSV。Prometheus/VictoriaMetrics remote write 和 HTTP SD 在后续阶段。
 
+#### Agent 生命周期、HA 与审计
+
+证书轮换和吊销通过管理员 API 完成。先从 agent 的 identity 目录导出公钥：
+
+```bash
+sudo openssl pkey -in /var/lib/incus-fleet-agent/identity/client.key \
+  -pubout -out /tmp/agent-public.pem
+```
+
+```bash
+# 为 agent 现有公钥签发新证书
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"public_key\":$(jq -Rs . < agent-public.pem)}" \
+  https://fleet.example/api/v1/agents/AGENT_ID/certificate
+# 吊销
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://fleet.example/api/v1/agents/AGENT_ID/revoke
+```
+
+gateway 每次连接都会检查吊销状态。agent 需要把返回的证书写入 identity 目录并重连；自动续期
+是后续增强。
+
+审计历史可以绕过 UI 的 200 条限制导出：
+
+```bash
+curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'https://fleet.example/api/v1/audit/export?format=jsonl' > audit.jsonl
+curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'https://fleet.example/api/v1/audit/export?format=csv' > audit.csv
+```
+
+主机任务已有数据库级 lease 原语（`lease_owner`、`lease_until`、
+`ClaimHostTask`/`RenewHostTaskLease`/`ReleaseHostTask`）。PostgreSQL 使用
+`FOR UPDATE SKIP LOCKED`；SQLite 通过事务串行化。这些原语已为多实例任务 worker 准备好；当前
+中心仍同步执行 HTTP 操作。
+
+使用 detached Ed25519 签名升级 agent：
+
+```bash
+incus-fleet-agent upgrade \
+  --binary incus-fleet-agent-linux-amd64 \
+  --signature incus-fleet-agent-linux-amd64.sig \
+  --public-key release-ed25519.pub \
+  --target /usr/local/bin/incus-fleet-agent
+```
+
+安装器验证签名、保留 `incus-fleet-agent.prev`、以 0755 安装新二进制并运行 `--version`；健康检查
+失败时恢复旧二进制。成功后重启服务。
+
 #### Prometheus/VictoriaMetrics
 
 启用 remote write 和查询代理：

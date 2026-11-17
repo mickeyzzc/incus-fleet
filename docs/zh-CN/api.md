@@ -457,6 +457,23 @@ SD token 与管理员 token 分离，通过 `Authorization: Bearer <token>` 发�
 版本支持 `mode=proxy`：Prometheus 抓取中心，中心返回最新内存样本和 `fleet_agent_up`。agent
 直连监听在后续阶段。
 
+agent 身份生命周期：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/agents/{id}/certificate` | 为 agent 的 PKIX 公钥签发新证书 |
+| `POST /api/v1/agents/{id}/revoke` | 吊销 agent；gateway 拒绝后续连接 |
+
+```json
+// 轮换
+{"public_key": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"}
+// 200
+{"certificate": "-----BEGIN CERTIFICATE-----\n...\n", "fingerprint": "...",
+ "expires_at": "2027-02-16T00:00:00Z"}
+// 吊销
+POST /api/v1/agents/AGENT_ID/revoke -> 204
+```
+
 ## 主机任务与审计
 
 每个变更型节点操作都会记录为一个 host task 和一条不可变审计记录。任务和审计与迁移历史
@@ -467,6 +484,7 @@ SD token 与管理员 token 分离，通过 `Authorization: Bearer <token>` 发�
 | `GET /api/v1/tasks?cluster=&member=&limit=` | 最近的任务，按时间倒序；`limit` 1-200，默认 50 |
 | `GET /api/v1/tasks/{id}` | 一个任务及其状态事件 |
 | `GET /api/v1/audit?cluster=&member=&limit=` | 主机审计记录，按时间倒序 |
+| `GET /api/v1/audit/export?format=jsonl\|csv` | 完整审计导出，不受 UI 上限 |
 
 ```json
 // GET /api/v1/tasks/{id}

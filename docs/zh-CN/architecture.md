@@ -153,6 +153,16 @@ spec：中心构建 join 或 init preseed，并用 agent CA 私钥签名；helpe
 包管理器安装，执行 `incus admin init --preseed`，等待本地 API，并把幂等步骤记录在
 `/var/lib/incus-fleet-helper`。指标和 eBPF 仍在后续阶段。
 
+## 高可用与生命周期
+
+主机任务带有 `lease_owner`/`lease_until`，可由 worker 通过 PostgreSQL 的
+`FOR UPDATE SKIP LOCKED` 或 SQLite 事务领取。这是多中心实例协调的基础原语；当前同步 HTTP 路径
+还没有后台 dispatcher。
+
+agent 证书由中心 CA 签发。管理员可以为 agent 现有公钥签发替换证书，或吊销 agent；gateway 在
+连接时检查吊销状态并校验存储的证书指纹。agent 升级使用 detached Ed25519 签名、`.prev`
+备份和 `--version` 健康检查，失败时恢复旧二进制。审计记录可导出为 JSONL 或 CSV。
+
 ## 共享资产与批量操作
 
 资产库把 SSH 公钥和脚本存放在控制平面数据库中。密钥按内容去重。批量操作复用与单实例维护操作相同的 `instances.RunOps` 路径，因此密钥注入、脚本执行和电源操作在单个或多个实例上表现一致。目标按顺序独立执行；一个失败不会中止其余目标。

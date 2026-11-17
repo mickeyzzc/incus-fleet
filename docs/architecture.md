@@ -191,6 +191,18 @@ host package manager when requested, runs `incus admin init --preseed`, waits fo
 and records idempotent steps under `/var/lib/incus-fleet-helper`. Telemetry and eBPF remain later
 phases.
 
+## High availability and lifecycle
+
+Host tasks carry `lease_owner`/`lease_until` and can be claimed by a worker with PostgreSQL
+`FOR UPDATE SKIP LOCKED` or a SQLite transaction. This is the coordination primitive for multiple
+center instances; the current synchronous HTTP path does not yet run a background dispatcher.
+
+Agent certificates are issued by the center CA. Admins can sign a replacement certificate for an
+existing agent public key or revoke an agent; the gateway checks revocation on connect and verifies
+the stored certificate fingerprint. Agent upgrades use a detached Ed25519 signature, a `.prev`
+backup, and a `--version` health check that restores the previous binary on failure. Audit records
+can be exported as JSONL or CSV.
+
 ## Shared assets and batch operations
 
 The asset library stores SSH public keys and scripts in the control-plane database. Keys are

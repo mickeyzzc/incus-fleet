@@ -35,6 +35,8 @@
   重传/OOM 计数器（procfs 回退）。
 - Prometheus/VictoriaMetrics remote write（有界重试队列）、PromQL range 查询代理，以及带 token
   鉴权的 HTTP 服务发现和中心代理抓取端点。
+- PostgreSQL/SQLite 主机任务 lease 原语、agent 证书轮换/吊销 API、带自动回滚的签名 agent
+  升级，以及 JSONL/CSV 审计导出。
 
 ### 修复
 

@@ -36,6 +36,8 @@ All notable changes to this project are documented here. The format follows
   Linux eBPF collector for host TCP retransmit/OOM counters with procfs fallback.
 - Prometheus/VictoriaMetrics remote write with a bounded retry queue, a PromQL range-query proxy,
   and token-authenticated HTTP service discovery with a center-proxied scrape endpoint.
+- Host-task lease primitives for PostgreSQL/SQLite, agent certificate rotation/revocation APIs,
+  signed agent upgrade with automatic rollback, and JSONL/CSV audit export.
 
 ### Fixed
 

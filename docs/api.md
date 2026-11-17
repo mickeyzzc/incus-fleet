@@ -515,6 +515,23 @@ The SD token is configured separately from the admin token and is sent as
 `mode=proxy`: Prometheus scrapes the center, which returns the latest in-memory sample plus
 `fleet_agent_up`. Direct agent listeners are a later phase.
 
+Agent identity lifecycle:
+
+| Method & path | Purpose |
+|---|---|
+| `POST /api/v1/agents/{id}/certificate` | sign a new certificate for the agent's PKIX public key |
+| `POST /api/v1/agents/{id}/revoke` | revoke an agent; the gateway rejects future connections |
+
+```json
+// rotate
+{"public_key": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"}
+// 200
+{"certificate": "-----BEGIN CERTIFICATE-----\n...\n", "fingerprint": "...",
+ "expires_at": "2027-02-16T00:00:00Z"}
+// revoke
+POST /api/v1/agents/AGENT_ID/revoke -> 204
+```
+
 ## Host tasks and audit
 
 Every mutating node operation is recorded as a host task plus an immutable audit entry. Tasks and
@@ -526,6 +543,7 @@ created or upgraded automatically at startup.
 | `GET /api/v1/tasks?cluster=&member=&limit=` | recent tasks, newest first; `limit` 1-200, default 50 |
 | `GET /api/v1/tasks/{id}` | one task and its state-transition events |
 | `GET /api/v1/audit?cluster=&member=&limit=` | host audit records, newest first |
+| `GET /api/v1/audit/export?format=jsonl\|csv` | full audit export, no UI limit |
 
 ```json
 // GET /api/v1/tasks/{id}
