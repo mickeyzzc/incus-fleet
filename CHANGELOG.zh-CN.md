@@ -48,6 +48,8 @@
   `fleet_instance_block_latency_seconds_*`。
 - direct HTTP SD 已用 Prometheus 3.8 抓取 agent `/metrics` 做端到端验证；新增 `metrics-serve`
   用于独立抓取验证，并保持 bearer token 大小写敏感。
+- 中心提供一键 Linux agent 安装器（`agent.install`）：校验 agent/helper、安装 CA/sudoers/systemd、
+  自动注册并启动服务。UI 显示该命令，不再假设 agent 已手动安装。
 - UI 的 **Add node** 支持 agent-first：显示一次性注册 token 并轮询上线、调用签名 agent
   bootstrap、展示步骤进度，并显式回退 SSH。`GET /api/v1/agents` 支持 `cluster`/`member` 过滤。
 - remote-write 磁盘持久化 spool、重启重放、队列/字节上限、旧文件淘汰、按中心实例隔离的 spool

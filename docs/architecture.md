@@ -208,6 +208,11 @@ Host tasks carry `lease_owner`/`lease_until` and can be claimed by a worker with
 `FOR UPDATE SKIP LOCKED` or a SQLite transaction. This is the coordination primitive for multiple
 center instances; the current synchronous HTTP path does not yet run a background dispatcher.
 
+The center can serve a self-contained Linux installer (`agent.install`) that downloads the agent and
+helper, verifies their checksums, writes the CA/sudoers/systemd assets, enrolls with a one-time token,
+and starts the service. This makes the agent-first Add node flow work on a fresh host without a manual
+binary copy.
+
 Agent certificates are issued by the center CA. Admins can sign a replacement certificate for an
 existing agent public key or revoke an agent; the gateway checks revocation on connect and verifies
 the stored certificate fingerprint. The agent renews itself over mTLS within 30 days of expiry.

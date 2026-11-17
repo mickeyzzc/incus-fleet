@@ -52,6 +52,9 @@ All notable changes to this project are documented here. The format follows
   `fleet_instance_block_latency_seconds_*`.
 - Direct HTTP SD validated end-to-end with Prometheus 3.8 scraping the agent `/metrics` listener;
   add `metrics-serve` for standalone scrape validation and keep bearer tokens case-sensitive.
+- One-command Linux agent installer served by the center (`agent.install`): checksummed agent/helper
+  downloads, CA/sudoers/systemd setup, automatic enrollment, and service start. The UI shows this
+  command instead of assuming the agent is already installed.
 - Agent-first **Add node** flow in the UI: enrollment-token display with polling, signed agent
   bootstrap, step progress, and an explicit SSH fallback. `GET /api/v1/agents` accepts
   `cluster`/`member` filters.

@@ -303,11 +303,45 @@ agent:
   ca_key: /etc/incus-fleet/agent-ca.key
 ```
 
-Create a one-time token from the UI/API (it is shown once), then build and enroll the agent:
+Create a one-time token from the UI/API (it is shown once). Build the Linux binaries once, host them
+on the center, and enable the installer:
+
+```yaml
+agent:
+  # ... gateway TLS settings ...
+  install:
+    enabled: true
+    gateway_url: https://fleet.example:8444
+    asset_url: https://fleet.example
+    agent_binary: /home/incus/bin/incus-fleet-agent
+    helper_binary: /home/incus/bin/incus-fleet-helper
+```
 
 ```bash
 cargo build --manifest-path agent/Cargo.toml --release
 go build -o bin/incus-fleet-helper ./cmd/incus-fleet-helper
+sudo install -m 0755 agent/target/release/incus-fleet-agent /home/incus/bin/incus-fleet-agent
+sudo install -m 0755 bin/incus-fleet-helper /home/incus/bin/incus-fleet-helper
+```
+
+On a fresh node, the Add node dialog shows a single command:
+
+```bash
+curl -fsSL https://fleet.example/api/v1/agent/install.sh | sudo sh -s -- \
+  --token '<one-time-token>' --cluster c1 --member node-a
+```
+
+The installer downloads the agent and helper, verifies their SHA-256, installs the CA, sudoers
+whitelist, systemd unit, and service user, enrolls the host, and starts `incus-fleet-agent`. The
+target needs `curl`, `sudo`/`visudo`, systemd, and a binary matching its architecture. Set
+`asset_url` when the center is behind a reverse proxy; otherwise the installer derives the asset URL
+from the incoming request. If the center uses a private HTTPS certificate, configure the node's
+trust store or add `--insecure` to the outer `curl` (the enrollment itself still verifies the agent
+gateway CA).
+
+Manual install remains available for air-gapped hosts:
+
+```bash
 sudo install -m 0755 agent/target/release/incus-fleet-agent /usr/local/bin/incus-fleet-agent
 sudo install -m 0755 bin/incus-fleet-helper /usr/libexec/incus-fleet-helper
 sudo install -m 0440 -o root -g root deploy/agent-sudoers \
@@ -331,10 +365,10 @@ sudo systemctl enable --now incus-fleet-agent
 ```
 
 The agent reports facts/heartbeats and read-only snapshots, and can apply allowlisted network
-mutations through the helper. eBPF, Incus bootstrap, and telemetry storage are later phases. The
-sample unit runs with `NoNewPrivileges=false` (sudo needs the setuid transition),
-`ProtectSystem=strict`, `MemoryMax=128M`, and `CPUQuota=25%`; verify the resource targets on the
-lowest-spec node before widening use.
+mutations through the helper. eBPF, Incus bootstrap, and telemetry storage are available once the
+optional object/dependencies are installed. The sample unit runs with `NoNewPrivileges=false` (sudo
+needs the setuid transition), `ProtectSystem=strict`, `MemoryMax=128M`, and `CPUQuota=25%`; verify
+the resource targets on the lowest-spec node before widening use.
 
 #### Host metrics
 
@@ -350,7 +384,7 @@ metrics:
 The agent sends host CPU/memory/load/uptime/network counters every 10 seconds. The center never
 writes metrics to SQLite/PostgreSQL; restarting it clears the buffer. The node detail page shows
 the last hour, and the API exports JSON, Prometheus text, or CSV. Prometheus/VictoriaMetrics
-remote write and HTTP SD are later phases.
+remote write, the query proxy, and HTTP SD are supported.
 
 #### Agent lifecycle, HA, and audit
 
@@ -586,8 +620,9 @@ The **Add node** dialog defaults to the **Host agent** flow and falls back to **
 For an agent-first join:
 
 1. Enter the exact member name and the cluster address.
-2. Click **Create enrollment token**. The dialog shows a one-time token and the `incus-fleet-agent
-   enroll` command. Run it on the node; the dialog polls for the agent to come online.
+2. Click **Create enrollment token**. The dialog shows a one-time token and a single install command
+   that downloads the agent, installs the systemd unit and sudoers whitelist, enrolls the host, and
+   starts the service. Run it as root; the dialog polls for the agent to come online.
 3. Once the agent is online, click **Bootstrap via agent**. The center signs the join spec and the
    agent helper installs Incus (only with **Install Incus through the package manager** enabled),
    preseed the cluster join, and reports the completed steps.

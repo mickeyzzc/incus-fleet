@@ -299,11 +299,42 @@ agent:
   ca_key: /etc/incus-fleet/agent-ca.key
 ```
 
-从 UI/API 创建一次性 token（只显示一次），然后构建并注册 agent：
+从 UI/API 创建一次性 token（只显示一次）。在中心构建 Linux 二进制并开放安装器：
+
+```yaml
+agent:
+  # ... gateway TLS 配置 ...
+  install:
+    enabled: true
+    gateway_url: https://fleet.example:8444
+    asset_url: https://fleet.example
+    agent_binary: /home/incus/bin/incus-fleet-agent
+    helper_binary: /home/incus/bin/incus-fleet-helper
+```
 
 ```bash
 cargo build --manifest-path agent/Cargo.toml --release
 go build -o bin/incus-fleet-helper ./cmd/incus-fleet-helper
+sudo install -m 0755 agent/target/release/incus-fleet-agent /home/incus/bin/incus-fleet-agent
+sudo install -m 0755 bin/incus-fleet-helper /home/incus/bin/incus-fleet-helper
+```
+
+在全新节点上，Add node 对话框会显示一条命令：
+
+```bash
+curl -fsSL https://fleet.example/api/v1/agent/install.sh | sudo sh -s -- \
+  --token '<一次性 token>' --cluster c1 --member node-a
+```
+
+安装器下载 agent 和 helper、校验 SHA-256、安装 CA、sudoers 白名单、systemd unit 和服务用户，
+完成注册并启动 `incus-fleet-agent`。目标主机需要 `curl`、`sudo`/`visudo`、systemd，以及匹配
+架构的二进制。中心位于反向代理后时应设置 `asset_url`；否则安装器会从请求推导资源地址。
+如果中心使用私有 HTTPS 证书，请配置节点信任库，或在外层 `curl` 加 `--insecure`（注册本身仍会
+校验 agent gateway CA）。
+
+离线主机仍可手动安装：
+
+```bash
 sudo install -m 0755 agent/target/release/incus-fleet-agent /usr/local/bin/incus-fleet-agent
 sudo install -m 0755 bin/incus-fleet-helper /usr/libexec/incus-fleet-helper
 sudo install -m 0440 -o root -g root deploy/agent-sudoers \
@@ -326,8 +357,8 @@ printf '%s' "$AGENT_TOKEN" | sudo -u incus-fleet-agent \
 sudo systemctl enable --now incus-fleet-agent
 ```
 
-agent 上报 facts/心跳、只读快照，并可经 helper 执行允许列表内的网络变更。eBPF、Incus
-bootstrap 和指标持久化仍在后续阶段。示例单元使用 `NoNewPrivileges=false`（sudo 需要 setuid
+agent 上报 facts/心跳、只读快照，并可经 helper 执行允许列表内的网络变更。eBPF、Incus bootstrap
+和遥测持久化可通过可选对象/依赖启用。示例单元使用 `NoNewPrivileges=false`（sudo 需要 setuid
 转换）、`ProtectSystem=strict`、`MemoryMax=128M` 和 `CPUQuota=25%`；在最低配节点上验证资源
 目标后再扩大使用范围。
 
@@ -344,7 +375,7 @@ metrics:
 
 agent 每 10 秒上报主机 CPU/内存/负载/运行时间/网络计数器。中心不会把指标写入
 SQLite/PostgreSQL；重启中心会清空缓冲。节点详情页显示最近 1 小时，API 可导出 JSON、
-Prometheus text 或 CSV。Prometheus/VictoriaMetrics remote write 和 HTTP SD 在后续阶段。
+Prometheus text 或 CSV。Prometheus/VictoriaMetrics remote write、查询代理和 HTTP SD 已支持。
 
 #### Agent 生命周期、HA 与审计
 

@@ -34,6 +34,12 @@ database:
 #   tls_key: /home/incus/certs/agent-server.key
 #   client_ca: /home/incus/certs/agent-ca.crt
 #   ca_key: /home/incus/certs/agent-ca.key
+#   install:
+#     enabled: true
+#     gateway_url: https://fleet.example:8444
+#     asset_url: https://fleet.example
+#     agent_binary: /home/incus/bin/incus-fleet-agent
+#     helper_binary: /home/incus/bin/incus-fleet-helper
 
 # Center-side telemetry buffer (Phase 4).
 # metrics:

@@ -357,6 +357,10 @@ not part of the browser API; only the admin endpoints below are exposed on the n
 | `POST /api/v1/agents/enrollment-tokens` | create a one-time token; requires an existing cluster |
 | `GET /api/v1/agents?cluster=&member=` | list enrolled agents, optionally filtered by cluster/member |
 | `GET /api/v1/agents/{id}/snapshot` | dispatch a read-only `nodenet.snapshot` to a connected agent |
+| `GET /api/v1/agent/install.sh` | public one-command installer; enabled by `agent.install` |
+| `GET /api/v1/agent/install/agent` | agent binary with `X-Checksum-Sha256` |
+| `GET /api/v1/agent/install/helper` | privileged helper binary with `X-Checksum-Sha256` |
+| `GET /api/v1/agent/install/ca.crt` | agent gateway CA certificate |
 
 ```json
 // POST /api/v1/agents/enrollment-tokens
@@ -365,6 +369,11 @@ not part of the browser API; only the admin endpoints below are exposed on the n
 {"token": "one-time-value", "cluster": "c1", "member": "node-a",
  "expires_at": "2026-11-18T00:15:00Z"}
 ```
+
+The installer routes are unauthenticated because the one-time enrollment token is the credential;
+they return `503` when `agent.install.enabled` is false. The generated script embeds the gateway URL,
+the asset base URL, both SHA-256 checksums, the CA certificate, the sudoers whitelist, and the systemd
+unit. It creates the service user, installs the binaries, enrolls, and starts the service.
 
 The token value is returned only once; the database stores its SHA-256 hash. Enrollment itself is
 `POST /api/v1/agent/enroll` on the agent gateway with a PKIX public key, cluster, member, and token.

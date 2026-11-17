@@ -28,7 +28,8 @@
 - 每个部署使用独立客户端证书连接集群
 - 可选 Rust 主机 agent（alpha）：一次性注册、mTLS WebSocket、facts/心跳，并可通过短生命周期特权 helper 执行允许列表内的主机网络变更和签名 Incus 引导
 - Agent 主机与 cgroup v2 实例指标、可选 eBPF 计数器、中心 1 小时缓冲、JSON/Prometheus/CSV 导出、Prometheus/VictoriaMetrics remote write 与查询代理、HTTP SD、数据库任务 lease、证书轮换/吊销、签名 agent 升级、审计导出、原生 netlink 写入、
-agent 后端节点网络路由、HA 任务 dispatcher、证书自动续期和 agent 指标直连抓取
+agent 后端节点网络路由、一条命令完成 agent 安装的 agent-first 上线、HA 任务 dispatcher、
+证书自动续期和 agent 指标直连抓取
 
 > 在线迁移会保留客户机网络状态。若两个集群使用不同网段，迁移后需在客户机内
 > 重新获取 DHCP（或让两个集群使用相同网段）。

@@ -305,6 +305,10 @@ SSH；写操作只有在 `node_access.ssh_write_fallback=true` 时才回退（�
 | `POST /api/v1/agents/enrollment-tokens` | 创建一次性 token；要求集群已存在 |
 | `GET /api/v1/agents?cluster=&member=` | 列出已注册 agent，可按 cluster/member 过滤 |
 | `GET /api/v1/agents/{id}/snapshot` | 向在线 agent 派发只读 `nodenet.snapshot` |
+| `GET /api/v1/agent/install.sh` | 公开的一键安装脚本；由 `agent.install` 启用 |
+| `GET /api/v1/agent/install/agent` | agent 二进制，带 `X-Checksum-Sha256` |
+| `GET /api/v1/agent/install/helper` | 特权 helper 二进制，带 `X-Checksum-Sha256` |
+| `GET /api/v1/agent/install/ca.crt` | agent gateway CA 证书 |
 
 ```json
 // POST /api/v1/agents/enrollment-tokens
@@ -313,6 +317,10 @@ SSH；写操作只有在 `node_access.ssh_write_fallback=true` 时才回退（�
 {"token": "one-time-value", "cluster": "c1", "member": "node-a",
  "expires_at": "2026-11-18T00:15:00Z"}
 ```
+
+安装器端点不需要登录，因为一次性注册 token 本身就是凭据；`agent.install.enabled=false` 时返回
+`503`。生成的脚本内嵌 gateway URL、资源基地址、两个 SHA-256 校验值、CA 证书、sudoers 白名单和
+systemd unit；它会创建服务用户、安装二进制、完成注册并启动服务。
 
 token 只返回一次；数据库只存它的 SHA-256。注册请求本身是 agent gateway 上的
 `POST /api/v1/agent/enroll`，携带 PKIX 公钥、cluster、member 和 token。gateway 返回 agent ID、

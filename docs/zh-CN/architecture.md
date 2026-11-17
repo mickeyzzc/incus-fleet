@@ -168,6 +168,10 @@ spec：中心构建 join 或 init preseed，并用 agent CA 私钥签名；helpe
 `FOR UPDATE SKIP LOCKED` 或 SQLite 事务领取。这是多中心实例协调的基础原语；当前同步 HTTP 路径
 还没有后台 dispatcher。
 
+中心可以通过 `agent.install` 提供自包含 Linux 安装器：下载 agent 和 helper、校验 SHA-256、写入
+CA/sudoers/systemd 资源、用一次性 token 注册并启动服务。这样 agent-first Add node 流程可以在全新
+主机上运行，无需手动复制二进制。
+
 agent 证书由中心 CA 签发。管理员可以为 agent 现有公钥签发替换证书，或吊销 agent；gateway 在
 连接时检查吊销状态并校验存储的证书指纹。agent 在离过期 30 天内通过 mTLS 自动续期。agent
 升级使用 detached Ed25519 签名、`.prev` 备份、`--version` 健康检查，失败时恢复旧二进制，并可
