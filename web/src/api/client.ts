@@ -5,6 +5,10 @@ import type {
   ClusterRegisterRequest,
   ClusterTraffic,
   NodeAddressRequest,
+  AgentBootstrapRequest,
+  AgentBootstrapResult,
+  AgentEnrollmentToken,
+  AgentSummary,
   NodeAudit,
   NodeFirewallRequest,
   NodeSnapshot,
@@ -930,6 +934,43 @@ export class ApiClient {
         })),
       }
     })
+  }
+
+  /** Lists enrolled host agents, optionally filtered by cluster or member. */
+  async listAgents(cluster?: string, member?: string): Promise<AgentSummary[]> {
+    const query = new URLSearchParams()
+    if (cluster) {
+      query.set('cluster', cluster)
+    }
+    if (member) {
+      query.set('member', member)
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    const data = await this.request<{ agents: AgentSummary[] }>('GET', `/api/v1/agents${suffix}`)
+    return data.agents ?? []
+  }
+
+  /** Creates a one-time enrollment token bound to one cluster member. */
+  async createAgentEnrollmentToken(
+    cluster: string,
+    member: string,
+    ttlSeconds = 900,
+  ): Promise<AgentEnrollmentToken> {
+    return this.request<AgentEnrollmentToken>('POST', '/api/v1/agents/enrollment-tokens', {
+      cluster,
+      member,
+      ttl_seconds: ttlSeconds,
+    })
+  }
+
+  /** Runs the signed Incus bootstrap for one enrolled agent. */
+  async bootstrapAgent(agentId: string, request: AgentBootstrapRequest): Promise<AgentBootstrapResult> {
+    const data = await this.request<{ result: AgentBootstrapResult }>(
+      'POST',
+      `/api/v1/agents/${encodeURIComponent(agentId)}/bootstrap`,
+      request,
+    )
+    return data.result
   }
 
   /** Provisions a new host and joins it to a cluster. */

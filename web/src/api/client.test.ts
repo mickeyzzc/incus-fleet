@@ -745,6 +745,25 @@ describe('ApiClient node network and cluster registration endpoints', () => {
     expect(urls).toContain('https://fleet.local/api/v1/tasks/task-1')
   })
 
+  it('lists agents, creates enrollment tokens, and bootstraps', async () => {
+    const { client, fetchImpl } = clientWith(
+      mockResponse({
+        agents: [{ id: 'agent-1', cluster: 'c1', member: 'n1', status: 'online' }],
+        token: 'enroll-token',
+        result: { ok: true, task_id: 't1', mode: 'bootstrap', steps: ['install'] },
+      }),
+    )
+
+    expect(await client.listAgents()).toHaveLength(1)
+    expect((await client.createAgentEnrollmentToken('c1', 'n1')).token).toBe('enroll-token')
+    expect((await client.bootstrapAgent('agent-1', { mode: 'join', address: '198.51.100.11' })).ok).toBe(true)
+
+    const urls = fetchImpl.mock.calls.map((call) => String(call[0]))
+    expect(urls).toContain('https://fleet.local/api/v1/agents')
+    expect(urls).toContain('https://fleet.local/api/v1/agents/enrollment-tokens')
+    expect(urls).toContain('https://fleet.local/api/v1/agents/agent-1/bootstrap')
+  })
+
   it('queries the external PromQL proxy', async () => {
     const { client, fetchImpl } = clientWith(mockResponse({
       status: 'success',

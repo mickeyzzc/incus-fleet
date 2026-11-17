@@ -662,6 +662,42 @@ export interface ClusterMemberJoinResult {
   steps: ClusterMemberJoinStep[]
 }
 
+export interface AgentSummary {
+  id: string
+  cluster: string
+  member: string
+  hostname?: string
+  status: string
+  version?: string
+  last_seen?: string
+  cert_not_after?: string
+}
+
+export interface AgentEnrollmentToken {
+  token: string
+  cluster: string
+  member: string
+  expires_at: string
+}
+
+export interface AgentBootstrapRequest {
+  mode: 'join' | 'init'
+  address: string
+  storage_source?: string
+  network_cidr?: string
+  install_mode?: 'existing' | 'package'
+  version_pin?: string
+  packages?: string[]
+}
+
+export interface AgentBootstrapResult {
+  ok: boolean
+  task_id: string
+  mode: string
+  message: string
+  steps: string[]
+}
+
 export interface ClusterRegisterRequest {
   name: string
   display_name?: string

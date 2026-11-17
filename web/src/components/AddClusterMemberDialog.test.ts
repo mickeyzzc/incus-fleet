@@ -151,10 +151,19 @@ function buttonByText(wrapper: ReturnType<typeof mountDialog>, text: string) {
 describe('AddClusterMemberDialog', () => {
   beforeEach(() => {
     vi.mocked(api.joinClusterMember).mockReset()
+    vi.mocked(api.listAgents).mockReset()
+    vi.mocked(api.listAgents).mockResolvedValue([])
+    vi.mocked(api.createAgentEnrollmentToken).mockReset()
+    vi.mocked(api.bootstrapAgent).mockReset()
   })
+
+  async function switchToSSH(wrapper: ReturnType<typeof mountDialog>) {
+    await buttonByText(wrapper, 'SSH').trigger('click')
+  }
 
   it('requires an address before submitting', async () => {
     const wrapper = mountDialog()
+    await switchToSSH(wrapper)
 
     await buttonByText(wrapper, 'Add node').trigger('click')
 
@@ -174,6 +183,7 @@ describe('AddClusterMemberDialog', () => {
     })
 
     const wrapper = mountDialog()
+    await switchToSSH(wrapper)
     await inputByPlaceholder(wrapper, '198.51.100.11').setValue('198.51.100.11')
     await inputByPlaceholder(wrapper, 'Detect from the host hostname').setValue('node-c')
     await inputByPlaceholder(wrapper, 'Defaults to node_access.ssh_user from the server config.').setValue('node-admin')
@@ -203,6 +213,7 @@ describe('AddClusterMemberDialog', () => {
     })
 
     const wrapper = mountDialog()
+    await switchToSSH(wrapper)
     await inputByPlaceholder(wrapper, '198.51.100.11').setValue('198.51.100.11')
 
     const passwordInputs = wrapper.findAll('input[type="password"]')
@@ -236,6 +247,7 @@ describe('AddClusterMemberDialog', () => {
     })
 
     const wrapper = mountDialog()
+    await switchToSSH(wrapper)
     await inputByPlaceholder(wrapper, '198.51.100.11').setValue('198.51.100.11')
     await buttonByText(wrapper, 'Add node').trigger('click')
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -250,6 +262,7 @@ describe('AddClusterMemberDialog', () => {
   it('reports join failures and keeps the form', async () => {
     vi.mocked(api.joinClusterMember).mockRejectedValue(new Error('ssh refused'))
     const wrapper = mountDialog()
+    await switchToSSH(wrapper)
     await inputByPlaceholder(wrapper, '198.51.100.11').setValue('198.51.100.11')
 
     await buttonByText(wrapper, 'Add node').trigger('click')
@@ -258,6 +271,68 @@ describe('AddClusterMemberDialog', () => {
     expect(ElMessage.error).toHaveBeenCalledWith('ssh refused')
     expect(wrapper.emitted('added')).toBeUndefined()
     expect(wrapper.text()).toContain('Target host')
+  })
+
+  it('bootstraps through an existing online agent', async () => {
+    vi.mocked(api.listAgents).mockResolvedValue([
+      {
+        id: 'agent-1',
+        cluster: 'c2',
+        member: 'node-c',
+        hostname: 'node-c',
+        status: 'online',
+        version: '0.1.0',
+      },
+    ])
+    vi.mocked(api.bootstrapAgent).mockResolvedValue({
+      ok: true,
+      task_id: 'task-1',
+      mode: 'bootstrap',
+      message: 'Incus bootstrap complete',
+      steps: ['install', 'service', 'preseed', 'ready'],
+    })
+
+    const wrapper = mountDialog()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await inputByPlaceholder(wrapper, 'Member name (must match agent --member)').setValue('node-c')
+    await inputByPlaceholder(wrapper, '198.51.100.11').setValue('198.51.100.11')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    await buttonByText(wrapper, 'Bootstrap via agent').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(api.bootstrapAgent).toHaveBeenCalledWith('agent-1', {
+      mode: 'join',
+      address: '198.51.100.11',
+      storage_source: '/srv/incus',
+      install_mode: 'existing',
+    })
+    expect(wrapper.emitted('added')).toHaveLength(1)
+    expect(wrapper.text()).toContain('node-c is online')
+    expect(wrapper.text()).toContain('Install Incus')
+    expect(wrapper.text()).toContain('Preseed')
+  })
+
+  it('creates an enrollment token and can fall back to SSH', async () => {
+    vi.mocked(api.createAgentEnrollmentToken).mockResolvedValue({
+      token: 'one-time-token',
+      cluster: 'c2',
+      member: 'node-c',
+      expires_at: '2026-11-18T00:15:00Z',
+    })
+
+    const wrapper = mountDialog()
+    await inputByPlaceholder(wrapper, 'Member name (must match agent --member)').setValue('node-c')
+    await buttonByText(wrapper, 'Create enrollment token').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(api.createAgentEnrollmentToken).toHaveBeenCalledWith('c2', 'node-c')
+    expect(wrapper.text()).toContain('one-time-token')
+    expect(wrapper.text()).toContain('--cluster c2 --member node-c')
+
+    await buttonByText(wrapper, 'Use SSH instead').trigger('click')
+    expect(wrapper.text()).toContain('SSH access')
+    wrapper.unmount()
   })
 
   it('resets the form when reopened and closes from the footer', async () => {

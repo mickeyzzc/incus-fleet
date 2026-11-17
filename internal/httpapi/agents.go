@@ -112,6 +112,21 @@ func (a *API) listAgents(w http.ResponseWriter, r *http.Request) {
 		a.serviceError(w, r, err)
 		return
 	}
+	cluster := strings.TrimSpace(r.URL.Query().Get("cluster"))
+	member := strings.TrimSpace(r.URL.Query().Get("member"))
+	if cluster != "" || member != "" {
+		filtered := make([]*store.Agent, 0, len(agents))
+		for _, agent := range agents {
+			if cluster != "" && agent.Cluster != cluster {
+				continue
+			}
+			if member != "" && agent.Member != member {
+				continue
+			}
+			filtered = append(filtered, agent)
+		}
+		agents = filtered
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 }

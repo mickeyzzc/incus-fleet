@@ -80,9 +80,25 @@ func TestAgentEnrollmentTokenAndList(t *testing.T) {
 	if err := f.store.UpsertAgent(context.Background(), agent); err != nil {
 		t.Fatal(err)
 	}
+	second := &store.Agent{
+		ID: "agent-2", Cluster: "c2", Member: "node-b", Status: store.AgentOnline,
+		CertFingerprint: "fp2", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := f.store.UpsertAgent(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
 	list := f.request(t, http.MethodGet, "/api/v1/agents", nil, cookie, "")
-	if list.Code != http.StatusOK || !containsAll(list.Body.String(), "agent-1", "node-a") {
+	if list.Code != http.StatusOK || !containsAll(list.Body.String(), "agent-1", "node-a", "agent-2") {
 		t.Fatalf("list agents = %d body=%s", list.Code, list.Body.String())
+	}
+	filtered := f.request(t, http.MethodGet, "/api/v1/agents?cluster=c1&member=node-a", nil, cookie, "")
+	if filtered.Code != http.StatusOK || !strings.Contains(filtered.Body.String(), "agent-1") ||
+		strings.Contains(filtered.Body.String(), "agent-2") {
+		t.Fatalf("filtered agents = %d body=%s", filtered.Code, filtered.Body.String())
+	}
+	empty := f.request(t, http.MethodGet, "/api/v1/agents?cluster=c2&member=node-a", nil, cookie, "")
+	if empty.Code != http.StatusOK || strings.Contains(empty.Body.String(), "agent-") {
+		t.Fatalf("empty agents = %d body=%s", empty.Code, empty.Body.String())
 	}
 }
 
