@@ -24,6 +24,21 @@ database:
 # Optional: local Incus member name when it differs from the hostname.
 # local_member: app-a
 
+# Reserved for the host agent gateway (disabled until Phase 1).
+# agent:
+#   enabled: false
+#   listen: 0.0.0.0:8444
+#   tls_cert: /home/incus/certs/agent-server.crt
+#   tls_key: /home/incus/certs/agent-server.key
+#   client_ca: /home/incus/certs/agent-ca.crt
+#   ca_key: /home/incus/certs/agent-ca.key
+
+# Center-side telemetry buffer (Phase 4).
+# metrics:
+#   enabled: false
+#   retention: 1h
+#   interval: 10s
+
 clusters:
   - name: c1
     display_name: Primary site

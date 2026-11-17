@@ -297,6 +297,49 @@ func minimalConfig() Config {
 	}
 }
 
+func TestAgentAndMetricsDefaults(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.applyDefaults()
+
+	if cfg.Agent.Listen != "0.0.0.0:8444" || cfg.Agent.Enabled {
+		t.Fatalf("agent defaults = %#v", cfg.Agent)
+	}
+	if cfg.Metrics.Retention != "1h" || cfg.Metrics.Interval != "10s" || cfg.Metrics.Enabled {
+		t.Fatalf("metrics defaults = %#v", cfg.Metrics)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate(defaults) error = %v", err)
+	}
+}
+
+func TestAgentAndMetricsValidation(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+		err    bool
+	}{
+		{"bad listen", func(c *Config) { c.Agent.Listen = "nope" }, true},
+		{"good listen", func(c *Config) { c.Agent.Listen = "127.0.0.1:9444" }, false},
+		{"bad retention", func(c *Config) { c.Metrics.Retention = "2h" }, true},
+		{"bad interval", func(c *Config) { c.Metrics.Interval = "500ms" }, true},
+		{"good metrics", func(c *Config) { c.Metrics.Retention = "30m"; c.Metrics.Interval = "30s" }, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := minimalConfig()
+			cfg.applyDefaults()
+			tc.mutate(&cfg)
+			err := cfg.Validate()
+			if tc.err && err == nil {
+				t.Fatal("Validate() error = nil")
+			}
+			if !tc.err && err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestNodeAccessValidation(t *testing.T) {
 	cases := []struct {
 		name   string

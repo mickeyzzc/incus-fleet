@@ -4,10 +4,12 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,11 +18,31 @@ var clusterNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
 // Config is the top-level application configuration.
 type Config struct {
-	Server      Server     `yaml:"server"`
-	Database    Database   `yaml:"database"`
-	NodeAccess  NodeAccess `yaml:"node_access"`
-	LocalMember string     `yaml:"local_member"`
-	Clusters    []Cluster  `yaml:"clusters"`
+	Server      Server        `yaml:"server"`
+	Database    Database      `yaml:"database"`
+	NodeAccess  NodeAccess    `yaml:"node_access"`
+	Agent       AgentConfig   `yaml:"agent"`
+	Metrics     MetricsConfig `yaml:"metrics"`
+	LocalMember string        `yaml:"local_member"`
+	Clusters    []Cluster     `yaml:"clusters"`
+}
+
+// AgentConfig is reserved for the host agent gateway. It is disabled until
+// the agent transport and certificate authority are wired in.
+type AgentConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Listen   string `yaml:"listen"`
+	TLSCert  string `yaml:"tls_cert"`
+	TLSKey   string `yaml:"tls_key"`
+	ClientCA string `yaml:"client_ca"`
+	CAKey    string `yaml:"ca_key"`
+}
+
+// MetricsConfig controls the center-side one-hour telemetry buffer.
+type MetricsConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	Retention string `yaml:"retention"`
+	Interval  string `yaml:"interval"`
 }
 
 // NodeAccess configures the SSH identity used to manage network settings on
@@ -116,6 +138,21 @@ func (c *Config) applyEnv() {
 		enabled := v == "1" || strings.EqualFold(v, "true")
 		c.NodeAccess.SSHWriteFallback = &enabled
 	}
+	if v := os.Getenv("INCUS_FLEET_AGENT_ENABLED"); v != "" {
+		c.Agent.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("INCUS_FLEET_AGENT_LISTEN"); v != "" {
+		c.Agent.Listen = v
+	}
+	if v := os.Getenv("INCUS_FLEET_METRICS_ENABLED"); v != "" {
+		c.Metrics.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("INCUS_FLEET_METRICS_RETENTION"); v != "" {
+		c.Metrics.Retention = v
+	}
+	if v := os.Getenv("INCUS_FLEET_METRICS_INTERVAL"); v != "" {
+		c.Metrics.Interval = v
+	}
 }
 
 func (c *Config) applyDefaults() {
@@ -133,6 +170,15 @@ func (c *Config) applyDefaults() {
 	}
 	if strings.TrimSpace(c.NodeAccess.Mode) == "" {
 		c.NodeAccess.Mode = "auto"
+	}
+	if strings.TrimSpace(c.Agent.Listen) == "" {
+		c.Agent.Listen = "0.0.0.0:8444"
+	}
+	if strings.TrimSpace(c.Metrics.Retention) == "" {
+		c.Metrics.Retention = "1h"
+	}
+	if strings.TrimSpace(c.Metrics.Interval) == "" {
+		c.Metrics.Interval = "10s"
 	}
 
 	for i := range c.Clusters {
@@ -169,6 +215,12 @@ func (c *Config) Validate() error {
 		return errors.New("config: database.dsn is required")
 	}
 
+	if err := c.Agent.validate(); err != nil {
+		return err
+	}
+	if err := c.Metrics.validate(); err != nil {
+		return err
+	}
 	if err := c.NodeAccess.validate(); err != nil {
 		return err
 	}
@@ -274,6 +326,35 @@ func (c *Config) ClusterByName(name string) (Cluster, bool) {
 	}
 
 	return Cluster{}, false
+}
+
+func (a AgentConfig) validate() error {
+	listen := strings.TrimSpace(a.Listen)
+	if listen == "" {
+		return nil
+	}
+	if _, _, err := net.SplitHostPort(listen); err != nil {
+		return fmt.Errorf("config: agent.listen %q is invalid", a.Listen)
+	}
+
+	return nil
+}
+
+func (m MetricsConfig) validate() error {
+	if strings.TrimSpace(m.Retention) != "" {
+		retention, err := time.ParseDuration(strings.TrimSpace(m.Retention))
+		if err != nil || retention <= 0 || retention > time.Hour {
+			return fmt.Errorf("config: metrics.retention %q must be a duration between 1s and 1h", m.Retention)
+		}
+	}
+	if strings.TrimSpace(m.Interval) != "" {
+		interval, err := time.ParseDuration(strings.TrimSpace(m.Interval))
+		if err != nil || interval < time.Second || interval > time.Minute {
+			return fmt.Errorf("config: metrics.interval %q must be a duration between 1s and 1m", m.Interval)
+		}
+	}
+
+	return nil
 }
 
 func (n NodeAccess) validate() error {
