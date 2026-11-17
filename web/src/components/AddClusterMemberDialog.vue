@@ -52,6 +52,15 @@ const enrollCommand = computed(() => {
   if (!enrollment.value) {
     return ''
   }
+  const origin = typeof window === 'undefined' ? '' : window.location.origin
+  return `curl -fsSL ${origin}/api/v1/agent/install.sh | sudo sh -s -- \
+  --token '${enrollment.value.token}' \
+  --cluster ${props.cluster} --member ${memberName.value}`
+})
+const manualEnrollCommand = computed(() => {
+  if (!enrollment.value) {
+    return ''
+  }
   return `printf '%s' '${enrollment.value.token}' | sudo incus-fleet-agent enroll \
   --center https://<center>:8444 \
   --ca /etc/incus-fleet/agent-ca.crt \
@@ -387,7 +396,12 @@ function close(): void {
             <span class="hint">
               {{ t('cluster.agentTokenExpires', { at: formatDateTime(enrollment.expires_at) }) }}
             </span>
+            <label>{{ t('cluster.agentInstallCommand') }}</label>
             <pre class="agent-command">{{ enrollCommand }}</pre>
+            <details class="agent-manual">
+              <summary>{{ t('cluster.agentManual') }}</summary>
+              <pre class="agent-command">{{ manualEnrollCommand }}</pre>
+            </details>
             <span class="hint">
               {{ t('cluster.agentWaiting') }}
               <el-tag v-if="polling" size="small" type="info">{{ t('cluster.agentPolling') }}</el-tag>
@@ -603,6 +617,16 @@ function close(): void {
   flex-direction: column;
   gap: 6px;
   margin: 12px 0;
+}
+
+.agent-manual {
+  margin: 2px 0 4px;
+}
+
+.agent-manual summary {
+  cursor: pointer;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .agent-command {

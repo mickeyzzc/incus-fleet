@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mickeyzzc/incus-fleet/internal/agentinstall"
 	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
@@ -46,6 +47,7 @@ type Deps struct {
 	NodeNet      *nodeaccess.Service
 	NodeJoin     *nodejoin.Service
 	Agent        AgentDispatcher
+	AgentInstall *agentinstall.Handler
 	Bootstrap    BootstrapSigner
 	Telemetry    *telemetry.Store
 	MetricsSD    MetricsSDConfig
@@ -67,6 +69,7 @@ type API struct {
 	nodenet      *nodeaccess.Service
 	nodejoin     *nodejoin.Service
 	agent        AgentDispatcher
+	agentInstall *agentinstall.Handler
 	bootstrap    BootstrapSigner
 	telemetry    *telemetry.Store
 	metricsSD    MetricsSDConfig
@@ -94,6 +97,7 @@ func New(deps Deps) *API {
 		nodenet:      deps.NodeNet,
 		nodejoin:     deps.NodeJoin,
 		agent:        deps.Agent,
+		agentInstall: deps.AgentInstall,
 		bootstrap:    deps.Bootstrap,
 		telemetry:    deps.Telemetry,
 		metricsSD:    deps.MetricsSD,
@@ -119,6 +123,9 @@ func (a *API) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/v1/healthz", a.health)
 	mux.HandleFunc("GET /api/v1/version", a.versionHandler)
+	if a.agentInstall != nil {
+		a.agentInstall.Register(mux)
+	}
 	mux.HandleFunc("POST /api/v1/auth/login", a.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", a.logout)
 

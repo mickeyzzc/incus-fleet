@@ -436,6 +436,55 @@ func TestAgentEnabledRequiresTLSFiles(t *testing.T) {
 	}
 }
 
+func TestAgentInstallValidation(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Agent = AgentConfig{
+		Enabled: true, Listen: "0.0.0.0:8444", TLSCert: "/cert", TLSKey: "/key",
+		ClientCA: "/ca", CAKey: "/ca-key",
+		Install: AgentInstallConfig{
+			Enabled: true, GatewayURL: "https://fleet.example:8444/",
+			AssetURL: "https://fleet.example/", AgentBinary: "/agent", HelperBinary: "/helper",
+		},
+	}
+	cfg.applyDefaults()
+	if cfg.Agent.Install.GatewayURL != "https://fleet.example:8444" ||
+		cfg.Agent.Install.AssetURL != "https://fleet.example" {
+		t.Fatalf("install URLs not trimmed: %#v", cfg.Agent.Install)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate(install) error = %v", err)
+	}
+	cases := []struct {
+		name string
+		edit func(*Config)
+	}{
+		{"gateway missing", func(c *Config) { c.Agent.Install.GatewayURL = "" }},
+		{"gateway http", func(c *Config) { c.Agent.Install.GatewayURL = "http://fleet.example" }},
+		{"gateway invalid", func(c *Config) { c.Agent.Install.GatewayURL = "://bad" }},
+		{"asset invalid", func(c *Config) { c.Agent.Install.AssetURL = "ftp://fleet.example" }},
+		{"agent binary missing", func(c *Config) { c.Agent.Install.AgentBinary = " " }},
+		{"helper binary missing", func(c *Config) { c.Agent.Install.HelperBinary = "" }},
+		{"agent disabled", func(c *Config) { c.Agent.Enabled = false }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := minimalConfig()
+			cfg.Agent = AgentConfig{
+				Enabled: true, Listen: "0.0.0.0:8444", TLSCert: "/cert", TLSKey: "/key",
+				ClientCA: "/ca", CAKey: "/ca-key",
+				Install: AgentInstallConfig{
+					Enabled: true, GatewayURL: "https://fleet.example:8444",
+					AgentBinary: "/agent", HelperBinary: "/helper",
+				},
+			}
+			tc.edit(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
 func TestAgentValidateFiles(t *testing.T) {
 	dir := t.TempDir()
 	cert := writeFile(t, dir, "agent-server.crt", "cert")

@@ -32,12 +32,23 @@ type Config struct {
 // AgentConfig is reserved for the host agent gateway. It is disabled until
 // the agent transport and certificate authority are wired in.
 type AgentConfig struct {
-	Enabled  bool   `yaml:"enabled"`
-	Listen   string `yaml:"listen"`
-	TLSCert  string `yaml:"tls_cert"`
-	TLSKey   string `yaml:"tls_key"`
-	ClientCA string `yaml:"client_ca"`
-	CAKey    string `yaml:"ca_key"`
+	Enabled  bool               `yaml:"enabled"`
+	Listen   string             `yaml:"listen"`
+	TLSCert  string             `yaml:"tls_cert"`
+	TLSKey   string             `yaml:"tls_key"`
+	ClientCA string             `yaml:"client_ca"`
+	CAKey    string             `yaml:"ca_key"`
+	Install  AgentInstallConfig `yaml:"install"`
+}
+
+// AgentInstallConfig enables the one-command Linux installer served by the
+// center. The binaries must match the target host architecture.
+type AgentInstallConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	GatewayURL   string `yaml:"gateway_url"`
+	AssetURL     string `yaml:"asset_url"`
+	AgentBinary  string `yaml:"agent_binary"`
+	HelperBinary string `yaml:"helper_binary"`
 }
 
 // HAConfig controls the background host-task dispatcher. Multiple center
@@ -241,6 +252,8 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Agent.Listen) == "" {
 		c.Agent.Listen = "0.0.0.0:8444"
 	}
+	c.Agent.Install.GatewayURL = strings.TrimRight(strings.TrimSpace(c.Agent.Install.GatewayURL), "/")
+	c.Agent.Install.AssetURL = strings.TrimRight(strings.TrimSpace(c.Agent.Install.AssetURL), "/")
 	if strings.TrimSpace(c.Metrics.Retention) == "" {
 		c.Metrics.Retention = "1h"
 	}
@@ -325,6 +338,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.HA.validate(); err != nil {
+		return err
+	}
+	if err := c.Agent.validate(); err != nil {
 		return err
 	}
 	if err := c.NodeAccess.validate(); err != nil {
@@ -483,6 +499,9 @@ func (a AgentConfig) validate() error {
 		return fmt.Errorf("config: agent.listen %q is invalid", a.Listen)
 	}
 	if !a.Enabled {
+		if a.Install.Enabled {
+			return fmt.Errorf("config: agent.install requires agent.enabled")
+		}
 		return nil
 	}
 	for label, value := range map[string]string{
@@ -494,6 +513,28 @@ func (a AgentConfig) validate() error {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("config: %s is required when agent.enabled is true", label)
 		}
+	}
+	if !a.Install.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(a.Install.GatewayURL) == "" {
+		return fmt.Errorf("config: agent.install.gateway_url is required")
+	}
+	gateway, err := url.Parse(a.Install.GatewayURL)
+	if err != nil || gateway.Scheme != "https" || gateway.Host == "" {
+		return fmt.Errorf("config: agent.install.gateway_url must be an https URL")
+	}
+	if a.Install.AssetURL != "" {
+		asset, err := url.Parse(a.Install.AssetURL)
+		if err != nil || (asset.Scheme != "https" && asset.Scheme != "http") || asset.Host == "" {
+			return fmt.Errorf("config: agent.install.asset_url must be an http(s) URL")
+		}
+	}
+	if strings.TrimSpace(a.Install.AgentBinary) == "" {
+		return fmt.Errorf("config: agent.install.agent_binary is required")
+	}
+	if strings.TrimSpace(a.Install.HelperBinary) == "" {
+		return fmt.Errorf("config: agent.install.helper_binary is required")
 	}
 
 	return nil

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/mickeyzzc/incus-fleet/internal/agentgw"
+	"github.com/mickeyzzc/incus-fleet/internal/agentinstall"
 	"github.com/mickeyzzc/incus-fleet/internal/agentops"
 	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
@@ -176,6 +177,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 			Timeout:     parseDuration(cfg.Metrics.Query.Timeout, 15*time.Second),
 		})
 	}
+	var agentInstall *agentinstall.Handler
 	var taskRunner *taskrunner.Runner
 	if cfg.HA.Enabled {
 		worker := strings.TrimSpace(cfg.HA.WorkerID)
@@ -207,6 +209,19 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		}
 		agentGW = agentgw.New(st, ca, logger, options...)
 		agentTLS = agentGW.TLSConfig(serverCert)
+		if cfg.Agent.Install.Enabled {
+			agentInstall, err = agentinstall.New(agentinstall.Config{
+				GatewayURL:   cfg.Agent.Install.GatewayURL,
+				AssetURL:     cfg.Agent.Install.AssetURL,
+				AgentBinary:  cfg.Agent.Install.AgentBinary,
+				HelperBinary: cfg.Agent.Install.HelperBinary,
+			}, ca.CertPEM(), logger)
+			if err != nil {
+				manager.Close()
+				_ = st.Close()
+				return nil, err
+			}
+		}
 		nodeAccess.SetAgentResolver(agentops.New(agentGW, st).Resolve)
 		if taskRunner != nil {
 			taskRunner.Register(taskrunner.AgentNetworkTask, taskrunner.AgentNetworkHandler(agentGW, st))
@@ -247,6 +262,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		NodeNet:      nodeAccess,
 		NodeJoin:     nodeJoin,
 		Agent:        agentGW,
+		AgentInstall: agentInstall,
 		Bootstrap:    agentGW,
 		CertIssuer:   agentGW,
 		Telemetry:    telemetryStore,

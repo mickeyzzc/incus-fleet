@@ -328,6 +328,7 @@ describe('AddClusterMemberDialog', () => {
 
     expect(api.createAgentEnrollmentToken).toHaveBeenCalledWith('c2', 'node-c')
     expect(wrapper.text()).toContain('one-time-token')
+    expect(wrapper.text()).toContain('/api/v1/agent/install.sh')
     expect(wrapper.text()).toContain('--cluster c2 --member node-c')
 
     await buttonByText(wrapper, 'Use SSH instead').trigger('click')
