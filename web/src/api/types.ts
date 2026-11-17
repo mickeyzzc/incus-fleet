@@ -529,3 +529,98 @@ export interface HealthResponse {
   version: string
   time: string
 }
+
+/** One NIC of the node fleet runs on. */
+export interface NodeAddress {
+  family: string
+  address: string
+  prefixlen: number
+}
+
+export interface NodeWiFiLink {
+  connected: boolean
+  ssid?: string
+  signal?: number
+  frequency?: number
+}
+
+export interface NodeNIC {
+  name: string
+  state: string
+  kind: string
+  mac?: string
+  mtu?: number
+  addresses: NodeAddress[]
+  wifi?: NodeWiFiLink
+}
+
+export interface NodeRoute {
+  destination: string
+  gateway?: string
+  device?: string
+  metric?: string
+}
+
+export interface NodeFirewallRule {
+  handle: string
+  rule: string
+}
+
+export interface NodeWiFiNetwork {
+  ssid: string
+  signal: number
+  frequency: number
+  secure: boolean
+}
+
+export interface NodeSnapshot {
+  host: string
+  nics: NodeNIC[]
+  routes: NodeRoute[]
+  firewall: NodeFirewallRule[]
+  wifi_scan?: NodeWiFiNetwork[]
+  wifi_device?: string
+  capabilities: string[]
+}
+
+export interface NodeAddressRequest {
+  dhcp: boolean
+  address?: string
+  gateway?: string
+  persist: boolean
+}
+
+export interface NodeFirewallRequest {
+  port: number
+  proto: 'tcp' | 'udp'
+  action: 'accept' | 'drop'
+  comment?: string
+}
+
+export interface ClusterRegisterRequest {
+  name: string
+  display_name?: string
+  endpoint: string
+  project?: string
+  tls_cert: string
+  tls_key: string
+  tls_server_cert?: string
+}
+
+export interface TrafficInstance {
+  name: string
+  location?: string
+  rx_bytes: number
+  tx_bytes: number
+  rx_packets: number
+  tx_packets: number
+}
+
+export interface ClusterTraffic {
+  at: string
+  total_rx_bytes: number
+  total_tx_bytes: number
+  total_rx_packets: number
+  total_tx_packets: number
+  instances: TrafficInstance[]
+}

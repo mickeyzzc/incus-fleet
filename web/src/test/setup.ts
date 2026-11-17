@@ -134,6 +134,17 @@ vi.mock('@/api', async (importOriginal) => {
       listMigrations: vi.fn(),
       getMigration: vi.fn(),
       submitMigration: vi.fn(),
+      nodeSnapshot: vi.fn(),
+      nodeNICState: vi.fn(),
+      nodeApplyAddress: vi.fn(),
+      nodeWifiConnect: vi.fn(),
+      nodeAddRoute: vi.fn(),
+      nodeDeleteRoute: vi.fn(),
+      nodeAddFirewallRule: vi.fn(),
+      nodeDeleteFirewallRule: vi.fn(),
+      clusterTraffic: vi.fn(),
+      registerCluster: vi.fn(),
+      unregisterCluster: vi.fn(),
     },
   }
 })

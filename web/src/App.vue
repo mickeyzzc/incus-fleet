@@ -101,6 +101,9 @@ async function logout(): Promise<void> {
             </el-menu-item>
           </el-sub-menu>
 
+          <el-menu-item index="/node">
+            <span>{{ t('nav.node') }}</span>
+          </el-menu-item>
           <el-menu-item index="/instances">
             <el-icon><Box /></el-icon>
             <span>{{ t('nav.instances') }}</span>

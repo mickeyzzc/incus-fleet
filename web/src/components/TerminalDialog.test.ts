@@ -65,6 +65,10 @@ function mountDialog() {
   })
 }
 
+function vmOf(wrapper: { vm: unknown }): any {
+  return wrapper.vm
+}
+
 describe('TerminalDialog', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -90,7 +94,7 @@ describe('TerminalDialog', () => {
       'ws://fleet.local/api/v1/clusters/c1/instances/web/console',
     )
 
-    wrapper.vm.$emit('update:modelValue', false)
+    vmOf(wrapper).$emit('update:modelValue', false)
     wrapper.unmount()
   })
 

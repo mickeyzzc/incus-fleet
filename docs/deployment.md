@@ -198,7 +198,30 @@ sudo systemctl status incus-fleet --no-pager
 ```
 
 The sample unit runs as `incus-fleet`, reads `/home/incus/incus-fleet.env`, and writes only to
-`/home/incus/data`. Adjust paths if you use a different deployment directory.
+`/home/incus/data` plus the node-network configuration paths below. Adjust paths if you use a
+different deployment directory.
+
+### Node network management (optional)
+
+The **Node Network** page manages the physical NICs, routes, nftables rules, and Wi-Fi of the
+host the app runs on. It needs a sudo whitelist and two unit hardening changes:
+
+```bash
+sudo install -m 0440 -o root -g root deploy/nodesudoers /etc/sudoers.d/incus-fleet-nodesudoers
+sudo visudo -cf /etc/sudoers.d/incus-fleet-nodesudoers   # parse check
+sudo mkdir -p /etc/network/interfaces.d /etc/wpa_supplicant
+sudo systemctl daemon-reload && sudo systemctl restart incus-fleet
+```
+
+The whitelist covers `ip`, `nft`, `iw`, `dhcpcd`, `wpa_supplicant`, `hostname`, and `tee` limited
+to `/etc/network/interfaces.d/*` and `/etc/wpa_supplicant/fleet.conf` (interface names are
+validated before use). Binary paths differ by distribution; adjust the file if your host keeps
+them elsewhere (the runner passes the resolved absolute path to sudo).
+
+The sample unit sets `NoNewPrivileges=false` and `PrivateDevices=false` because sudo is a setuid
+binary and `ip`/`iw`/`nft` need the real device view; `ReadWritePaths` grants the two `/etc`
+directories above. Keep the remaining hardening. Wi-Fi scan/connect additionally needs
+`wpasupplicant` installed on the node (`apt-get install -y wpasupplicant`).
 
 Follow logs with:
 

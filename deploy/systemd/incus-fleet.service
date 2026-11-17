@@ -16,15 +16,21 @@ RestartSec=5s
 TimeoutStopSec=30s
 KillSignal=SIGTERM
 
-# Hardening. Read-only access to /home/incus plus a writable data directory.
-NoNewPrivileges=true
+# Hardening. Read-only access to /home/incus plus the specific writable paths.
+# NoNewPrivileges must stay off: node network management escalates through the
+# sudo whitelist in deploy/nodesudoers, and sudo is a setuid binary that
+# NoNewPrivileges would neutralise. PrivateDevices must stay off for the same
+# reason: `ip`/`iw`/`nft` need the real network device view.
+NoNewPrivileges=false
 PrivateTmp=true
-PrivateDevices=true
+PrivateDevices=false
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/incus/data
+# SQLite lives in data/; nodenet persists ifupdown snippets and the fleet
+# wpa_supplicant config in the two /etc paths.
+ReadWritePaths=/home/incus/data /etc/network/interfaces.d /etc/wpa_supplicant
 ProtectKernelTunables=true
-ProtectKernelModules=true
+ProtectKernelModules=false
 ProtectControlGroups=true
 ProtectClock=true
 ProtectHostname=true

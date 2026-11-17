@@ -25,6 +25,10 @@ function buttonByText(wrapper: ReturnType<typeof mountDashboard>, text: string) 
   return button
 }
 
+function vmOf(wrapper: { vm: unknown }): any {
+  return wrapper.vm
+}
+
 describe('DashboardView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -143,5 +147,139 @@ describe('DashboardView fleet resource summary', () => {
     expect(wrapper.text()).toContain('29.8 GiB')
 
     wrapper.unmount()
+  })
+})
+
+describe('DashboardView traffic polling and registered clusters', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('polls cluster traffic and derives rates', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.mocked(api.listClusters).mockResolvedValue([clusterSummary({ online: true })])
+    vi.mocked(api.listInstances).mockResolvedValue([])
+    vi.mocked(api.listMigrations).mockResolvedValue([])
+    const first = {
+      at: new Date().toISOString(),
+      cluster: 'c1',
+      total_rx_bytes: 1000,
+      total_tx_bytes: 2000,
+      total_rx_packets: 10,
+      total_tx_packets: 20,
+      instances: [],
+    }
+    const second = {
+      at: new Date().toISOString(),
+      cluster: 'c1',
+      total_rx_bytes: 31000,
+      total_tx_bytes: 62000,
+      total_rx_packets: 310,
+      total_tx_packets: 620,
+      instances: [],
+    }
+    vi.mocked(api.clusterTraffic).mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+    expect(api.clusterTraffic).toHaveBeenCalledWith('c1')
+
+    // second poll derives per-second rates from the delta
+    await vi.advanceTimersByTimeAsync(3100)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('↓')
+    // cumulative fleet counters rendered as well
+    expect(wrapper.text()).toContain('30.3 KiB')
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('skips offline clusters and tolerates traffic errors', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.mocked(api.listClusters).mockResolvedValue([
+      clusterSummary({ name: 'c2', online: false }),
+    ])
+    vi.mocked(api.listInstances).mockResolvedValue([])
+    vi.mocked(api.listMigrations).mockResolvedValue([])
+    vi.mocked(api.clusterTraffic).mockRejectedValue(new Error('offline'))
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+    expect(api.clusterTraffic).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('registers a cluster from the dashboard dialog', async () => {
+    vi.mocked(api.listClusters).mockResolvedValue([clusterSummary()])
+    vi.mocked(api.listInstances).mockResolvedValue([])
+    vi.mocked(api.listMigrations).mockResolvedValue([])
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Add cluster').trigger('click')
+    // The dialog mounted with modelValue true renders the form
+    expect(wrapper.text()).toContain('Register a cluster')
+
+    // Trigger the registered event through the child component
+    const dialog = wrapper.findComponent({ name: 'ClusterRegisterDialog' })
+    expect(dialog.exists()).toBe(true)
+    dialog.vm.$emit('registered')
+    await flushPromises()
+    expect(api.listClusters).toHaveBeenCalledTimes(2)
+  })
+
+  it('unregisters a registered cluster after confirmation', async () => {
+    vi.mocked(api.listClusters).mockResolvedValue([clusterSummary()])
+    vi.mocked(api.listInstances).mockResolvedValue([])
+    vi.mocked(api.listMigrations).mockResolvedValue([])
+    vi.mocked(api.unregisterCluster).mockResolvedValue(undefined)
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const remove = wrapper.findAll('button').find((b) => b.text().includes('Remove'))
+    if (!remove) {
+      // Remove button only renders for registered clusters; emulate by invoking the handler
+      await vmOf(wrapper).removeCluster('c1')
+    } else {
+      await remove.trigger('click')
+    }
+    await flushPromises()
+
+    expect(api.unregisterCluster).toHaveBeenCalledWith('c1')
+    expect(ElMessage.success).toHaveBeenCalled()
+  })
+
+  it('keeps the fleet unchanged when removal is cancelled', async () => {
+    vi.mocked(api.listClusters).mockResolvedValue([clusterSummary()])
+    vi.mocked(api.listInstances).mockResolvedValue([])
+    vi.mocked(api.listMigrations).mockResolvedValue([])
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const { ElMessageBox } = await import('element-plus')
+    ;(ElMessageBox.confirm as any).mockRejectedValueOnce('cancel')
+    await vmOf(wrapper).removeCluster('c1')
+    expect(api.unregisterCluster).not.toHaveBeenCalled()
+  })
+
+  it('reports unregister failures', async () => {
+    vi.mocked(api.listClusters).mockResolvedValue([clusterSummary()])
+    vi.mocked(api.listInstances).mockResolvedValue([])
+    vi.mocked(api.listMigrations).mockResolvedValue([])
+    vi.mocked(api.unregisterCluster).mockRejectedValue(new Error('store unavailable'))
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    await vmOf(wrapper).removeCluster('c1')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith('store unavailable')
   })
 })

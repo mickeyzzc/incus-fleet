@@ -195,6 +195,88 @@ instance counts may be zero when the cluster cannot be inspected.
 
 `POST /clusters/{cluster}/reconnect` returns the updated summary object directly (not wrapped).
 
+### Dynamic cluster registration
+
+```json
+// POST /api/v1/clusters
+{
+  "name": "c64",
+  "display_name": "Cluster 64",
+  "endpoint": "https://192.168.64.21:8443",
+  "project": "default",
+  "tls_cert": "-----BEGIN CERTIFICATE-----\n...",
+  "tls_key": "-----BEGIN EC PRIVATE KEY-----\n...",
+  "tls_server_cert": "-----BEGIN CERTIFICATE-----\n..."
+}
+```
+
+`tls_cert`/`tls_key` are PEM bodies (the UI reads them from the picked files);
+`tls_server_cert` is optional. The cluster is dialed first; only a successful connection is
+persisted in the store (SQLite/PostgreSQL) and re-registered on startup. Failure returns the
+connection error and leaves no phantom entry. `201` returns the cluster summary.
+
+`DELETE /api/v1/clusters/{cluster}` removes a dynamically registered cluster (`204`). Clusters
+defined in the configuration file return `404` here; unregistering a name that only exists in the
+manager also returns `404`.
+
+### Cluster traffic
+
+```json
+// GET /api/v1/clusters/{cluster}/traffic
+{
+  "at": "2026-11-17T05:13:07Z",
+  "total_rx_bytes": 3003418965,
+  "total_tx_bytes": 40544880,
+  "total_rx_packets": 41558733,
+  "total_tx_packets": 636161,
+  "instances": [
+    {"name": "deb13-a", "rx_bytes": 1010964553, "tx_bytes": 14306432,
+     "rx_packets": 14000000, "tx_packets": 210000}
+  ]
+}
+```
+
+Counters are cumulative since instance boot and only include running instances; the dashboard
+polls every 3 seconds and derives per-second rates from consecutive samples.
+
+## Node network (the host running the fleet app)
+
+These endpoints manage the physical node itself (not Instances inside clusters). They require the
+sudo whitelist and unit changes described in `docs/deployment.md`.
+
+```json
+// GET /api/v1/node?wifi=wlo1
+{
+  "host": "n100-server",
+  "nics": [
+    {"name": "enp1s0", "state": "up", "kind": "ethernet", "mac": "aa:bb:cc:dd:ee:ff", "mtu": 1500,
+     "addresses": [{"family": "inet", "address": "192.168.62.21", "prefixlen": 24}]},
+    {"name": "wlo1", "state": "up", "kind": "wifi", "addresses": [],
+     "wifi": {"connected": true, "ssid": "Office", "signal": -55, "frequency": 2437}}
+  ],
+  "routes": [{"destination": "default", "gateway": "192.168.62.1", "device": "enp1s0", "metric": "100"}],
+  "firewall": [{"handle": "7", "rule": "tcp dport 22 accept comment \"fleet_rule\""}],
+  "wifi_scan": [{"ssid": "Office", "signal": -45, "frequency": 2437, "secure": true}],
+  "wifi_device": "wlo1",
+  "capabilities": ["nics", "routes", "firewall"]
+}
+```
+
+The `wifi` query parameter selects the interface to scan; without it the first wireless interface
+is used. Scan results are deduplicated by SSID (strongest BSS kept) and require the interface to
+be up.
+
+| Method & path | Purpose |
+|---|---|
+| `POST /node/networks/{name}/state` `{"up": bool}` | bring a NIC up/down |
+| `PATCH /node/networks/{name}` `{"dhcp": bool, "address": "10.62.0.50/24", "gateway": "...", "persist": bool}` | static address or DHCP; `persist` writes `/etc/network/interfaces.d/<name>` |
+| `POST /node/networks/{name}/wifi` `{"ssid": "...", "password": "..."}` | associate + DHCP lease via wpa_supplicant |
+| `GET/POST /node/routes`, `DELETE /node/routes/{destination}` | routing table and static routes |
+| `GET/POST /node/firewall`, `DELETE /node/firewall/{handle}` | fleet_filter nftables table rules |
+
+Handler errors map to `400 invalid_request` (bad input) and `503 node_unavailable` (missing sudo
+rules, binaries, or host failure).
+
 ## Instances
 
 ```json

@@ -18,6 +18,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/httpapi"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
+	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/version"
 	"github.com/mickeyzzc/incus-fleet/web"
@@ -88,13 +89,39 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	instancesService := instances.New(manager)
 	migrationsService := migrations.New(manager, st, logger)
 	assetsService := assets.New(st, instancesService)
+	nodenetService := nodenet.NewService(nodenet.SudoRunner{})
 	authenticator := auth.New(cfg.Server.AuthToken, 12*time.Hour)
+
+	// Clusters registered at runtime through the web UI persist in the
+	// store and rejoin the manager on every startup.
+	registered, err := st.ListClusters(ctx)
+	if err != nil {
+		logger.Warn("registered clusters unavailable", "error", err)
+	}
+	for _, cluster := range registered {
+		if _, exists := manager.Get(cluster.Name); exists == nil {
+			continue
+		}
+		if _, err := manager.Register(ctx, config.Cluster{
+			Name:          cluster.Name,
+			DisplayName:   cluster.DisplayName,
+			Endpoint:      cluster.Endpoint,
+			Project:       cluster.Project,
+			TLSCert:       cluster.TLSCert,
+			TLSKey:        cluster.TLSKey,
+			TLSServerCert: cluster.TLSServerCert,
+		}); err != nil {
+			logger.Warn("registered cluster reconnect failed", "cluster", cluster.Name, "error", err)
+		}
+	}
 
 	handler := httpapi.New(httpapi.Deps{
 		Clusters:   manager,
 		Instances:  instancesService,
 		Assets:     assetsService,
 		Migrations: migrationsService,
+		Store:      st,
+		NodeNet:    nodenetService,
 		Auth:       authenticator,
 		StaticFS:   o.staticFS,
 		Logger:     logger,

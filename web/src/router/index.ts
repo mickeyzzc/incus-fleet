@@ -49,6 +49,12 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'titles.assets' },
   },
   {
+    path: '/node',
+    name: 'node',
+    component: () => import('@/views/NodeView.vue'),
+    meta: { titleKey: 'titles.node' },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },

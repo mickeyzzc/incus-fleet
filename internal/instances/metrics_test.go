@@ -121,3 +121,57 @@ func TestInstanceStateNotFoundSurfacesNotFound(t *testing.T) {
 		t.Fatalf("InstanceMetrics() missing instance = %v", err)
 	}
 }
+
+func TestClusterTrafficAggregatesRunningInstances(t *testing.T) {
+	srv := &incusfake.Server{
+		Instances: []api.InstanceFull{
+			{Instance: api.Instance{Name: "web", Status: "Running", StatusCode: api.Running}},
+			{Instance: api.Instance{Name: "db", Status: "Stopped", StatusCode: api.Stopped}},
+			{Instance: api.Instance{Name: "cache", Status: "Running", StatusCode: api.Running}},
+		},
+		StateFunc: func(name string) (*api.InstanceState, error) {
+			if name == "cache" {
+				return nil, errors.New("agent down")
+			}
+
+			return &api.InstanceState{
+				Status: "Running",
+				Network: map[string]api.InstanceStateNetwork{
+					"lo": {
+						Counters: api.InstanceStateNetworkCounters{BytesReceived: 500, BytesSent: 500},
+					},
+					"eth0": {
+						Counters: api.InstanceStateNetworkCounters{
+							BytesReceived: 1000, BytesSent: 2000,
+							PacketsReceived: 10, PacketsSent: 20,
+						},
+					},
+				},
+			}, nil
+		},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	totals, err := svc.ClusterTraffic("c1")
+	if err != nil {
+		t.Fatalf("ClusterTraffic() error = %v", err)
+	}
+
+	if totals.TotalRxBytes != 1000 || totals.TotalTxBytes != 2000 {
+		t.Fatalf("ClusterTraffic() bytes = %+v", totals)
+	}
+	if totals.TotalRxPackets != 10 || totals.TotalTxPackets != 20 {
+		t.Fatalf("ClusterTraffic() packets = %+v", totals)
+	}
+	// The stopped instance is skipped and the failing one is tolerated.
+	if len(totals.Instances) != 1 || totals.Instances[0].Name != "web" {
+		t.Fatalf("ClusterTraffic() instances = %#v", totals.Instances)
+	}
+	if totals.At.IsZero() {
+		t.Fatalf("ClusterTraffic() At is zero")
+	}
+
+	if _, err := svc.ClusterTraffic("missing"); err == nil {
+		t.Fatal("ClusterTraffic() unknown cluster error = nil")
+	}
+}

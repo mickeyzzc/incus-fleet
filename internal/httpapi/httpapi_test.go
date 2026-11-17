@@ -23,6 +23,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/config"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
+	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
 )
@@ -34,6 +35,8 @@ type apiFixture struct {
 	target     *incusfake.Server
 	migrations *migrations.Service
 	store      *store.SQLStore
+	nodeRunner *fakeNodeRunner
+	auth       *auth.Authenticator
 }
 
 func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
@@ -45,7 +48,7 @@ func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 	}
 	dial := func(_ context.Context, cfg config.Cluster) (clusters.InstanceServer, error) {
 		switch cfg.Name {
-		case "c1":
+		case "c1", "c64":
 			return source, nil
 		case "c2":
 			return target, nil
@@ -71,12 +74,16 @@ func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 		"dist/assets/app.js": {Data: []byte("console.log('fleet')")},
 	}
 
+	nodeRunner := newFakeNodeRunner()
+	authenticator := auth.New("secret", time.Hour)
 	handler := New(Deps{
 		Clusters:   manager,
 		Instances:  instances.New(manager),
 		Assets:     assets.New(st, instances.New(manager)),
 		Migrations: migrationService,
-		Auth:       auth.New("secret", time.Hour),
+		Store:      st,
+		NodeNet:    nodenet.NewService(nodeRunner),
+		Auth:       authenticator,
 		StaticFS:   staticFS,
 		Logger:     logger,
 		Version:    "test",
@@ -88,7 +95,16 @@ func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 		_ = st.Close()
 	})
 
-	return &apiFixture{handler: handler, token: "secret", source: source, target: target, migrations: migrationService, store: st}
+	return &apiFixture{
+		handler:    handler,
+		token:      "secret",
+		source:     source,
+		target:     target,
+		migrations: migrationService,
+		store:      st,
+		nodeRunner: nodeRunner,
+		auth:       authenticator,
+	}
 }
 
 // closeStore breaks the asset store so listing handlers hit the error branch.

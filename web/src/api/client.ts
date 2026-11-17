@@ -1,5 +1,10 @@
 import type {
   BatchItem,
+  ClusterRegisterRequest,
+  ClusterTraffic,
+  NodeAddressRequest,
+  NodeFirewallRequest,
+  NodeSnapshot,
   BatchKeysRequest,
   BatchPowerRequest,
   BatchScriptsRequest,
@@ -800,6 +805,63 @@ export class ApiClient {
       form,
       onProgress,
     )
+  }
+
+  /** Returns the physical network snapshot of the node fleet runs on. */
+  async nodeSnapshot(wifiDevice?: string): Promise<NodeSnapshot> {
+    const query = wifiDevice ? `?wifi=${encodeURIComponent(wifiDevice)}` : ''
+    const data = await this.request<NodeSnapshot>('GET', `/api/v1/node${query}`)
+    return data
+  }
+
+  /** Brings one NIC of the node up or down. */
+  async nodeNICState(name: string, up: boolean): Promise<void> {
+    await this.request<void>('POST', `/api/v1/node/networks/${encodeURIComponent(name)}/state`, { up })
+  }
+
+  /** Configures one NIC with DHCP or a static address. */
+  async nodeApplyAddress(name: string, request: NodeAddressRequest): Promise<void> {
+    await this.request<void>('PATCH', `/api/v1/node/networks/${encodeURIComponent(name)}`, request)
+  }
+
+  /** Associates one Wi-Fi interface with an access point. */
+  async nodeWifiConnect(name: string, ssid: string, password: string): Promise<void> {
+    await this.request<void>('POST', `/api/v1/node/networks/${encodeURIComponent(name)}/wifi`, { ssid, password })
+  }
+
+  /** Adds one static route on the node. */
+  async nodeAddRoute(destination: string, gateway: string, device: string): Promise<void> {
+    await this.request<void>('POST', '/api/v1/node/routes', { destination, gateway, device })
+  }
+
+  /** Deletes one static route from the node. */
+  async nodeDeleteRoute(destination: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/node/routes/${encodeURIComponent(destination)}`)
+  }
+
+  /** Adds one firewall input rule to the fleet-managed nftables table. */
+  async nodeAddFirewallRule(request: NodeFirewallRequest): Promise<void> {
+    await this.request<void>('POST', '/api/v1/node/firewall', request)
+  }
+
+  /** Deletes one firewall rule by handle. */
+  async nodeDeleteFirewallRule(handle: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/node/firewall/${encodeURIComponent(handle)}`)
+  }
+
+  /** Aggregates the network counters of every running instance on one cluster. */
+  async clusterTraffic(cluster: string): Promise<ClusterTraffic> {
+    return this.request<ClusterTraffic>('GET', `/api/v1/clusters/${encodeURIComponent(cluster)}/traffic`)
+  }
+
+  /** Registers a new cluster at runtime. */
+  async registerCluster(request: ClusterRegisterRequest): Promise<void> {
+    await this.request<void>('POST', '/api/v1/clusters', request)
+  }
+
+  /** Removes one dynamically registered cluster. */
+  async unregisterCluster(name: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/clusters/${encodeURIComponent(name)}`)
   }
 
   /** Builds the websocket URL for an instance console or exec session. */
