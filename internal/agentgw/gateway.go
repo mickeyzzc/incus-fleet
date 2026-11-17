@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
+	"github.com/mickeyzzc/incus-fleet/internal/bootstrap"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 )
 
@@ -95,6 +96,14 @@ func New(st *store.SQLStore, ca *CA, logger *slog.Logger, opts ...Option) *Gatew
 	}
 
 	return g
+}
+
+// SignBootstrap signs a bootstrap spec with the CA key.
+func (g *Gateway) SignBootstrap(spec *bootstrap.Spec) error {
+	if g.ca == nil {
+		return errors.New("agentgw: CA is not configured")
+	}
+	return g.ca.SignBootstrap(spec)
 }
 
 // TLSConfig builds the listener configuration. Enrollment uses the server

@@ -20,6 +20,8 @@ import (
 	"net"
 	"os"
 	"time"
+
+	"github.com/mickeyzzc/incus-fleet/internal/bootstrap"
 )
 
 const defaultAgentCertTTL = 90 * 24 * time.Hour
@@ -98,6 +100,11 @@ func GenerateCA(commonName string) (*CA, error) {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: mustMarshalKey(key)})
 
 	return ParseCA(certPEM, keyPEM)
+}
+
+// SignBootstrap signs a bootstrap spec with the CA key.
+func (c *CA) SignBootstrap(spec *bootstrap.Spec) error {
+	return bootstrap.Sign(c.key, spec)
 }
 
 // CertPEM returns the CA certificate in PEM form.

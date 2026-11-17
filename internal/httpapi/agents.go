@@ -14,8 +14,14 @@ import (
 
 	"github.com/mickeyzzc/incus-fleet/internal/agentgw"
 	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
+	"github.com/mickeyzzc/incus-fleet/internal/bootstrap"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 )
+
+// BootstrapSigner signs declarative Incus bootstrap specs.
+type BootstrapSigner interface {
+	SignBootstrap(*bootstrap.Spec) error
+}
 
 // AgentDispatcher is the subset of the agent gateway used by HTTP handlers.
 type AgentDispatcher interface {

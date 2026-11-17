@@ -28,6 +28,7 @@ pub struct HelperRequest {
     pub comment: String,
     pub ssid: String,
     pub password: String,
+    pub spec: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,6 +38,9 @@ pub struct HelperResponse {
     pub task_id: String,
     pub backend: String,
     pub persistence: String,
+    pub message: String,
+    #[serde(default)]
+    pub steps: Vec<String>,
     pub error: String,
 }
 
@@ -66,14 +70,23 @@ impl HelperRequest {
             comment: spec.comment.clone(),
             ssid: spec.ssid.clone(),
             password: spec.password.clone(),
+            spec: String::new(),
         }
     }
 }
 
 /// Run the privileged helper via sudo and parse its JSON response.
-pub async fn invoke(helper: &str, request: &HelperRequest) -> Result<HelperResponse> {
-    let mut child = Command::new("sudo")
-        .args(["-n", helper])
+pub async fn invoke(
+    helper: &str,
+    request: &HelperRequest,
+    bootstrap_ca: Option<&std::path::Path>,
+) -> Result<HelperResponse> {
+    let mut command = Command::new("sudo");
+    command.args(["-n", helper]);
+    if let Some(ca) = bootstrap_ca {
+        command.env("INCUS_FLEET_BOOTSTRAP_CA", ca);
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

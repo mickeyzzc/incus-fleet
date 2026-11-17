@@ -153,6 +153,14 @@ message NodenetApplyResult {
   string error = 6;
 }
 
+message IncusBootstrapResult {
+  bool ok = 1;
+  string task_id = 2;
+  string mode = 3;
+  string message = 4;
+  repeated string steps = 5;
+}
+
 // NodenetSnapshot is the read-only host network view returned by the agent.
 message NodenetSnapshot {
   string host = 1;

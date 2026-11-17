@@ -13,6 +13,8 @@ func TestHandleRejectsInvalidRequests(t *testing.T) {
 		`{"action":"address","interface":"eth0"}`,
 		`{"action":"confirm"}`,
 		`{"action":"route-add","destination":"bad","gateway":"10.0.0.1","device":"eth0"}`,
+		`{"action":"incus-bootstrap"}`,
+		`{"action":"incus-bootstrap","spec":"not-json"}`,
 	}
 	for _, body := range cases {
 		resp, code := handleReader(strings.NewReader(body))

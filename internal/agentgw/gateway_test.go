@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
+	"github.com/mickeyzzc/incus-fleet/internal/bootstrap"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 )
 
@@ -483,5 +484,24 @@ func TestConnectRejectsFingerprintMismatch(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("fingerprint mismatch status = %d", resp.StatusCode)
+	}
+}
+
+func TestSignBootstrap(t *testing.T) {
+	ca := mustTestCA(t)
+	gw := New(openAgentStore(t), ca, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	spec := &bootstrap.Spec{
+		Version: 1, Mode: "join", Cluster: "c1", Member: "node-a",
+		Address: "192.0.2.10", Preseed: "cluster:\n  enabled: true\n",
+		TaskID: "task-1", Nonce: "nonce", ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}
+	if err := gw.SignBootstrap(spec); err != nil {
+		t.Fatalf("SignBootstrap() error = %v", err)
+	}
+	if err := bootstrap.Verify(ca.CertPEM(), spec); err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+	if gw.ca = nil; gw.SignBootstrap(spec) == nil {
+		t.Fatal("SignBootstrap(nil CA) expected error")
 	}
 }

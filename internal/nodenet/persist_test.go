@@ -141,3 +141,45 @@ func TestPersistAddressWriteError(t *testing.T) {
 		t.Fatal("PersistAddress() expected write error")
 	}
 }
+
+func TestDetectManagerRemaining(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "etc/NetworkManager"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "etc/NetworkManager/NetworkManager.conf"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := DetectManager(root); got != ManagerNetworkMgr {
+		t.Fatalf("NetworkManager detect = %q", got)
+	}
+
+	root = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "etc/sysconfig/network"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "etc/sysconfig/network/config"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := DetectManager(root); got != ManagerWicked {
+		t.Fatalf("wicked detect = %q", got)
+	}
+}
+
+func TestPersistAddressDHCPBranchesAndUnknown(t *testing.T) {
+	for _, manager := range []Manager{ManagerNetworkd, ManagerNetplan, ManagerWicked} {
+		root := t.TempDir()
+		if err := PersistAddress(&persistRunner{}, root, manager, "eth0", AddressRequest{DHCP: true}); err != nil {
+			t.Fatalf("PersistAddress(%s) error = %v", manager, err)
+		}
+	}
+	if err := PersistAddress(nil, t.TempDir(), ManagerUnknown, "eth0", AddressRequest{DHCP: true}); err == nil {
+		t.Fatal("PersistAddress(unknown) expected error")
+	}
+	if got := PersistencePath("/", ManagerUnknown, "eth0"); got != "" {
+		t.Fatalf("PersistencePath(unknown) = %q", got)
+	}
+	if err := PersistAddress(nil, t.TempDir(), ManagerIfupdown, "eth0", AddressRequest{Address: "10.0.0.1", Gateway: "bad"}); err == nil {
+		t.Fatal("PersistAddress(bad gateway) expected error")
+	}
+}

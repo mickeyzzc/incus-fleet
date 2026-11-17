@@ -38,6 +38,7 @@ type request struct {
 	Comment        string `json:"comment,omitempty"`
 	SSID           string `json:"ssid,omitempty"`
 	Password       string `json:"password,omitempty"`
+	Spec           string `json:"spec,omitempty"`
 }
 
 type response struct {
@@ -47,6 +48,7 @@ type response struct {
 	Backend     string            `json:"backend"`
 	Persistence string            `json:"persistence,omitempty"`
 	Message     string            `json:"message,omitempty"`
+	Steps       []string          `json:"steps,omitempty"`
 	Snapshot    *nodenet.Snapshot `json:"snapshot,omitempty"`
 	Error       string            `json:"error,omitempty"`
 }
@@ -180,6 +182,8 @@ func handleReader(input io.Reader) (response, int) {
 			return failure(req, err), 1
 		}
 		return success(req, ""), 0
+	case "incus-bootstrap":
+		return handleBootstrap(req)
 	case "confirm":
 		if err := removeState(req.TaskID); err != nil {
 			return failure(req, err), 1

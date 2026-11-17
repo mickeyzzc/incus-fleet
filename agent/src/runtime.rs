@@ -17,8 +17,8 @@ use tracing::{info, warn};
 use crate::facts;
 use crate::identity::Identity;
 use crate::proto::v1::{
-    Envelope, Heartbeat, Hello, NodenetApplyResult, NodenetApplySpec, TaskResult, TaskState,
-    TaskType, envelope,
+    Envelope, Heartbeat, Hello, IncusBootstrapResult, NodenetApplyResult, NodenetApplySpec,
+    TaskResult, TaskState, TaskType, envelope,
 };
 use crate::snapshot;
 
@@ -26,13 +26,14 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Run the agent forever, reconnecting with exponential backoff.
 pub async fn run(state_dir: &Path, helper: &Path) -> Result<()> {
+    let bootstrap_ca = state_dir.join("identity/ca.pem");
     let (identity, files) = Identity::load(state_dir)?;
     let tls = client_tls(&files.ca_pem, &files.cert_pem, &files.key_pem)?;
     let connect_url = websocket_url(&identity.center_url)?;
 
     let mut backoff = Duration::from_secs(1);
     loop {
-        match session(&connect_url, &identity, tls.clone(), helper).await {
+        match session(&connect_url, &identity, tls.clone(), helper, &bootstrap_ca).await {
             Ok(()) => {
                 info!("agent session closed");
                 backoff = Duration::from_secs(1);
@@ -88,6 +89,7 @@ async fn session(
     identity: &Identity,
     tls: Arc<ClientConfig>,
     helper: &Path,
+    bootstrap_ca: &Path,
 ) -> Result<()> {
     let (mut ws, _) = tokio::time::timeout(
         Duration::from_secs(10),
@@ -139,7 +141,7 @@ async fn session(
                     WsMessage::Binary(data) => {
                         let envelope = Envelope::decode(data.as_ref()).context("decode envelope")?;
                         if let Some(envelope::Body::Task(task)) = envelope.body {
-                            let result = handle_task(task, helper).await;
+                            let result = handle_task(task, helper, bootstrap_ca).await;
                             send(&mut ws, mk_envelope(envelope::Body::Result(result))).await?;
                         }
                     }
@@ -153,7 +155,11 @@ async fn session(
     Ok(())
 }
 
-async fn handle_task(task: crate::proto::v1::TaskDispatch, helper: &Path) -> TaskResult {
+async fn handle_task(
+    task: crate::proto::v1::TaskDispatch,
+    helper: &Path,
+    bootstrap_ca: &Path,
+) -> TaskResult {
     let task_id = task.task_id.clone();
     match task.r#type() {
         TaskType::NodenetSnapshot => match snapshot::collect().await {
@@ -199,25 +205,30 @@ async fn handle_task(task: crate::proto::v1::TaskDispatch, helper: &Path) -> Tas
                 spec.task_id = task.task_id.clone();
             }
             let request = crate::helper::HelperRequest::from_spec(&spec);
-            let result =
-                match crate::helper::invoke(helper.to_string_lossy().as_ref(), &request).await {
-                    Ok(response) => NodenetApplyResult {
-                        ok: true,
-                        action: response.action,
-                        task_id: response.task_id,
-                        backend: response.backend,
-                        persistence: response.persistence,
-                        error: String::new(),
-                    },
-                    Err(err) => NodenetApplyResult {
-                        ok: false,
-                        action: spec.action,
-                        task_id: spec.task_id,
-                        backend: "helper".into(),
-                        persistence: String::new(),
-                        error: err.to_string(),
-                    },
-                };
+            let result = match crate::helper::invoke(
+                helper.to_string_lossy().as_ref(),
+                &request,
+                Some(bootstrap_ca),
+            )
+            .await
+            {
+                Ok(response) => NodenetApplyResult {
+                    ok: true,
+                    action: response.action,
+                    task_id: response.task_id,
+                    backend: response.backend,
+                    persistence: response.persistence,
+                    error: String::new(),
+                },
+                Err(err) => NodenetApplyResult {
+                    ok: false,
+                    action: spec.action,
+                    task_id: spec.task_id,
+                    backend: "helper".into(),
+                    persistence: String::new(),
+                    error: err.to_string(),
+                },
+            };
             TaskResult {
                 task_id,
                 state: if result.ok {
@@ -232,6 +243,51 @@ async fn handle_task(task: crate::proto::v1::TaskDispatch, helper: &Path) -> Tas
                     "helper_failed".into()
                 },
                 error: result.error.clone(),
+                at_ms: now_ms(),
+                plan_hash: task.plan_hash,
+            }
+        }
+        TaskType::IncusBootstrap => {
+            let mut request = crate::helper::HelperRequest::from_spec(&NodenetApplySpec::default());
+            request.action = "incus-bootstrap".into();
+            request.task_id = task.task_id.clone();
+            request.spec = String::from_utf8_lossy(&task.payload).to_string();
+            let result = match crate::helper::invoke(
+                helper.to_string_lossy().as_ref(),
+                &request,
+                Some(bootstrap_ca),
+            )
+            .await
+            {
+                Ok(response) => IncusBootstrapResult {
+                    ok: true,
+                    task_id: response.task_id,
+                    mode: "bootstrap".into(),
+                    message: response.message,
+                    steps: response.steps,
+                },
+                Err(err) => IncusBootstrapResult {
+                    ok: false,
+                    task_id: task.task_id.clone(),
+                    mode: "bootstrap".into(),
+                    message: err.to_string(),
+                    steps: Vec::new(),
+                },
+            };
+            TaskResult {
+                task_id,
+                state: if result.ok {
+                    TaskState::Succeeded as i32
+                } else {
+                    TaskState::Failed as i32
+                },
+                payload: result.encode_to_vec(),
+                error_code: if result.ok {
+                    String::new()
+                } else {
+                    "bootstrap_failed".into()
+                },
+                error: result.message.clone(),
                 at_ms: now_ms(),
                 plan_hash: task.plan_hash,
             }

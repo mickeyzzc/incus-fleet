@@ -158,6 +158,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		NodeNet:    nodeAccess,
 		NodeJoin:   nodeJoin,
 		Agent:      agentGW,
+		Bootstrap:  agentGW,
 		Auth:       authenticator,
 		StaticFS:   o.staticFS,
 		Logger:     logger,
