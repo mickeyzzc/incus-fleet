@@ -23,6 +23,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
 	"github.com/mickeyzzc/incus-fleet/internal/bootstrap"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
+	"github.com/mickeyzzc/incus-fleet/internal/telemetry"
 )
 
 const (
@@ -56,6 +57,11 @@ func WithCertTTL(d time.Duration) Option {
 	}
 }
 
+// WithTelemetry attaches the center-side one-hour ring buffer.
+func WithTelemetry(store *telemetry.Store) Option {
+	return func(g *Gateway) { g.telemetry = store }
+}
+
 // Gateway serves enrollment and mTLS WebSocket connections.
 type Gateway struct {
 	store             *store.SQLStore
@@ -63,6 +69,7 @@ type Gateway struct {
 	logger            *slog.Logger
 	heartbeatInterval time.Duration
 	certTTL           time.Duration
+	telemetry         *telemetry.Store
 
 	mu      sync.Mutex
 	conns   map[string]*agentConn
@@ -368,6 +375,13 @@ func (g *Gateway) handleEnvelope(_ context.Context, agent *store.Agent, env *age
 		}}})
 	case *agentpb.Envelope_Facts:
 		agent.Facts = marshalFacts(body.Facts)
+		agent.LastSeen = time.Now().UTC()
+		agent.UpdatedAt = agent.LastSeen
+		g.saveAgent(agent)
+	case *agentpb.Envelope_Telemetry:
+		if g.telemetry != nil {
+			g.telemetry.Ingest(body.Telemetry, agent.Cluster, agent.Member)
+		}
 		agent.LastSeen = time.Now().UTC()
 		agent.UpdatedAt = agent.LastSeen
 		g.saveAgent(agent)

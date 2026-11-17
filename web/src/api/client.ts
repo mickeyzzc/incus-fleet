@@ -10,6 +10,7 @@ import type {
   NodeSnapshot,
   NodeTask,
   NodeTaskEvent,
+  TelemetrySeries,
   BatchKeysRequest,
   BatchPowerRequest,
   BatchScriptsRequest,
@@ -892,6 +893,16 @@ export class ApiClient {
     const query = new URLSearchParams({ cluster, member, limit: String(limit) })
     const data = await this.request<{ audit: NodeAudit[] }>('GET', `/api/v1/audit?${query.toString()}`)
     return data.audit ?? []
+  }
+
+  /** Returns the center's one-hour telemetry buffer for one member. */
+  async hostMetrics(cluster: string, member: string, from = '1h'): Promise<TelemetrySeries[]> {
+    const query = new URLSearchParams({ cluster, member, from })
+    const data = await this.request<{ series: TelemetrySeries[] }>(
+      'GET',
+      `/api/v1/metrics/query?${query.toString()}`,
+    )
+    return data.series ?? []
   }
 
   /** Provisions a new host and joins it to a cluster. */

@@ -22,6 +22,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
 	"github.com/mickeyzzc/incus-fleet/internal/bootstrap"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
+	"github.com/mickeyzzc/incus-fleet/internal/telemetry"
 )
 
 func openAgentStore(t *testing.T) *store.SQLStore {
@@ -503,5 +504,28 @@ func TestSignBootstrap(t *testing.T) {
 	}
 	if gw.ca = nil; gw.SignBootstrap(spec) == nil {
 		t.Fatal("SignBootstrap(nil CA) expected error")
+	}
+}
+
+func TestGatewayIngestsTelemetry(t *testing.T) {
+	ca := mustTestCA(t)
+	st := openAgentStore(t)
+	ts := telemetry.New(10)
+	gw := New(st, ca, slog.New(slog.NewTextHandler(io.Discard, nil)), WithTelemetry(ts))
+	now := time.Now().UTC()
+	agent := &store.Agent{ID: "agent-1", Cluster: "c1", Member: "node-a", Status: store.AgentOnline,
+		CreatedAt: now, UpdatedAt: now}
+	if err := st.UpsertAgent(context.Background(), agent); err != nil {
+		t.Fatal(err)
+	}
+	gw.handleEnvelope(context.Background(), agent, &agentpb.Envelope{Body: &agentpb.Envelope_Telemetry{
+		Telemetry: &agentpb.TelemetryBatch{AgentId: "agent-1", Series: []*agentpb.Series{{
+			Name: "fleet_host_load", Type: agentpb.MetricType_METRIC_TYPE_GAUGE,
+			Samples: []*agentpb.Sample{{AtMs: now.UnixMilli(), Value: 1.5}},
+		}}},
+	}})
+	series := ts.Query(telemetry.Filter{Cluster: "c1", Member: "node-a"})
+	if len(series) != 1 || series[0].Points[0].Value != 1.5 {
+		t.Fatalf("telemetry = %#v", series)
 	}
 }

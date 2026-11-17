@@ -2,6 +2,7 @@ mod enroll;
 mod facts;
 mod helper;
 mod identity;
+mod metrics;
 mod proto;
 mod runtime;
 mod snapshot;

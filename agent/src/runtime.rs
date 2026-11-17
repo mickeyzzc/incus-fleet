@@ -16,6 +16,7 @@ use tracing::{info, warn};
 
 use crate::facts;
 use crate::identity::Identity;
+use crate::metrics;
 use crate::proto::v1::{
     Envelope, Heartbeat, Hello, IncusBootstrapResult, NodenetApplyResult, NodenetApplySpec,
     TaskResult, TaskState, TaskType, envelope,
@@ -120,6 +121,9 @@ async fn session(
 
     let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut telemetry_tick = tokio::time::interval(Duration::from_secs(10));
+    telemetry_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut telemetry = metrics::Collector::new();
     let started = Instant::now();
 
     loop {
@@ -133,6 +137,10 @@ async fn session(
                         incus_version: String::new(),
                         running_tasks: 0,
                     }))).await?;
+            }
+            _ = telemetry_tick.tick() => {
+                let batch = telemetry.collect(&identity.agent_id);
+                send(&mut ws, mk_envelope(envelope::Body::Telemetry(batch))).await?;
             }
             message = ws.next() => {
                 let Some(message) = message else { break; };

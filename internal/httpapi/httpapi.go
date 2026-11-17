@@ -25,6 +25,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
+	"github.com/mickeyzzc/incus-fleet/internal/telemetry"
 
 	"github.com/lxc/incus/v7/shared/api"
 )
@@ -45,6 +46,7 @@ type Deps struct {
 	NodeJoin   *nodejoin.Service
 	Agent      AgentDispatcher
 	Bootstrap  BootstrapSigner
+	Telemetry  *telemetry.Store
 	Auth       *auth.Authenticator
 	StaticFS   fs.FS
 	Logger     *slog.Logger
@@ -62,6 +64,7 @@ type API struct {
 	nodejoin   *nodejoin.Service
 	agent      AgentDispatcher
 	bootstrap  BootstrapSigner
+	telemetry  *telemetry.Store
 	auth       *auth.Authenticator
 	logger     *slog.Logger
 	version    string
@@ -85,6 +88,7 @@ func New(deps Deps) *API {
 		nodejoin:   deps.NodeJoin,
 		agent:      deps.Agent,
 		bootstrap:  deps.Bootstrap,
+		telemetry:  deps.Telemetry,
 		auth:       deps.Auth,
 		logger:     logger,
 		version:    deps.Version,
@@ -146,6 +150,9 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents/{id}/snapshot", a.requireAuth(http.HandlerFunc(a.agentSnapshot)))
 	mux.Handle("POST /api/v1/agents/{id}/network", a.requireAuth(http.HandlerFunc(a.agentNetwork)))
 	mux.Handle("POST /api/v1/agents/{id}/bootstrap", a.requireAuth(http.HandlerFunc(a.agentBootstrap)))
+	mux.Handle("GET /api/v1/metrics/query", a.requireAuth(http.HandlerFunc(a.queryMetrics)))
+	mux.Handle("GET /api/v1/metrics/snapshot", a.requireAuth(http.HandlerFunc(a.snapshotMetrics)))
+	mux.Handle("GET /api/v1/metrics/export", a.requireAuth(http.HandlerFunc(a.exportMetrics)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.listSnapshots)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.createSnapshot)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore", a.requireAuth(http.HandlerFunc(a.restoreSnapshot)))

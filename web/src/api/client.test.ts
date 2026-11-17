@@ -745,6 +745,15 @@ describe('ApiClient node network and cluster registration endpoints', () => {
     expect(urls).toContain('https://fleet.local/api/v1/tasks/task-1')
   })
 
+  it('loads host metrics from the center buffer', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ series: [{ name: 'fleet_host_load' }] }))
+    const series = await client.hostMetrics('c1', 'n1')
+    expect(series).toHaveLength(1)
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain(
+      '/api/v1/metrics/query?cluster=c1&member=n1&from=1h',
+    )
+  })
+
   it('provisions a new cluster member', async () => {
     const { client, fetchImpl } = clientWith(mockResponse({ member: { name: 'n2' }, steps: [] }))
 

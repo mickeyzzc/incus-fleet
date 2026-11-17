@@ -24,6 +24,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
+	"github.com/mickeyzzc/incus-fleet/internal/telemetry"
 	"github.com/mickeyzzc/incus-fleet/internal/version"
 	"github.com/mickeyzzc/incus-fleet/web"
 )
@@ -109,6 +110,10 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		agentGW  *agentgw.Gateway
 		agentTLS *tls.Config
 	)
+	var telemetryStore *telemetry.Store
+	if cfg.Metrics.Enabled {
+		telemetryStore = telemetry.New(telemetry.DefaultMaxSeries)
+	}
 	if cfg.Agent.Enabled {
 		ca, err := agentgw.LoadCA(cfg.Agent.ClientCA, cfg.Agent.CAKey)
 		if err != nil {
@@ -122,7 +127,11 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 			_ = st.Close()
 			return nil, fmt.Errorf("app: load agent server certificate: %w", err)
 		}
-		agentGW = agentgw.New(st, ca, logger)
+		options := []agentgw.Option{}
+		if telemetryStore != nil {
+			options = append(options, agentgw.WithTelemetry(telemetryStore))
+		}
+		agentGW = agentgw.New(st, ca, logger, options...)
 		agentTLS = agentGW.TLSConfig(serverCert)
 	}
 
@@ -159,6 +168,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		NodeJoin:   nodeJoin,
 		Agent:      agentGW,
 		Bootstrap:  agentGW,
+		Telemetry:  telemetryStore,
 		Auth:       authenticator,
 		StaticFS:   o.staticFS,
 		Logger:     logger,

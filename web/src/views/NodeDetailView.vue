@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Back } from '@element-plus/icons-vue'
 
+import HostMetricsPanel from '@/components/HostMetricsPanel.vue'
 import NodeNetworkPanel from '@/components/NodeNetworkPanel.vue'
 import type { ClusterMember } from '@/api/types'
 import { useClustersStore } from '@/stores/clusters'
@@ -92,6 +93,8 @@ watch(() => props.cluster, ensureCluster)
           </div>
         </div>
       </section>
+
+      <HostMetricsPanel :cluster="cluster" :member="memberInfo.name" />
 
       <NodeNetworkPanel :cluster="cluster" :member="memberInfo.name" />
     </template>

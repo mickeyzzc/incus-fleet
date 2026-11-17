@@ -689,3 +689,15 @@ export interface ClusterTraffic {
   total_tx_packets: number
   instances: TrafficInstance[]
 }
+
+export interface TelemetryPoint {
+  at: string
+  value: number
+}
+
+export interface TelemetrySeries {
+  name: string
+  labels: Record<string, string>
+  type: string
+  points: TelemetryPoint[]
+}
