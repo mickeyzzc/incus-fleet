@@ -171,8 +171,8 @@ mod platform {
     #[repr(C)]
     #[derive(Clone, Copy, Debug)]
     pub struct FlowKey {
-        saddr: u32,
-        daddr: u32,
+        saddr: [u8; 16],
+        daddr: [u8; 16],
         sport: u16,
         dport: u16,
         family: u16,
@@ -180,6 +180,8 @@ mod platform {
     }
 
     unsafe impl Pod for FlowKey {}
+
+    const _: () = assert!(std::mem::size_of::<FlowKey>() == 40);
 
     pub struct Collector {
         _ebpf: Ebpf,

@@ -25,12 +25,18 @@ struct {
     __type(value, __u64);
 } CGROUP_RETRANSMITS SEC(".maps");
 
-// IPv4 4-tuple -> cgroup id, populated by sockops in process context so
+// IPv4/IPv6 4-tuple -> cgroup id, populated by sockops in process context so
 // retransmit tracepoints can resolve the owning container even when the timer
 // runs in softirq context.
 struct flow_key {
-    __u32 saddr;
-    __u32 daddr;
+    union {
+        __u32 v4[4];
+        __u8 v6[16];
+    } saddr;
+    union {
+        __u32 v4[4];
+        __u8 v6[16];
+    } daddr;
     __u16 sport;
     __u16 dport;
     __u16 family;
@@ -110,17 +116,23 @@ int fleet_sockops(struct bpf_sock_ops *skops)
         op != BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB)
         return 0;
 
-    if (skops->family != 2)
+    __u32 family = skops->family;
+    if (family != 2 && family != 10)
         return 0;
     struct bpf_sock *sk = skops->sk;
     if (!sk)
         return 0;
     struct flow_key key = {};
-    key.saddr = sk->src_ip4;
-    key.daddr = sk->dst_ip4;
+    if (family == 2) {
+        key.saddr.v4[0] = sk->src_ip4;
+        key.daddr.v4[0] = sk->dst_ip4;
+    } else {
+        __builtin_memcpy(key.saddr.v6, sk->src_ip6, 16);
+        __builtin_memcpy(key.daddr.v6, sk->dst_ip6, 16);
+    }
     key.sport = (__u16)sk->src_port;
     key.dport = __builtin_bswap16(sk->dst_port);
-    key.family = 2;
+    key.family = (__u16)family;
     __u64 cgroup_id = bpf_get_current_cgroup_id();
     if (cgroup_id)
         bpf_map_update_elem(&SOCKET_CGROUPS, &key, &cgroup_id, BPF_NOEXIST);
@@ -137,6 +149,8 @@ struct tcp_retransmit_ctx {
     __u16 family;
     __u8 saddr[4];
     __u8 daddr[4];
+    __u8 saddr_v6[16];
+    __u8 daddr_v6[16];
 };
 
 SEC("tracepoint/tcp/tcp_retransmit_skb")
@@ -144,13 +158,18 @@ int tcp_retransmit(void *raw_ctx)
 {
     struct tcp_retransmit_ctx *ctx = raw_ctx;
     __u64 cgroup_id = 0;
-    if (ctx->family == 2) {
+    if (ctx->family == 2 || ctx->family == 10) {
         struct flow_key key = {};
-        __builtin_memcpy(&key.saddr, ctx->saddr, 4);
-        __builtin_memcpy(&key.daddr, ctx->daddr, 4);
+        if (ctx->family == 2) {
+            __builtin_memcpy(key.saddr.v4, ctx->saddr, 4);
+            __builtin_memcpy(key.daddr.v4, ctx->daddr, 4);
+        } else {
+            __builtin_memcpy(key.saddr.v6, ctx->saddr_v6, 16);
+            __builtin_memcpy(key.daddr.v6, ctx->daddr_v6, 16);
+        }
         key.sport = ctx->sport;
         key.dport = ctx->dport;
-        key.family = 2;
+        key.family = ctx->family;
         __u64 *mapped = bpf_map_lookup_elem(&SOCKET_CGROUPS, &key);
         if (mapped)
             cgroup_id = *mapped;
