@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"text/template"
@@ -39,15 +41,21 @@ type Config struct {
 	// architecture. They are checksummed at startup.
 	AgentBinary  string
 	HelperBinary string
+	// AgentBinaries and HelperBinaries optionally map GOARCH values
+	// (amd64, arm64) to architecture-specific binaries.
+	AgentBinaries  map[string]string
+	HelperBinaries map[string]string
 }
 
 // Handler serves the installer and its assets.
 type Handler struct {
-	cfg    Config
-	caPEM  string
-	agent  asset
-	helper asset
-	logger *slog.Logger
+	cfg     Config
+	caPEM   string
+	agent   asset
+	helper  asset
+	agents  map[string]asset
+	helpers map[string]asset
+	logger  *slog.Logger
 }
 
 type asset struct {
@@ -77,20 +85,51 @@ func New(cfg Config, caPEM []byte, logger *slog.Logger) (*Handler, error) {
 	if len(bytes.TrimSpace(caPEM)) == 0 {
 		return nil, fmt.Errorf("agentinstall: CA certificate is required")
 	}
-	agent, err := loadAsset(cfg.AgentBinary, "agent_binary")
-	if err != nil {
-		return nil, err
+	agents := make(map[string]asset)
+	helpers := make(map[string]asset)
+	if len(cfg.AgentBinaries) > 0 || len(cfg.HelperBinaries) > 0 {
+		if len(cfg.AgentBinaries) != len(cfg.HelperBinaries) {
+			return nil, fmt.Errorf("agentinstall: agent_binaries and helper_binaries must list the same architectures")
+		}
+		for arch, path := range cfg.AgentBinaries {
+			helperPath, ok := cfg.HelperBinaries[arch]
+			if !ok {
+				return nil, fmt.Errorf("agentinstall: missing helper binary for %s", arch)
+			}
+			agent, err := loadAsset(path, "agent_binaries."+arch)
+			if err != nil {
+				return nil, err
+			}
+			helper, err := loadAsset(helperPath, "helper_binaries."+arch)
+			if err != nil {
+				return nil, err
+			}
+			agents[arch] = agent
+			helpers[arch] = helper
+		}
+	} else {
+		agent, err := loadAsset(cfg.AgentBinary, "agent_binary")
+		if err != nil {
+			return nil, err
+		}
+		helper, err := loadAsset(cfg.HelperBinary, "helper_binary")
+		if err != nil {
+			return nil, err
+		}
+		agents[runtime.GOARCH] = agent
+		helpers[runtime.GOARCH] = helper
 	}
-	helper, err := loadAsset(cfg.HelperBinary, "helper_binary")
-	if err != nil {
-		return nil, err
+	if len(agents) == 0 {
+		return nil, fmt.Errorf("agentinstall: no agent binaries configured")
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
+	firstArch := defaultArch(agents)
 
 	return &Handler{
-		cfg: cfg, caPEM: string(caPEM), agent: agent, helper: helper, logger: logger,
+		cfg: cfg, caPEM: string(caPEM), agent: agents[firstArch], helper: helpers[firstArch],
+		agents: agents, helpers: helpers, logger: logger,
 	}, nil
 }
 
@@ -119,8 +158,7 @@ func (h *Handler) installScript(w http.ResponseWriter, r *http.Request) {
 		"AssetURL":    shQuote(base),
 		"AssetURLRaw": base,
 		"GatewayURL":  shQuote(h.cfg.GatewayURL),
-		"AgentSHA":    h.agent.sha256,
-		"HelperSHA":   h.helper.sha256,
+		"Checksums":   checksumCases(h.agents, h.helpers),
 		"CAPEM":       h.caPEM,
 		"Sudoers":     sudoersAsset,
 		"Unit":        unitAsset,
@@ -129,12 +167,35 @@ func (h *Handler) installScript(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) serveAgent(w http.ResponseWriter, _ *http.Request) {
-	h.serveAsset(w, h.agent, "incus-fleet-agent")
+func (h *Handler) serveAgent(w http.ResponseWriter, r *http.Request) {
+	arch := strings.TrimSpace(r.URL.Query().Get("arch"))
+	a, ok := h.assetForArch(h.agents, arch, h.agent)
+	if !ok {
+		http.Error(w, "installer binary is unavailable for this architecture", http.StatusNotFound)
+		return
+	}
+	h.serveAsset(w, a, "incus-fleet-agent")
 }
 
-func (h *Handler) serveHelper(w http.ResponseWriter, _ *http.Request) {
-	h.serveAsset(w, h.helper, "incus-fleet-helper")
+func (h *Handler) serveHelper(w http.ResponseWriter, r *http.Request) {
+	arch := strings.TrimSpace(r.URL.Query().Get("arch"))
+	a, ok := h.assetForArch(h.helpers, arch, h.helper)
+	if !ok {
+		http.Error(w, "installer binary is unavailable for this architecture", http.StatusNotFound)
+		return
+	}
+	h.serveAsset(w, a, "incus-fleet-helper")
+}
+
+func (h *Handler) assetForArch(assets map[string]asset, arch string, fallback asset) (asset, bool) {
+	if arch == "" {
+		if fallback.path != "" {
+			return fallback, true
+		}
+		arch = defaultArch(assets)
+	}
+	a, ok := assets[arch]
+	return a, ok
 }
 
 func (h *Handler) serveCA(w http.ResponseWriter, _ *http.Request) {
@@ -157,6 +218,43 @@ func (h *Handler) serveAsset(w http.ResponseWriter, a asset, name string) {
 	w.Header().Set("X-Checksum-Sha256", a.sha256)
 	w.Header().Set("Cache-Control", "no-store")
 	http.ServeContent(w, &http.Request{Method: http.MethodGet}, name, modTime(a.path), file)
+}
+
+func defaultArch(assets map[string]asset) string {
+	keys := make([]string, 0, len(assets))
+	for key := range assets {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[0]
+}
+
+func checksumCases(agents, helpers map[string]asset) string {
+	keys := make([]string, 0, len(agents))
+	for key := range agents {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("case \"$ARCH\" in\n")
+	for _, key := range keys {
+		agent, agentOK := agents[key]
+		helper, helperOK := helpers[key]
+		if !agentOK || !helperOK {
+			continue
+		}
+		b.WriteString(key)
+		b.WriteString(") AGENT_SHA='")
+		b.WriteString(agent.sha256)
+		b.WriteString("'; HELPER_SHA='")
+		b.WriteString(helper.sha256)
+		b.WriteString("' ;;\n")
+	}
+	b.WriteString("esac\n")
+	return b.String()
 }
 
 func loadAsset(path, field string) (asset, error) {
@@ -276,12 +374,24 @@ done
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
+RAW_ARCH="$(uname -m)"
+case "$RAW_ARCH" in
+	x86_64|amd64) ARCH=amd64 ;;
+	aarch64|arm64) ARCH=arm64 ;;
+	*) echo "unsupported architecture: $RAW_ARCH" >&2; exit 1 ;;
+esac
+{{.Checksums}}
+if [ -z "${AGENT_SHA:-}" ] || [ -z "${HELPER_SHA:-}" ]; then
+	echo "no installer binary is configured for $ARCH" >&2
+	exit 1
+fi
+
 echo "downloading incus-fleet-agent"
-curl -fsSL "$ASSET_URL/api/v1/agent/install/agent" -o "$TMP/incus-fleet-agent"
-printf '%s  %s\n' '{{.AgentSHA}}' "$TMP/incus-fleet-agent" | sha256sum -c - >/dev/null
+curl -fsSL "$ASSET_URL/api/v1/agent/install/agent?arch=$ARCH" -o "$TMP/incus-fleet-agent"
+printf '%s  %s\n' "$AGENT_SHA" "$TMP/incus-fleet-agent" | sha256sum -c - >/dev/null
 echo "downloading incus-fleet-helper"
-curl -fsSL "$ASSET_URL/api/v1/agent/install/helper" -o "$TMP/incus-fleet-helper"
-printf '%s  %s\n' '{{.HelperSHA}}' "$TMP/incus-fleet-helper" | sha256sum -c - >/dev/null
+curl -fsSL "$ASSET_URL/api/v1/agent/install/helper?arch=$ARCH" -o "$TMP/incus-fleet-helper"
+printf '%s  %s\n' "$HELPER_SHA" "$TMP/incus-fleet-helper" | sha256sum -c - >/dev/null
 
 install -m 0755 "$TMP/incus-fleet-agent" /usr/local/bin/incus-fleet-agent
 install -m 0755 "$TMP/incus-fleet-helper" /usr/libexec/incus-fleet-helper

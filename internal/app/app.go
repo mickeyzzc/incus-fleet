@@ -282,10 +282,12 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		}
 		if cfg.Agent.Install.Enabled {
 			agentInstall, err = agentinstall.New(agentinstall.Config{
-				GatewayURL:   cfg.Agent.Install.GatewayURL,
-				AssetURL:     cfg.Agent.Install.AssetURL,
-				AgentBinary:  cfg.Agent.Install.AgentBinary,
-				HelperBinary: cfg.Agent.Install.HelperBinary,
+				GatewayURL:     cfg.Agent.Install.GatewayURL,
+				AssetURL:       cfg.Agent.Install.AssetURL,
+				AgentBinary:    cfg.Agent.Install.AgentBinary,
+				HelperBinary:   cfg.Agent.Install.HelperBinary,
+				AgentBinaries:  cfg.Agent.Install.AgentBinaries,
+				HelperBinaries: cfg.Agent.Install.HelperBinaries,
 			}, ca.CertPEM(), logger)
 			if err != nil {
 				manager.Close()

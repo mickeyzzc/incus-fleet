@@ -66,11 +66,13 @@ type AgentConfig struct {
 // AgentInstallConfig enables the one-command Linux installer served by the
 // center. The binaries must match the target host architecture.
 type AgentInstallConfig struct {
-	Enabled      bool   `yaml:"enabled"`
-	GatewayURL   string `yaml:"gateway_url"`
-	AssetURL     string `yaml:"asset_url"`
-	AgentBinary  string `yaml:"agent_binary"`
-	HelperBinary string `yaml:"helper_binary"`
+	Enabled        bool              `yaml:"enabled"`
+	GatewayURL     string            `yaml:"gateway_url"`
+	AssetURL       string            `yaml:"asset_url"`
+	AgentBinary    string            `yaml:"agent_binary"`
+	HelperBinary   string            `yaml:"helper_binary"`
+	AgentBinaries  map[string]string `yaml:"agent_binaries"`
+	HelperBinaries map[string]string `yaml:"helper_binaries"`
 }
 
 // HAConfig controls the background host-task dispatcher. Multiple center
@@ -578,11 +580,25 @@ func (a AgentConfig) validate() error {
 			return fmt.Errorf("config: agent.install.asset_url must be an http(s) URL")
 		}
 	}
-	if strings.TrimSpace(a.Install.AgentBinary) == "" {
-		return fmt.Errorf("config: agent.install.agent_binary is required")
-	}
-	if strings.TrimSpace(a.Install.HelperBinary) == "" {
-		return fmt.Errorf("config: agent.install.helper_binary is required")
+	if len(a.Install.AgentBinaries) == 0 && len(a.Install.HelperBinaries) == 0 {
+		if strings.TrimSpace(a.Install.AgentBinary) == "" {
+			return fmt.Errorf("config: agent.install.agent_binary is required")
+		}
+		if strings.TrimSpace(a.Install.HelperBinary) == "" {
+			return fmt.Errorf("config: agent.install.helper_binary is required")
+		}
+	} else {
+		if len(a.Install.AgentBinaries) != len(a.Install.HelperBinaries) {
+			return fmt.Errorf("config: agent.install.agent_binaries and helper_binaries must list the same architectures")
+		}
+		for arch, path := range a.Install.AgentBinaries {
+			if strings.TrimSpace(arch) == "" || strings.TrimSpace(path) == "" {
+				return fmt.Errorf("config: agent.install.agent_binaries contains an empty entry")
+			}
+			if strings.TrimSpace(a.Install.HelperBinaries[arch]) == "" {
+				return fmt.Errorf("config: agent.install.helper_binaries is missing %s", arch)
+			}
+		}
 	}
 
 	return nil

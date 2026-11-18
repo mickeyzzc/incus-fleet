@@ -163,6 +163,20 @@ func TestInstallerRejectsInvalidConfig(t *testing.T) {
 	if _, err := New(Config{GatewayURL: "https://fleet.example", AgentBinary: filepath.Join(dir, "missing"), HelperBinary: helperPath}, []byte(testCA), nil); err == nil {
 		t.Fatal("missing agent binary expected error")
 	}
+	if _, err := New(Config{
+		GatewayURL:     "https://fleet.example",
+		AgentBinaries:  map[string]string{"amd64": agentPath, "arm64": agentPath},
+		HelperBinaries: map[string]string{"amd64": helperPath},
+	}, []byte(testCA), nil); err == nil {
+		t.Fatal("multiarch mismatch expected error")
+	}
+	if _, err := New(Config{
+		GatewayURL:     "https://fleet.example",
+		AgentBinaries:  map[string]string{"amd64": agentPath},
+		HelperBinaries: map[string]string{"arm64": helperPath},
+	}, []byte(testCA), nil); err == nil {
+		t.Fatal("missing helper arch expected error")
+	}
 }
 
 func TestInstallerRequestHelpers(t *testing.T) {
@@ -231,5 +245,50 @@ func TestServeAssetContent(t *testing.T) {
 	body, _ := io.ReadAll(rec.Result().Body)
 	if string(body) != "payload" || rec.Code != http.StatusOK {
 		t.Fatalf("helper = %d %q", rec.Code, body)
+	}
+}
+
+func TestMultiArchInstaller(t *testing.T) {
+	dir := t.TempDir()
+	amdAgent := filepath.Join(dir, "agent-amd64")
+	armAgent := filepath.Join(dir, "agent-arm64")
+	amdHelper := filepath.Join(dir, "helper-amd64")
+	armHelper := filepath.Join(dir, "helper-arm64")
+	for path, data := range map[string]string{
+		amdAgent: "amd-agent", armAgent: "arm-agent", amdHelper: "amd-helper", armHelper: "arm-helper",
+	} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler, err := New(Config{
+		GatewayURL:     "https://fleet.example:8444",
+		AgentBinaries:  map[string]string{"amd64": amdAgent, "arm64": armAgent},
+		HelperBinaries: map[string]string{"amd64": amdHelper, "arm64": armHelper},
+	}, []byte(testCA), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agent/install.sh", nil)
+	req.Host = "fleet.example"
+	handler.installScript(rec, req)
+	body := rec.Body.String()
+	for _, want := range []string{"amd64) AGENT_SHA=", "arm64) AGENT_SHA=", "?arch=$ARCH"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("multiarch script missing %q", want)
+		}
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/agent/install/agent?arch=arm64", nil)
+	handler.serveAgent(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "arm-agent" {
+		t.Fatalf("arm agent = %d %q", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/agent/install/agent?arch=riscv64", nil)
+	handler.serveAgent(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unsupported arch = %d", rec.Code)
 	}
 }

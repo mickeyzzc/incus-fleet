@@ -454,6 +454,14 @@ func TestAgentInstallValidation(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate(install) error = %v", err)
 	}
+	multi := cfg
+	multi.Agent.Install.AgentBinary = ""
+	multi.Agent.Install.HelperBinary = ""
+	multi.Agent.Install.AgentBinaries = map[string]string{"amd64": "/agent-amd64", "arm64": "/agent-arm64"}
+	multi.Agent.Install.HelperBinaries = map[string]string{"amd64": "/helper-amd64", "arm64": "/helper-arm64"}
+	if err := multi.Validate(); err != nil {
+		t.Fatalf("Validate(multiarch) error = %v", err)
+	}
 	cases := []struct {
 		name string
 		edit func(*Config)
@@ -465,6 +473,18 @@ func TestAgentInstallValidation(t *testing.T) {
 		{"agent binary missing", func(c *Config) { c.Agent.Install.AgentBinary = " " }},
 		{"helper binary missing", func(c *Config) { c.Agent.Install.HelperBinary = "" }},
 		{"agent disabled", func(c *Config) { c.Agent.Enabled = false }},
+		{"multiarch mismatch", func(c *Config) {
+			c.Agent.Install.AgentBinary = ""
+			c.Agent.Install.HelperBinary = ""
+			c.Agent.Install.AgentBinaries = map[string]string{"amd64": "/a", "arm64": "/b"}
+			c.Agent.Install.HelperBinaries = map[string]string{"amd64": "/h"}
+		}},
+		{"multiarch empty", func(c *Config) {
+			c.Agent.Install.AgentBinary = ""
+			c.Agent.Install.HelperBinary = ""
+			c.Agent.Install.AgentBinaries = map[string]string{"": "/a"}
+			c.Agent.Install.HelperBinaries = map[string]string{"": "/h"}
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

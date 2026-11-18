@@ -38,6 +38,13 @@ database:
 #     asset_url: https://fleet.example
 #     agent_binary: /home/incus/bin/incus-fleet-agent
 #     helper_binary: /home/incus/bin/incus-fleet-helper
+#     # Optional multi-arch selection instead of the two paths above:
+#     # agent_binaries:
+#     #   amd64: /home/incus/bin/incus-fleet-agent-linux-amd64
+#     #   arm64: /home/incus/bin/incus-fleet-agent-linux-arm64
+#     # helper_binaries:
+#     #   amd64: /home/incus/bin/incus-fleet-helper-linux-amd64
+#     #   arm64: /home/incus/bin/incus-fleet-helper-linux-arm64
 
 # Center-side telemetry buffer (Phase 4).
 # metrics:

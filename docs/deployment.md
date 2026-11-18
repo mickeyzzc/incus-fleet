@@ -331,9 +331,10 @@ curl -fsSL https://fleet.example/api/v1/agent/install.sh | sudo sh -s -- \
   --token '<one-time-token>' --cluster c1 --member node-a
 ```
 
-The installer downloads the agent and helper, verifies their SHA-256, installs the CA, sudoers
-whitelist, systemd unit, and service user, enrolls the host, and starts `incus-fleet-agent`. The
-target needs `curl`, `sudo`/`visudo`, systemd, and a binary matching its architecture. Set
+The installer detects `uname -m`, downloads the matching architecture when `agent_binaries` /
+`helper_binaries` are configured, verifies the SHA-256, installs the CA, sudoers whitelist, systemd
+unit, and service user, enrolls the host, and starts `incus-fleet-agent`. The target needs `curl`,
+`sudo`/`visudo`, and systemd. Set
 `asset_url` when the center is behind a reverse proxy; otherwise the installer derives the asset URL
 from the incoming request. If the center uses a private HTTPS certificate, configure the node's
 trust store or add `--insecure` to the outer `curl` (the enrollment itself still verifies the agent

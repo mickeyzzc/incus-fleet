@@ -56,7 +56,8 @@ All notable changes to this project are documented here. The format follows
   dispatch, shared PostgreSQL sessions, and ordered cluster endpoint failover with active health
   checks. Includes forced single-node recovery and learner rejoin APIs.
 - One-command Linux agent installer served by the center (`agent.install`): checksummed agent/helper
-  downloads, CA/sudoers/systemd setup, automatic enrollment, and service start. The UI shows this
+  downloads, per-architecture binary selection, CA/sudoers/systemd setup, automatic enrollment, and
+  service start. The UI shows this
   command instead of assuming the agent is already installed.
 - Agent-first **Add node** flow in the UI: enrollment-token display with polling, signed agent
   bootstrap, step progress, and an explicit SSH fallback. `GET /api/v1/agents` accepts

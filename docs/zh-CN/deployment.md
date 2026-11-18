@@ -326,9 +326,9 @@ curl -fsSL https://fleet.example/api/v1/agent/install.sh | sudo sh -s -- \
   --token '<一次性 token>' --cluster c1 --member node-a
 ```
 
-安装器下载 agent 和 helper、校验 SHA-256、安装 CA、sudoers 白名单、systemd unit 和服务用户，
-完成注册并启动 `incus-fleet-agent`。目标主机需要 `curl`、`sudo`/`visudo`、systemd，以及匹配
-架构的二进制。中心位于反向代理后时应设置 `asset_url`；否则安装器会从请求推导资源地址。
+安装器通过 `uname -m` 检测架构；配置了 `agent_binaries`/`helper_binaries` 时下载对应架构的
+二进制，校验 SHA-256，安装 CA、sudoers 白名单、systemd unit 和服务用户，完成注册并启动
+`incus-fleet-agent`。目标主机需要 `curl`、`sudo`/`visudo` 和 systemd。中心位于反向代理后时应设置 `asset_url`；否则安装器会从请求推导资源地址。
 如果中心使用私有 HTTPS 证书，请配置节点信任库，或在外层 `curl` 加 `--insecure`（注册本身仍会
 校验 agent gateway CA）。
 
