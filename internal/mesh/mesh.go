@@ -480,6 +480,103 @@ func (m *Mesh) Remove(id string) error {
 	return node.RemoveServer(raft.ServerID(id), 0, 5*time.Second).Error()
 }
 
+// JoinAny adds a node, forwarding to the leader when necessary.
+func (m *Mesh) JoinAny(id, address, controlAddress string, voter bool) error {
+	if m.IsLeader() {
+		return m.Join(id, address, controlAddress, voter)
+	}
+	return m.forwardAdmin(adminRequest{Op: "join", ID: id, Address: address, ControlAddress: controlAddress, Voter: voter})
+}
+
+// PromoteAny promotes a non-voter, forwarding to the leader when necessary.
+func (m *Mesh) PromoteAny(id string) error {
+	if m.IsLeader() {
+		return m.Promote(id)
+	}
+	return m.forwardAdmin(adminRequest{Op: "promote", ID: id})
+}
+
+// RemoveAny removes a node, forwarding to the leader when necessary.
+func (m *Mesh) RemoveAny(id string) error {
+	if m.IsLeader() {
+		return m.Remove(id)
+	}
+	return m.forwardAdmin(adminRequest{Op: "remove", ID: id})
+}
+
+type adminRequest struct {
+	Op             string `json:"op"`
+	ID             string `json:"id"`
+	Address        string `json:"address,omitempty"`
+	ControlAddress string `json:"control_address,omitempty"`
+	Voter          bool   `json:"voter,omitempty"`
+}
+
+func (m *Mesh) forwardAdmin(req adminRequest) error {
+	leader := m.Leader()
+	if leader == "" {
+		return errors.New("mesh: no leader for admin operation")
+	}
+	address := m.peerAddress(leader)
+	if address == "" {
+		return fmt.Errorf("mesh: unknown leader %q control address", leader)
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/internal/mesh/admin", bytes.NewReader(body)) //nolint:gosec // operator-configured peer
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(AdminSecretHeader, m.cfg.Secret)
+	resp, err := m.client.Do(httpReq) //nolint:gosec // operator-configured peer
+	if err != nil {
+		return fmt.Errorf("mesh: forward admin to %s: %w", leader, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("mesh: forward admin to %s: HTTP %d: %s", leader, resp.StatusCode, message)
+	}
+	return nil
+}
+
+// AdminHandler applies a forwarded admin operation on the leader.
+func (m *Mesh) AdminHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !constantTimeEqual(r.Header.Get(AdminSecretHeader), m.cfg.Secret) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		var req adminRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		var err error
+		switch req.Op {
+		case "join":
+			err = m.Join(req.ID, req.Address, req.ControlAddress, req.Voter)
+		case "promote":
+			err = m.Promote(req.ID)
+		case "remove":
+			err = m.Remove(req.ID)
+		default:
+			http.Error(w, "unknown operation", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
 // ForceSingle resets this node into a one-voter cluster for disaster recovery.
 // The operator must ensure all other nodes are permanently fenced first.
 func (m *Mesh) ForceSingle() error {
@@ -676,15 +773,3 @@ func (w *slogWriter) Write(data []byte) (int, error) {
 
 // AdminSecretHeader is the header used for inter-center calls.
 const AdminSecretHeader = "X-Fleet-Mesh-Secret" //nolint:gosec // header name, not a credential
-
-// FormatPeerAddress validates and normalizes a raft peer address.
-func FormatPeerAddress(address string) (string, error) {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil || host == "" || port == "" {
-		return "", fmt.Errorf("mesh: invalid peer address %q: expected host:port", address)
-	}
-	if _, err := strconv.Atoi(port); err != nil {
-		return "", fmt.Errorf("mesh: invalid peer port in %q", address)
-	}
-	return net.JoinHostPort(host, port), nil
-}

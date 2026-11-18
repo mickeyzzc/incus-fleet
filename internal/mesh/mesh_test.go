@@ -240,14 +240,6 @@ func TestMeshConfigValidationAndHelpers(t *testing.T) {
 			t.Fatalf("New(%#v) expected error", cfg)
 		}
 	}
-	for _, invalid := range []string{"bad", "host:bad", ":9443"} {
-		if _, err := FormatPeerAddress(invalid); err == nil {
-			t.Fatalf("FormatPeerAddress(%q) expected error", invalid)
-		}
-	}
-	if got, err := FormatPeerAddress("192.0.2.10:8443"); err != nil || got != "192.0.2.10:8443" {
-		t.Fatalf("FormatPeerAddress = %q, %v", got, err)
-	}
 	if !constantTimeEqual("abc", "abc") || constantTimeEqual("abc", "abd") || constantTimeEqual("a", "ab") {
 		t.Fatal("constantTimeEqual mismatch")
 	}
@@ -396,6 +388,15 @@ func TestRaftThreeNodeConsensus(t *testing.T) {
 	}
 	if err := follower.ClearOwnerAny("forwarded"); err != nil {
 		t.Fatalf("forward to good leader = %v", err)
+	}
+	if err := follower.JoinAny("new-node", "127.0.0.1:19894", "", false); err != nil {
+		t.Fatalf("forward join = %v", err)
+	}
+	if err := follower.PromoteAny("new-node"); err != nil {
+		t.Fatalf("forward promote = %v", err)
+	}
+	if err := follower.RemoveAny("new-node"); err != nil {
+		t.Fatalf("forward remove = %v", err)
 	}
 
 	deadline = time.Now().Add(10 * time.Second)
@@ -785,6 +786,29 @@ func TestOwnerAnyOnLeader(t *testing.T) {
 	if m.Owner("a1") != "" {
 		t.Fatal("owner not cleared")
 	}
+	adminBody, _ := json.Marshal(adminRequest{Op: "join", ID: "app-c", Address: "127.0.0.1:19892"})
+	rec := httptest.NewRecorder()
+	adminReq := httptest.NewRequest(http.MethodPost, "/internal/mesh/admin", bytes.NewReader(adminBody))
+	adminReq.Header.Set(AdminSecretHeader, "s")
+	m.AdminHandler().ServeHTTP(rec, adminReq)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("AdminHandler join = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := m.peerAddress("app-c"); got != "127.0.0.1:19892" {
+		t.Fatalf("raft peer fallback address = %q", got)
+	}
+	if err := m.RemoveAny("app-c"); err != nil {
+		t.Fatalf("RemoveAny(app-c) = %v", err)
+	}
+	if err := m.JoinAny("app-b", "127.0.0.1:19893", "", false); err != nil {
+		t.Fatalf("JoinAny on leader = %v", err)
+	}
+	if err := m.PromoteAny("app-b"); err != nil {
+		t.Fatalf("PromoteAny on leader = %v", err)
+	}
+	if err := m.RemoveAny("app-b"); err != nil {
+		t.Fatalf("RemoveAny on leader = %v", err)
+	}
 }
 
 func TestOwnerExpiry(t *testing.T) {
@@ -889,4 +913,63 @@ func TestRaftLeaderFailover(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("owner not replicated after failover: %q", peer.Owner("agent-failover"))
+}
+
+func TestAdminHandlerAndAny(t *testing.T) {
+	m := newTestMesh(t, nil)
+	handler := m.AdminHandler()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/internal/mesh/admin", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("admin auth = %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/internal/mesh/admin", strings.NewReader("{bad"))
+	req.Header.Set(AdminSecretHeader, "mesh-secret")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("admin bad json = %d", rec.Code)
+	}
+	body, _ := json.Marshal(adminRequest{Op: "unknown", ID: "x"})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/internal/mesh/admin", bytes.NewReader(body))
+	req.Header.Set(AdminSecretHeader, "mesh-secret")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("admin unknown = %d", rec.Code)
+	}
+	body, _ = json.Marshal(adminRequest{Op: "remove", ID: "x"})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/internal/mesh/admin", bytes.NewReader(body))
+	req.Header.Set(AdminSecretHeader, "mesh-secret")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("admin remove without raft = %d", rec.Code)
+	}
+
+	if err := m.JoinAny("x", "127.0.0.1:1", "", false); err == nil {
+		t.Fatal("JoinAny without leader expected error")
+	}
+	if err := m.PromoteAny("x"); err == nil {
+		t.Fatal("PromoteAny without leader expected error")
+	}
+	if err := m.RemoveAny("x"); err == nil {
+		t.Fatal("RemoveAny without leader expected error")
+	}
+}
+
+func TestAdminForwardingToLeader(t *testing.T) {
+	leader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer leader.Close()
+	m := newTestMesh(t, nil)
+	m.controls["the-leader"] = leader.Listener.Addr().String()
+	m.cfg.Peers = append(m.cfg.Peers, Peer{ID: "the-leader", Address: "127.0.0.1:19890", ControlAddress: leader.Listener.Addr().String()})
+	// Without a raft leader the forwarder must fail fast.
+	if err := m.JoinAny("x", "127.0.0.1:1", "", false); err == nil {
+		t.Fatal("forward without known leader expected error")
+	}
 }

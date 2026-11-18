@@ -572,6 +572,7 @@ POST /api/v1/tasks
 | `POST /api/v1/mesh/remove` | 从 voter 集合移除节点 |
 | `POST /internal/mesh/dispatch` | 内部认证中继；由 `X-Fleet-Mesh-Secret` 保护 |
 | `POST /internal/mesh/owner` | 内部转发的 owner 注册；同样由该密钥保护 |
+| `POST /internal/mesh/admin` | 内部转发给 leader 的 join/promote/remove；同样由该密钥保护 |
 
 `clusters[].endpoints` 可配置额外的 Incus API 地址用于故障切换；manager 会在后台重连离线集群。
 

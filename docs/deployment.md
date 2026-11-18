@@ -708,16 +708,19 @@ clusters:
 Losing quorum (two of three voters down) stops writes. To temporarily restore a single-center
 service, fence the lost nodes first, back up the survivor, then call:
 
+Send this **directly to the survivor**, not through the load balancer:
+
 ```bash
 curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"confirm":true}' \
-  https://fleet.example/api/v1/mesh/force-single
+  https://192.0.2.20:8080/api/v1/mesh/force-single
 ```
 
 This resets the survivor into a one-voter cluster. Point Caddy/VIP only at the survivor; agents
 reconnect to the same URL. When the other nodes return, wipe their mesh data directories and add
-them as non-voters, then promote after they catch up:
+them as non-voters, then promote after they catch up. Join/promote/remove are forwarded to the Raft
+leader, so they can go through the normal load-balanced API URL:
 
 ```bash
 curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \

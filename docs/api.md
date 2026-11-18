@@ -640,6 +640,7 @@ passwords, Incus join tokens, and private keys are never stored in tasks or audi
 | `POST /api/v1/mesh/remove` | remove a node from the voter set |
 | `POST /internal/mesh/dispatch` | internal authenticated relay; guarded by `X-Fleet-Mesh-Secret` |
 | `POST /internal/mesh/owner` | internal forwarded owner registration; same secret guard |
+| `POST /internal/mesh/admin` | internal leader-forwarded join/promote/remove; same secret guard |
 
 `clusters[].endpoints` can list additional Incus API endpoints for failover; the manager retries
 offline clusters in the background.

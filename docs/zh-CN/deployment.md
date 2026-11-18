@@ -675,11 +675,13 @@ clusters:
 失去 quorum（3 个节点挂 2 个）后会停止写入。要临时恢复单中心服务，先隔离失效节点、备份幸存
 节点，然后调用：
 
+该请求必须**直接发送给幸存节点**，不要经过负载均衡：
+
 ```bash
 curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"confirm":true}' \
-  https://fleet.example/api/v1/mesh/force-single
+  https://192.0.2.20:8080/api/v1/mesh/force-single
 ```
 
 这会把幸存节点重置为单 voter 集群。Caddy/VIP 只指向该节点；agent 用同一个 URL 重连。其他节点

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -123,4 +124,14 @@ func containsText(s, sub string) bool {
 		}
 		return false
 	})()
+}
+
+func TestMeshStatusDirect(t *testing.T) {
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	api := New(Deps{Auth: f.auth, Version: "test"})
+	rec := httptest.NewRecorder()
+	api.meshStatus(rec, httptest.NewRequest(http.MethodGet, "/api/v1/mesh/status", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("nil mesh status = %d", rec.Code)
+	}
 }

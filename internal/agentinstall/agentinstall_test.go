@@ -291,4 +291,10 @@ func TestMultiArchInstaller(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unsupported arch = %d", rec.Code)
 	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/agent/install/helper?arch=riscv64", nil)
+	handler.serveHelper(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unsupported helper arch = %d", rec.Code)
+	}
 }

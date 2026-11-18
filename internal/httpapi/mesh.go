@@ -58,7 +58,7 @@ func (a *API) meshJoin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "id and address are required")
 		return
 	}
-	if err := a.mesh.Join(req.ID, req.Address, req.ControlAddress, req.Voter); err != nil {
+	if err := a.mesh.JoinAny(req.ID, req.Address, req.ControlAddress, req.Voter); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}
@@ -81,7 +81,7 @@ func (a *API) meshPromote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "id is required")
 		return
 	}
-	if err := a.mesh.Promote(req.ID); err != nil {
+	if err := a.mesh.PromoteAny(req.ID); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}
@@ -104,7 +104,7 @@ func (a *API) meshRemove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "id is required")
 		return
 	}
-	if err := a.mesh.Remove(req.ID); err != nil {
+	if err := a.mesh.RemoveAny(req.ID); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}

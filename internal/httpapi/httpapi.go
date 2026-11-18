@@ -133,6 +133,7 @@ func (a *API) Handler() http.Handler {
 	if a.mesh != nil {
 		mux.Handle("POST /internal/mesh/dispatch", a.mesh.DispatchHandler())
 		mux.Handle("POST /internal/mesh/owner", a.mesh.OwnerHandler())
+		mux.Handle("POST /internal/mesh/admin", a.mesh.AdminHandler())
 		mux.Handle("GET /api/v1/mesh/status", a.requireAuth(http.HandlerFunc(a.meshStatus)))
 		mux.Handle("POST /api/v1/mesh/force-single", a.requireAuth(http.HandlerFunc(a.meshForceSingle)))
 		mux.Handle("POST /api/v1/mesh/join", a.requireAuth(http.HandlerFunc(a.meshJoin)))
