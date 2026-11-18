@@ -92,7 +92,7 @@ func New(cfg Config, logger *slog.Logger) (*Mesh, error) {
 
 	return &Mesh{
 		cfg: cfg, logger: logger, fsm: NewFSM(), controls: make(map[string]string),
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{},
 	}, nil
 }
 
@@ -466,7 +466,7 @@ func (m *Mesh) Promote(id string) error {
 	if node == nil || node.State() != raft.Leader {
 		return raft.ErrNotLeader
 	}
-	return node.AddVoter(raft.ServerID(id), raft.ServerAddress(m.peerAddress(id)), 0, 5*time.Second).Error()
+	return node.AddVoter(raft.ServerID(id), raft.ServerAddress(m.raftAddress(id)), 0, 5*time.Second).Error()
 }
 
 // Remove drops a node from the voter set.
@@ -507,6 +507,24 @@ func (m *Mesh) ForceSingle() error {
 	m.fsm.Reset()
 	m.logger.Warn("raft forced to single-node mode", "node_id", m.cfg.NodeID)
 	return nil
+}
+
+func (m *Mesh) raftAddress(id string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, peer := range m.cfg.Peers {
+		if peer.ID == id {
+			return peer.Address
+		}
+	}
+	if m.raft != nil {
+		for _, server := range m.raft.GetConfiguration().Configuration().Servers {
+			if string(server.ID) == id {
+				return string(server.Address)
+			}
+		}
+	}
+	return ""
 }
 
 func (m *Mesh) peerAddress(id string) string {
@@ -565,6 +583,11 @@ func (m *Mesh) Dispatch(ctx context.Context, agentID string, typ agentpb.TaskTyp
 	address := m.peerAddress(owner)
 	if address == "" {
 		return nil, fmt.Errorf("mesh: unknown owner %q for agent %s", owner, agentID)
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout+5*time.Second)
+		defer cancel()
 	}
 	request := dispatchRequest{
 		AgentID: agentID, TaskType: int32(typ), Payload: payload, TimeoutMS: timeout.Milliseconds(),

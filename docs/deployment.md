@@ -688,9 +688,10 @@ What the mesh replicates:
 Agents keep connecting to the single virtual `agent.install.gateway_url` (Caddy/VIP). They do not
 know which center is leader. The agent CA and server certificate must be shared by all centers.
 
-Cluster endpoints can also fail over. Configure `endpoints` in addition to `endpoint`; the manager
-tries them in order, health-checks the active client every 10 seconds, and moves to the next endpoint
-when the current one stops answering:
+Cluster endpoints can also fail over. Configure `endpoints` in addition to `endpoint`; when the list
+is present it replaces `endpoint` for dialing, so keep the first entry equal to `endpoint`. The
+manager tries them in order, health-checks the active client every 10 seconds, and moves to the next
+endpoint when the current one stops answering:
 
 ```yaml
 clusters:

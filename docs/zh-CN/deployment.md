@@ -657,8 +657,9 @@ mesh 复制以下状态：
 agent 始终连接虚拟的 `agent.install.gateway_url`（Caddy/VIP），不知道当前 leader 是谁。所有
 center 必须共享 agent CA 和服务端证书。
 
-集群 endpoint 也支持故障切换：在 `endpoint` 之外配置 `endpoints`，manager 按顺序尝试，并每 10 秒
-对当前 client 做健康检查，发现无响应时切到下一个 endpoint：
+集群 endpoint 也支持故障切换：在 `endpoint` 之外配置 `endpoints`；列表存在时会替代 `endpoint`
+用于拨号，因此第一项应与 `endpoint` 相同。manager 按顺序尝试，并每 10 秒对当前 client 做健康检查，
+发现无响应时切到下一个 endpoint：
 
 ```yaml
 clusters:
