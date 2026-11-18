@@ -56,6 +56,13 @@ var schemaMigrations = []schemaMigration{
 			`ALTER TABLE host_tasks ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''`,
 		},
 	},
+	{
+		version: 5,
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, expires_at BIGINT NOT NULL)`,
+			`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)`,
+		},
+	},
 }
 
 func (s *SQLStore) migrate(ctx context.Context) error {

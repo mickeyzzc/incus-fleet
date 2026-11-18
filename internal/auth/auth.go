@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -13,14 +14,30 @@ import (
 // ErrInvalidToken is returned for wrong credentials.
 var ErrInvalidToken = errors.New("auth: invalid token")
 
+// SessionStore persists sessions across center instances.
+type SessionStore interface {
+	CreateSession(ctx context.Context, id string, expires time.Time) error
+	GetSession(ctx context.Context, id string) (time.Time, error)
+	DeleteSession(ctx context.Context, id string) error
+	CleanupSessions(ctx context.Context, now time.Time) error
+}
+
 // Authenticator validates the shared admin token and manages sessions.
 type Authenticator struct {
 	token []byte
 	ttl   time.Duration
 	now   func() time.Time
+	store SessionStore
 
 	mu       sync.Mutex
 	sessions map[string]time.Time
+}
+
+// NewWithStore creates an authenticator backed by a shared session store.
+func NewWithStore(token string, ttl time.Duration, store SessionStore) *Authenticator {
+	a := New(token, ttl)
+	a.store = store
+	return a
 }
 
 // New creates an authenticator. Empty tokens are rejected by Login.
@@ -63,6 +80,13 @@ func (a *Authenticator) Login(token string) (string, time.Time, error) {
 	id := base64.RawURLEncoding.EncodeToString(buf[:])
 	expires := a.now().Add(a.ttl)
 
+	if a.store != nil {
+		if err := a.store.CreateSession(context.Background(), id, expires); err != nil {
+			return "", time.Time{}, err
+		}
+		return id, expires, nil
+	}
+
 	a.mu.Lock()
 	a.sessions[id] = expires
 	a.cleanupLocked()
@@ -75,6 +99,17 @@ func (a *Authenticator) Login(token string) (string, time.Time, error) {
 func (a *Authenticator) ValidateSession(id string) bool {
 	if id == "" {
 		return false
+	}
+
+	if a.store != nil {
+		expires, err := a.store.GetSession(context.Background(), id)
+		if err != nil || !a.now().Before(expires) {
+			if err == nil {
+				_ = a.store.DeleteSession(context.Background(), id)
+			}
+			return false
+		}
+		return true
 	}
 
 	a.mu.Lock()
@@ -94,6 +129,10 @@ func (a *Authenticator) ValidateSession(id string) bool {
 
 // Logout removes a session.
 func (a *Authenticator) Logout(id string) {
+	if a.store != nil {
+		_ = a.store.DeleteSession(context.Background(), id)
+		return
+	}
 	a.mu.Lock()
 	delete(a.sessions, id)
 	a.mu.Unlock()
@@ -101,6 +140,10 @@ func (a *Authenticator) Logout(id string) {
 
 // Cleanup removes expired sessions.
 func (a *Authenticator) Cleanup() {
+	if a.store != nil {
+		_ = a.store.CleanupSessions(context.Background(), a.now())
+		return
+	}
 	a.mu.Lock()
 	a.cleanupLocked()
 	a.mu.Unlock()

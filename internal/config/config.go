@@ -25,8 +25,30 @@ type Config struct {
 	Agent       AgentConfig   `yaml:"agent"`
 	Metrics     MetricsConfig `yaml:"metrics"`
 	HA          HAConfig      `yaml:"ha"`
+	Mesh        MeshConfig    `yaml:"mesh"`
 	LocalMember string        `yaml:"local_member"`
 	Clusters    []Cluster     `yaml:"clusters"`
+}
+
+// MeshConfig configures the Raft center mesh. A healthy deployment has an odd
+// number of voters: three centers, or two centers plus one witness.
+type MeshConfig struct {
+	Enabled        bool       `yaml:"enabled"`
+	NodeID         string     `yaml:"node_id"`
+	Address        string     `yaml:"address"`
+	ControlAddress string     `yaml:"control_address"`
+	DataDir        string     `yaml:"data_dir"`
+	Peers          []MeshPeer `yaml:"peers"`
+	Witness        bool       `yaml:"witness"`
+	ForceSingle    bool       `yaml:"force_single"`
+	Secret         string     `yaml:"secret"`
+}
+
+// MeshPeer is one voting participant, including witnesses.
+type MeshPeer struct {
+	ID             string `yaml:"id"`
+	Address        string `yaml:"address"`
+	ControlAddress string `yaml:"control_address"`
 }
 
 // AgentConfig is reserved for the host agent gateway. It is disabled until
@@ -137,13 +159,14 @@ type Database struct {
 
 // Cluster describes one Incus cluster endpoint.
 type Cluster struct {
-	Name          string `yaml:"name"`
-	DisplayName   string `yaml:"display_name"`
-	Endpoint      string `yaml:"endpoint"`
-	Project       string `yaml:"project"`
-	TLSCert       string `yaml:"tls_cert"`
-	TLSKey        string `yaml:"tls_key"`
-	TLSServerCert string `yaml:"tls_server_cert"`
+	Name          string   `yaml:"name"`
+	DisplayName   string   `yaml:"display_name"`
+	Endpoint      string   `yaml:"endpoint"`
+	Endpoints     []string `yaml:"endpoints"`
+	Project       string   `yaml:"project"`
+	TLSCert       string   `yaml:"tls_cert"`
+	TLSKey        string   `yaml:"tls_key"`
+	TLSServerCert string   `yaml:"tls_server_cert"`
 }
 
 // Load reads, applies environment overrides, validates, and verifies files.
@@ -222,6 +245,9 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("INCUS_FLEET_METRICS_REMOTE_WRITE_SPOOL_PARTITION"); v != "" {
 		c.Metrics.RemoteWrite.SpoolPartition = v
 	}
+	if v := os.Getenv("INCUS_FLEET_MESH_SECRET"); v != "" {
+		c.Mesh.Secret = v
+	}
 	if v := os.Getenv("INCUS_FLEET_METRICS_QUERY_URL"); v != "" {
 		c.Metrics.Query.URL = v
 	}
@@ -298,6 +324,9 @@ func (c *Config) applyDefaults() {
 	}
 
 	for i := range c.Clusters {
+		if strings.TrimSpace(c.Clusters[i].Endpoint) == "" && len(c.Clusters[i].Endpoints) > 0 {
+			c.Clusters[i].Endpoint = c.Clusters[i].Endpoints[0]
+		}
 		if c.Clusters[i].Project == "" {
 			c.Clusters[i].Project = "default"
 		}
@@ -340,6 +369,12 @@ func (c *Config) Validate() error {
 	if err := c.HA.validate(); err != nil {
 		return err
 	}
+	if err := c.Mesh.validate(); err != nil {
+		return err
+	}
+	if c.Mesh.Enabled && !c.Mesh.Witness && !c.Agent.Enabled {
+		return fmt.Errorf("config: mesh requires agent.enabled on non-witness nodes")
+	}
 	if err := c.Agent.validate(); err != nil {
 		return err
 	}
@@ -362,9 +397,11 @@ func (c *Config) Validate() error {
 		}
 		seen[cl.Name] = struct{}{}
 
-		u, err := url.Parse(cl.Endpoint)
-		if err != nil || u.Scheme != "https" || u.Host == "" {
-			return fmt.Errorf("config: cluster %q endpoint must be a valid https URL", cl.Name)
+		for _, endpoint := range ClusterEndpoints(*cl) {
+			u, err := url.Parse(endpoint)
+			if err != nil || u.Scheme != "https" || u.Host == "" {
+				return fmt.Errorf("config: cluster %q endpoint must be a valid https URL", cl.Name)
+			}
 		}
 		if strings.TrimSpace(cl.TLSCert) == "" || strings.TrimSpace(cl.TLSKey) == "" {
 			return fmt.Errorf("config: cluster %q tls_cert and tls_key are required", cl.Name)
@@ -479,6 +516,17 @@ func (c *Config) ValidateFiles() error {
 	return nil
 }
 
+// ClusterEndpoints returns all configured endpoints in dial order.
+func ClusterEndpoints(c Cluster) []string {
+	if len(c.Endpoints) > 0 {
+		return append([]string(nil), c.Endpoints...)
+	}
+	if strings.TrimSpace(c.Endpoint) == "" {
+		return nil
+	}
+	return []string{c.Endpoint}
+}
+
 // ClusterByName returns a cluster by name.
 func (c *Config) ClusterByName(name string) (Cluster, bool) {
 	for i := range c.Clusters {
@@ -537,6 +585,48 @@ func (a AgentConfig) validate() error {
 		return fmt.Errorf("config: agent.install.helper_binary is required")
 	}
 
+	return nil
+}
+
+func (m MeshConfig) validate() error {
+	if !m.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(m.NodeID) == "" || strings.TrimSpace(m.Address) == "" ||
+		strings.TrimSpace(m.DataDir) == "" || strings.TrimSpace(m.Secret) == "" {
+		return fmt.Errorf("config: mesh.node_id, address, data_dir and secret are required")
+	}
+	if _, _, err := net.SplitHostPort(strings.TrimSpace(m.Address)); err != nil {
+		return fmt.Errorf("config: mesh.address %q must be host:port", m.Address)
+	}
+	if _, _, err := net.SplitHostPort(strings.TrimSpace(m.ControlAddress)); err != nil {
+		return fmt.Errorf("config: mesh.control_address %q must be host:port", m.ControlAddress)
+	}
+	if len(m.Peers) == 0 {
+		return fmt.Errorf("config: mesh.peers is required")
+	}
+	if len(m.Peers)%2 == 0 {
+		return fmt.Errorf("config: mesh.peers must contain an odd number of voters (use a witness)")
+	}
+	seen := make(map[string]bool, len(m.Peers))
+	for _, peer := range m.Peers {
+		if strings.TrimSpace(peer.ID) == "" {
+			return fmt.Errorf("config: mesh peer id is required")
+		}
+		if seen[peer.ID] {
+			return fmt.Errorf("config: duplicate mesh peer %q", peer.ID)
+		}
+		seen[peer.ID] = true
+		if _, _, err := net.SplitHostPort(strings.TrimSpace(peer.Address)); err != nil {
+			return fmt.Errorf("config: mesh peer %q address must be host:port", peer.ID)
+		}
+		if _, _, err := net.SplitHostPort(strings.TrimSpace(peer.ControlAddress)); err != nil {
+			return fmt.Errorf("config: mesh peer %q control_address must be host:port", peer.ID)
+		}
+	}
+	if !seen[m.NodeID] {
+		return fmt.Errorf("config: mesh.node_id must appear in mesh.peers")
+	}
 	return nil
 }
 

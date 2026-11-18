@@ -63,6 +63,16 @@ func WithTelemetry(store *telemetry.Store) Option {
 	return func(g *Gateway) { g.telemetry = store }
 }
 
+// WithConnectHook notifies the mesh when an agent connects locally.
+func WithConnectHook(fn func(string)) Option {
+	return func(g *Gateway) { g.onConnect = fn }
+}
+
+// WithDisconnectHook notifies the mesh when an agent disconnects locally.
+func WithDisconnectHook(fn func(string)) Option {
+	return func(g *Gateway) { g.onDisconnect = fn }
+}
+
 // Gateway serves enrollment and mTLS WebSocket connections.
 type Gateway struct {
 	store             *store.SQLStore
@@ -71,6 +81,8 @@ type Gateway struct {
 	heartbeatInterval time.Duration
 	certTTL           time.Duration
 	telemetry         *telemetry.Store
+	onConnect         func(string)
+	onDisconnect      func(string)
 
 	mu      sync.Mutex
 	conns   map[string]*agentConn
@@ -350,7 +362,15 @@ func (g *Gateway) connect(w http.ResponseWriter, r *http.Request) {
 		done: make(chan struct{}),
 	}
 	g.register(conn)
-	defer g.unregister(conn)
+	if g.onConnect != nil {
+		g.onConnect(agentID)
+	}
+	defer func() {
+		g.unregister(conn)
+		if g.onDisconnect != nil {
+			g.onDisconnect(agentID)
+		}
+	}()
 	defer conn.close()
 
 	go conn.writeLoop()

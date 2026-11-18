@@ -413,3 +413,154 @@ func TestDefaultDialInvalidFiles(t *testing.T) {
 		t.Fatal("invalid TLS material expected connect error")
 	}
 }
+
+func TestEndpointFailover(t *testing.T) {
+	cfg := testConfig("c1")
+	cfg.Endpoints = []string{"https://192.0.2.10:8443", "https://192.0.2.11:8443"}
+	var attempted []string
+	dial := func(_ context.Context, target config.Cluster) (InstanceServer, error) {
+		attempted = append(attempted, target.Endpoint)
+		if target.Endpoint == cfg.Endpoints[0] {
+			return nil, errors.New("primary endpoint down")
+		}
+		return &incusfake.Server{}, nil
+	}
+	m, err := NewWithDialer(context.Background(), []config.Cluster{cfg}, dial, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Close)
+
+	conn, err := m.Connection("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Client(); err != nil {
+		t.Fatalf("Client() error = %v", err)
+	}
+	if got := conn.ActiveEndpoint(); got != cfg.Endpoints[1] {
+		t.Fatalf("ActiveEndpoint = %q", got)
+	}
+	if len(attempted) != 2 || attempted[0] != cfg.Endpoints[0] || attempted[1] != cfg.Endpoints[1] {
+		t.Fatalf("dial attempts = %v", attempted)
+	}
+
+	if _, err := m.Reconnect(context.Background(), "c1"); err != nil {
+		t.Fatalf("Reconnect() error = %v", err)
+	}
+	if got := conn.ActiveEndpoint(); got != cfg.Endpoints[1] {
+		t.Fatalf("ActiveEndpoint after reconnect = %q", got)
+	}
+}
+
+func TestClusterWatchStopsOnCancel(t *testing.T) {
+	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")},
+		fakeDialer(map[string]InstanceServer{"c1": &incusfake.Server{}}, nil), testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		m.watch(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watch did not stop")
+	}
+}
+
+func TestClusterWatchRetriesOffline(t *testing.T) {
+	var attempts atomic.Int32
+	dial := func(context.Context, config.Cluster) (InstanceServer, error) {
+		attempts.Add(1)
+		return nil, errors.New("offline")
+	}
+	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")}, dial, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Close)
+	m.watchInterval = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.watch(ctx)
+		close(done)
+	}()
+	time.Sleep(80 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watch did not stop")
+	}
+	if attempts.Load() < 2 {
+		t.Fatalf("watch attempts = %d", attempts.Load())
+	}
+}
+
+func TestClusterWatchSuccessBranch(t *testing.T) {
+	var attempts atomic.Int32
+	dial := func(context.Context, config.Cluster) (InstanceServer, error) {
+		if attempts.Add(1) < 3 {
+			return nil, errors.New("offline")
+		}
+		return &incusfake.Server{}, nil
+	}
+	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")}, dial, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Close)
+	m.watchInterval = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.watch(ctx)
+		close(done)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := m.Connection("c1")
+		if err == nil {
+			if _, err := conn.Client(); err == nil {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	conn, err := m.Connection("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Client(); err != nil {
+		t.Fatalf("watch did not reconnect: %v", err)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watch did not stop")
+	}
+}
+
+func TestConnectionWithoutEndpoints(t *testing.T) {
+	cfg := testConfig("c1")
+	cfg.Endpoint = ""
+	cfg.Endpoints = nil
+	conn := &Connection{cfg: cfg, endpoints: config.ClusterEndpoints(cfg)}
+	if err := conn.connect(context.Background(), func(context.Context, config.Cluster) (InstanceServer, error) {
+		t.Fatal("dial should not be called")
+		return nil, nil
+	}); err == nil {
+		t.Fatal("connect without endpoints expected error")
+	}
+	if got := conn.ActiveEndpoint(); got != "" {
+		t.Fatalf("ActiveEndpoint = %q", got)
+	}
+}

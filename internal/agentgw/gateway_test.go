@@ -675,3 +675,19 @@ func TestRenewBranches(t *testing.T) {
 		t.Fatalf("no cert renew = %d", rec.Code)
 	}
 }
+
+func TestGatewayHooks(t *testing.T) {
+	called := 0
+	gw := New(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WithConnectHook(func(string) { called++ }),
+		WithDisconnectHook(func(string) { called++ }),
+	)
+	if gw.onConnect == nil || gw.onDisconnect == nil {
+		t.Fatal("hooks not installed")
+	}
+	gw.onConnect("a")
+	gw.onDisconnect("a")
+	if called != 2 {
+		t.Fatalf("hook calls = %d", called)
+	}
+}

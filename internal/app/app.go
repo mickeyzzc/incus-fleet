@@ -18,12 +18,14 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/agentgw"
 	"github.com/mickeyzzc/incus-fleet/internal/agentinstall"
 	"github.com/mickeyzzc/incus-fleet/internal/agentops"
+	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
 	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
 	"github.com/mickeyzzc/incus-fleet/internal/httpapi"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
+	"github.com/mickeyzzc/incus-fleet/internal/mesh"
 	"github.com/mickeyzzc/incus-fleet/internal/metricsquery"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
 	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
@@ -68,6 +70,12 @@ type App struct {
 	remoteWrite  *remotewrite.Writer
 	metricsQuery *metricsquery.Proxy
 	taskRunner   *taskrunner.Runner
+	mesh         *mesh.Mesh
+}
+
+// agentDispatch is the transport used by both async tasks and sync node ops.
+type agentDispatch interface {
+	Dispatch(ctx context.Context, agentID string, typ agentpb.TaskType, payload []byte, timeout time.Duration) (*agentpb.TaskResult, error)
 }
 
 // New builds all services and the HTTP handler.
@@ -115,7 +123,12 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	}
 	nodeAccess := nodeaccess.New(manager, localNodeNet, cfg.NodeAccess, nodeOptions...)
 	nodeJoin := nodejoin.New(manager, cfg.NodeAccess, logger)
-	authenticator := auth.New(cfg.Server.AuthToken, 12*time.Hour)
+	var authenticator *auth.Authenticator
+	if cfg.Mesh.Enabled {
+		authenticator = auth.NewWithStore(cfg.Server.AuthToken, 12*time.Hour, st)
+	} else {
+		authenticator = auth.New(cfg.Server.AuthToken, 12*time.Hour)
+	}
 
 	var (
 		agentGW  *agentgw.Gateway
@@ -178,8 +191,40 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		})
 	}
 	var agentInstall *agentinstall.Handler
+	var centerMesh *mesh.Mesh
 	var taskRunner *taskrunner.Runner
-	if cfg.HA.Enabled {
+	var agentDispatcher agentDispatch
+	if cfg.Mesh.Enabled {
+		peers := make([]mesh.Peer, 0, len(cfg.Mesh.Peers))
+		for _, peer := range cfg.Mesh.Peers {
+			peers = append(peers, mesh.Peer{
+				ID: peer.ID, Address: peer.Address, ControlAddress: peer.ControlAddress,
+			})
+		}
+		if cfg.Mesh.ForceSingle {
+			peers = []mesh.Peer{{
+				ID: cfg.Mesh.NodeID, Address: cfg.Mesh.Address, ControlAddress: cfg.Mesh.ControlAddress,
+			}}
+		}
+		centerMesh, err = mesh.New(mesh.Config{
+			Enabled: cfg.Mesh.Enabled, NodeID: cfg.Mesh.NodeID, Address: cfg.Mesh.Address,
+			ControlAddress: cfg.Mesh.ControlAddress, DataDir: cfg.Mesh.DataDir,
+			Peers: peers, Witness: cfg.Mesh.Witness, Secret: cfg.Mesh.Secret,
+		}, logger)
+		if err != nil {
+			manager.Close()
+			_ = st.Close()
+			return nil, err
+		}
+		if err := centerMesh.Start(); err != nil {
+			_ = centerMesh.Close()
+			manager.Close()
+			_ = st.Close()
+			return nil, err
+		}
+	}
+
+	if cfg.HA.Enabled && (centerMesh == nil || !cfg.Mesh.Witness) {
 		worker := strings.TrimSpace(cfg.HA.WorkerID)
 		if worker == "" {
 			hostname, _ := os.Hostname()
@@ -207,8 +252,27 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		if telemetryStore != nil {
 			options = append(options, agentgw.WithTelemetry(telemetryStore))
 		}
+		if centerMesh != nil {
+			options = append(options,
+				agentgw.WithConnectHook(func(agentID string) {
+					if err := centerMesh.SetOwnerAny(agentID, cfg.Mesh.NodeID); err != nil {
+						logger.Warn("mesh: record agent owner failed", "agent", agentID, "error", err)
+					}
+				}),
+				agentgw.WithDisconnectHook(func(agentID string) {
+					if err := centerMesh.ClearOwnerAny(agentID); err != nil {
+						logger.Warn("mesh: clear agent owner failed", "agent", agentID, "error", err)
+					}
+				}),
+			)
+		}
 		agentGW = agentgw.New(st, ca, logger, options...)
 		agentTLS = agentGW.TLSConfig(serverCert)
+		agentDispatcher = agentGW
+		if centerMesh != nil {
+			centerMesh.SetDispatcher(agentDispatcher)
+			agentDispatcher = centerMesh
+		}
 		if cfg.Agent.Install.Enabled {
 			agentInstall, err = agentinstall.New(agentinstall.Config{
 				GatewayURL:   cfg.Agent.Install.GatewayURL,
@@ -222,11 +286,11 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 				return nil, err
 			}
 		}
-		nodeAccess.SetAgentResolver(agentops.New(agentGW, st).Resolve)
+		nodeAccess.SetAgentResolver(agentops.New(agentDispatcher, st).Resolve)
 		if taskRunner != nil {
-			taskRunner.Register(taskrunner.AgentNetworkTask, taskrunner.AgentNetworkHandler(agentGW, st))
-			taskRunner.Register(taskrunner.AgentBootstrapTask, taskrunner.AgentBootstrapHandler(agentGW, st))
-			taskRunner.Register(taskrunner.AgentSnapshotTask, taskrunner.AgentSnapshotHandler(agentGW, st))
+			taskRunner.Register(taskrunner.AgentNetworkTask, taskrunner.AgentNetworkHandler(agentDispatcher, st))
+			taskRunner.Register(taskrunner.AgentBootstrapTask, taskrunner.AgentBootstrapHandler(agentDispatcher, st))
+			taskRunner.Register(taskrunner.AgentSnapshotTask, taskrunner.AgentSnapshotHandler(agentDispatcher, st))
 		}
 	}
 
@@ -263,6 +327,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		NodeJoin:     nodeJoin,
 		Agent:        agentGW,
 		AgentInstall: agentInstall,
+		Mesh:         centerMesh,
 		Bootstrap:    agentGW,
 		CertIssuer:   agentGW,
 		Telemetry:    telemetryStore,
@@ -304,6 +369,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		remoteWrite:  remoteWriter,
 		metricsQuery: queryProxy,
 		taskRunner:   taskRunner,
+		mesh:         centerMesh,
 	}, nil
 }
 
@@ -391,6 +457,9 @@ func (a *App) Run(ctx context.Context) error {
 func (a *App) Close() error {
 	if a.remoteWrite != nil {
 		a.remoteWrite.Close()
+	}
+	if a.mesh != nil {
+		_ = a.mesh.Close()
 	}
 	a.clusters.Close()
 

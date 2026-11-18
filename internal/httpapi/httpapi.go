@@ -21,6 +21,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/hostops"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
+	"github.com/mickeyzzc/incus-fleet/internal/mesh"
 	"github.com/mickeyzzc/incus-fleet/internal/metricsquery"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
 	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
@@ -48,6 +49,7 @@ type Deps struct {
 	NodeJoin     *nodejoin.Service
 	Agent        AgentDispatcher
 	AgentInstall *agentinstall.Handler
+	Mesh         *mesh.Mesh
 	Bootstrap    BootstrapSigner
 	Telemetry    *telemetry.Store
 	MetricsSD    MetricsSDConfig
@@ -70,6 +72,7 @@ type API struct {
 	nodejoin     *nodejoin.Service
 	agent        AgentDispatcher
 	agentInstall *agentinstall.Handler
+	mesh         *mesh.Mesh
 	bootstrap    BootstrapSigner
 	telemetry    *telemetry.Store
 	metricsSD    MetricsSDConfig
@@ -98,6 +101,7 @@ func New(deps Deps) *API {
 		nodejoin:     deps.NodeJoin,
 		agent:        deps.Agent,
 		agentInstall: deps.AgentInstall,
+		mesh:         deps.Mesh,
 		bootstrap:    deps.Bootstrap,
 		telemetry:    deps.Telemetry,
 		metricsSD:    deps.MetricsSD,
@@ -125,6 +129,15 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/version", a.versionHandler)
 	if a.agentInstall != nil {
 		a.agentInstall.Register(mux)
+	}
+	if a.mesh != nil {
+		mux.Handle("POST /internal/mesh/dispatch", a.mesh.DispatchHandler())
+		mux.Handle("POST /internal/mesh/owner", a.mesh.OwnerHandler())
+		mux.Handle("GET /api/v1/mesh/status", a.requireAuth(http.HandlerFunc(a.meshStatus)))
+		mux.Handle("POST /api/v1/mesh/force-single", a.requireAuth(http.HandlerFunc(a.meshForceSingle)))
+		mux.Handle("POST /api/v1/mesh/join", a.requireAuth(http.HandlerFunc(a.meshJoin)))
+		mux.Handle("POST /api/v1/mesh/promote", a.requireAuth(http.HandlerFunc(a.meshPromote)))
+		mux.Handle("POST /api/v1/mesh/remove", a.requireAuth(http.HandlerFunc(a.meshRemove)))
 	}
 	mux.HandleFunc("POST /api/v1/auth/login", a.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", a.logout)

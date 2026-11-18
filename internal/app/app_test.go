@@ -2,11 +2,16 @@ package app
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"io"
 	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -434,5 +439,135 @@ func TestDefaultSpoolPartition(t *testing.T) {
 	partition := defaultSpoolPartition()
 	if !strings.Contains(partition, strconv.Itoa(os.Getpid())) || strings.TrimSpace(partition) == "" {
 		t.Fatalf("defaultSpoolPartition() = %q", partition)
+	}
+}
+
+func writeTestCA(t *testing.T, dir string) (string, string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "fleet-test-ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPath := filepath.Join(dir, "ca.crt")
+	keyPath := filepath.Join(dir, "ca.key")
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certPath, keyPath
+}
+
+func writeTestServerCert(t *testing.T, dir string) (string, string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "fleet.example"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		DNSNames: []string{"fleet.example"}, KeyUsage: x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPath := filepath.Join(dir, "server.crt")
+	keyPath := filepath.Join(dir, "server.key")
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certPath, keyPath
+}
+
+func TestNewWithMesh(t *testing.T) {
+	dir := t.TempDir()
+	caCert, caKey := writeTestCA(t, dir)
+	serverCert, serverKey := writeTestServerCert(t, dir)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+
+	cfg := testConfig(t)
+	cfg.Agent = config.AgentConfig{
+		Enabled: true, Listen: "127.0.0.1:18444", TLSCert: serverCert, TLSKey: serverKey,
+		ClientCA: caCert, CAKey: caKey,
+	}
+	cfg.HA = config.HAConfig{Enabled: true, WorkerID: "app-a", Lease: "30s", Interval: "1s"}
+	cfg.Mesh = config.MeshConfig{
+		Enabled: true, NodeID: "app-a", Address: address, ControlAddress: address,
+		DataDir: filepath.Join(dir, "mesh"), Secret: "mesh-secret", ForceSingle: true,
+		Peers: []config.MeshPeer{{ID: "app-a", Address: address, ControlAddress: address}},
+	}
+	application, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatalf("New(mesh) error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+	if application.mesh == nil || application.taskRunner == nil {
+		t.Fatal("mesh or task runner not wired")
+	}
+	if application.mesh.Owner("missing") != "" {
+		t.Fatal("unexpected owner")
+	}
+}
+
+func TestNewWithMeshWitness(t *testing.T) {
+	dir := t.TempDir()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+
+	cfg := testConfig(t)
+	cfg.Agent.Enabled = false
+	cfg.HA = config.HAConfig{Enabled: true, WorkerID: "witness", Lease: "30s", Interval: "1s"}
+	cfg.Mesh = config.MeshConfig{
+		Enabled: true, NodeID: "witness", Address: address, ControlAddress: address,
+		DataDir: filepath.Join(dir, "mesh"), Secret: "mesh-secret", ForceSingle: true,
+		Witness: true,
+		Peers:   []config.MeshPeer{{ID: "witness", Address: address, ControlAddress: address}},
+	}
+	application, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatalf("New(witness) error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+	if application.mesh == nil || application.taskRunner != nil {
+		t.Fatalf("witness wiring: mesh=%v taskRunner=%v", application.mesh, application.taskRunner)
 	}
 }

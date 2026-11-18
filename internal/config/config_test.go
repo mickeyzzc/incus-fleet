@@ -604,3 +604,101 @@ func TestHAConfigDefaultsAndValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestClusterEndpoints(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Clusters[0].Endpoint = ""
+	cfg.Clusters[0].Endpoints = []string{"https://192.0.2.10:8443", "https://192.0.2.11:8443"}
+	cfg.applyDefaults()
+	if cfg.Clusters[0].Endpoint != cfg.Clusters[0].Endpoints[0] {
+		t.Fatalf("primary endpoint = %q", cfg.Clusters[0].Endpoint)
+	}
+	if got := ClusterEndpoints(cfg.Clusters[0]); len(got) != 2 {
+		t.Fatalf("ClusterEndpoints = %v", got)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate(endpoints) error = %v", err)
+	}
+	cfg.Clusters[0].Endpoints[1] = "http://192.0.2.11:8443"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("invalid endpoint accepted")
+	}
+}
+
+func TestMeshConfigValidation(t *testing.T) {
+	base := minimalConfig()
+	base.Agent = AgentConfig{
+		Enabled: true, Listen: "0.0.0.0:8444", TLSCert: "/cert", TLSKey: "/key",
+		ClientCA: "/ca", CAKey: "/ca-key",
+	}
+	peers := []MeshPeer{
+		{ID: "app-a", Address: "192.0.2.20:9400", ControlAddress: "192.0.2.20:9401"},
+		{ID: "app-b", Address: "192.0.2.21:9400", ControlAddress: "192.0.2.21:9401"},
+		{ID: "witness", Address: "192.0.2.22:9400", ControlAddress: "192.0.2.22:9401"},
+	}
+	base.Mesh = MeshConfig{
+		Enabled: true, NodeID: "app-a", Address: "192.0.2.20:9400",
+		ControlAddress: "192.0.2.20:9401", DataDir: "/tmp/mesh-a", Secret: "mesh-secret", Peers: peers,
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("Validate(mesh) error = %v", err)
+	}
+	witness := base
+	witness.Mesh.Witness = true
+	witness.Agent.Enabled = false
+	if err := witness.Validate(); err != nil {
+		t.Fatalf("Validate(witness) error = %v", err)
+	}
+
+	cases := []struct {
+		name string
+		edit func(*Config)
+	}{
+		{"no peers", func(c *Config) { c.Mesh.Peers = nil }},
+		{"even peers", func(c *Config) { c.Mesh.Peers = peers[:2] }},
+		{"no node id", func(c *Config) { c.Mesh.NodeID = "" }},
+		{"no address", func(c *Config) { c.Mesh.Address = "" }},
+		{"bad address", func(c *Config) { c.Mesh.Address = "bad" }},
+		{"no control address", func(c *Config) { c.Mesh.ControlAddress = "" }},
+		{"bad control address", func(c *Config) { c.Mesh.ControlAddress = "bad" }},
+		{"no data dir", func(c *Config) { c.Mesh.DataDir = "" }},
+		{"no secret", func(c *Config) { c.Mesh.Secret = "" }},
+		{"duplicate peer", func(c *Config) { c.Mesh.Peers = append([]MeshPeer(nil), peers...); c.Mesh.Peers[1].ID = "app-a" }},
+		{"empty peer id", func(c *Config) { c.Mesh.Peers = append([]MeshPeer(nil), peers...); c.Mesh.Peers[1].ID = "" }},
+		{"bad peer address", func(c *Config) { c.Mesh.Peers = append([]MeshPeer(nil), peers...); c.Mesh.Peers[1].Address = "bad" }},
+		{"bad peer control", func(c *Config) {
+			c.Mesh.Peers = append([]MeshPeer(nil), peers...)
+			c.Mesh.Peers[1].ControlAddress = "bad"
+		}},
+		{"unknown self", func(c *Config) { c.Mesh.NodeID = "missing" }},
+		{"agent disabled", func(c *Config) { c.Agent.Enabled = false }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := minimalConfig()
+			cfg.Agent = AgentConfig{
+				Enabled: true, Listen: "0.0.0.0:8444", TLSCert: "/cert", TLSKey: "/key",
+				ClientCA: "/ca", CAKey: "/ca-key",
+			}
+			cfg.Mesh = MeshConfig{
+				Enabled: true, NodeID: "app-a", Address: "192.0.2.20:9400",
+				ControlAddress: "192.0.2.20:9401", DataDir: "/tmp/mesh-a",
+				Secret: "mesh-secret", Peers: append([]MeshPeer(nil), peers...),
+			}
+			tc.edit(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestMeshEnvSecret(t *testing.T) {
+	t.Setenv("INCUS_FLEET_MESH_SECRET", "from-env")
+	cfg := minimalConfig()
+	cfg.applyDefaults()
+	cfg.applyEnv()
+	if cfg.Mesh.Secret != "from-env" {
+		t.Fatalf("mesh secret = %q", cfg.Mesh.Secret)
+	}
+}

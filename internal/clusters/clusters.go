@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
@@ -98,10 +99,12 @@ type DialFunc func(ctx context.Context, cfg config.Cluster) (InstanceServer, err
 
 // Connection is one configured cluster and its client.
 type Connection struct {
-	cfg    config.Cluster
-	client InstanceServer
-	raw    incus.InstanceServer
-	err    error
+	cfg           config.Cluster
+	client        InstanceServer
+	raw           incus.InstanceServer
+	err           error
+	endpoints     []string
+	endpointIndex int
 
 	mu sync.RWMutex
 }
@@ -112,8 +115,54 @@ func (c *Connection) Name() string { return c.cfg.Name }
 // DisplayName returns the human-facing name.
 func (c *Connection) DisplayName() string { return c.cfg.DisplayName }
 
-// Endpoint returns the API endpoint.
+// Endpoint returns the configured primary API endpoint.
 func (c *Connection) Endpoint() string { return c.cfg.Endpoint }
+
+// ActiveEndpoint returns the endpoint that is currently in use.
+func (c *Connection) ActiveEndpoint() string {
+	endpoints := config.ClusterEndpoints(c.cfg)
+	c.mu.RLock()
+	index := c.endpointIndex
+	c.mu.RUnlock()
+	if len(endpoints) == 0 {
+		return c.cfg.Endpoint
+	}
+	return endpoints[index%len(endpoints)]
+}
+
+// connect tries every configured endpoint in order until one dial succeeds.
+func (c *Connection) connect(ctx context.Context, dial DialFunc) error {
+	endpoints := config.ClusterEndpoints(c.cfg)
+	if len(endpoints) == 0 {
+		err := errors.New("no endpoints configured")
+		c.setError(err)
+		return err
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < len(endpoints); attempt++ {
+		c.mu.RLock()
+		index := (c.endpointIndex + attempt) % len(endpoints)
+		c.mu.RUnlock()
+
+		cfg := c.cfg
+		cfg.Endpoint = endpoints[index]
+		srv, err := dial(ctx, cfg)
+		if srv != nil && err == nil {
+			c.mu.Lock()
+			c.endpointIndex = index
+			c.mu.Unlock()
+			c.reconnect(ctx, srv)
+			return nil
+		}
+		if err == nil {
+			err = errors.New("dial returned no client")
+		}
+		lastErr = fmt.Errorf("%s: %w", endpoints[index], err)
+	}
+	c.setError(lastErr)
+	return lastErr
+}
 
 // Project returns the Incus project used for this connection.
 func (c *Connection) Project() string { return c.cfg.Project }
@@ -227,11 +276,13 @@ func (c *Connection) disconnect() {
 
 // Manager owns all configured cluster connections.
 type Manager struct {
-	dial   DialFunc
-	logger *slog.Logger
-	mu     sync.RWMutex
-	order  []string
-	conns  map[string]*Connection
+	dial          DialFunc
+	logger        *slog.Logger
+	mu            sync.RWMutex
+	order         []string
+	conns         map[string]*Connection
+	watchCancel   context.CancelFunc
+	watchInterval time.Duration
 }
 
 // New connects to every configured cluster. Connection failures are recorded
@@ -250,24 +301,24 @@ func NewWithDialer(ctx context.Context, cfgs []config.Cluster, dial DialFunc, lo
 	}
 
 	m := &Manager{
-		dial:   dial,
-		logger: logger,
-		order:  make([]string, 0, len(cfgs)),
-		conns:  make(map[string]*Connection, len(cfgs)),
+		dial:          dial,
+		logger:        logger,
+		order:         make([]string, 0, len(cfgs)),
+		conns:         make(map[string]*Connection, len(cfgs)),
+		watchInterval: 10 * time.Second,
 	}
+	watchCtx, cancel := context.WithCancel(context.Background())
+	m.watchCancel = cancel
+	go m.watch(watchCtx)
 
 	for _, cfg := range cfgs {
 		if _, exists := m.conns[cfg.Name]; exists {
 			return nil, fmt.Errorf("clusters: duplicate cluster %q", cfg.Name)
 		}
 
-		conn := &Connection{cfg: cfg}
-		srv, err := dial(ctx, cfg)
-		if err != nil {
-			conn.err = err
+		conn := &Connection{cfg: cfg, endpoints: config.ClusterEndpoints(cfg)}
+		if err := conn.connect(ctx, dial); err != nil {
 			logger.Warn("cluster connection failed", "cluster", cfg.Name, "error", err)
-		} else {
-			conn.reconnect(ctx, srv)
 		}
 
 		m.order = append(m.order, cfg.Name)
@@ -459,21 +510,56 @@ func (m *Manager) Reconnect(ctx context.Context, name string) (Summary, error) {
 		return Summary{}, err
 	}
 
-	srv, err := m.dial(ctx, conn.cfg)
-	if err != nil {
-		conn.setError(err)
+	if err := conn.connect(ctx, m.dial); err != nil {
 		m.logger.Warn("cluster reconnect failed", "cluster", name, "error", err)
 		return conn.Summary(), fmt.Errorf("clusters: reconnect %s: %w", name, err)
 	}
-
-	conn.reconnect(ctx, srv)
-	m.logger.Info("cluster reconnected", "cluster", name)
+	m.logger.Info("cluster reconnected", "cluster", name, "endpoint", conn.ActiveEndpoint())
 
 	return conn.Summary(), nil
 }
 
+// watch re-dials unavailable clusters using the next healthy endpoint.
+func (m *Manager) watch(ctx context.Context) {
+	interval := m.watchInterval
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.mu.RLock()
+			conns := make([]*Connection, 0, len(m.conns))
+			for _, conn := range m.conns {
+				conns = append(conns, conn)
+			}
+			m.mu.RUnlock()
+			for _, conn := range conns {
+				conn.mu.RLock()
+				down := conn.client == nil
+				conn.mu.RUnlock()
+				if !down {
+					continue
+				}
+				if err := conn.connect(ctx, m.dial); err != nil {
+					m.logger.Debug("cluster endpoint failover pending", "cluster", conn.Name(), "error", err)
+					continue
+				}
+				m.logger.Info("cluster endpoint failover succeeded", "cluster", conn.Name(), "endpoint", conn.ActiveEndpoint())
+			}
+		}
+	}
+}
+
 // Close disconnects every cluster.
 func (m *Manager) Close() {
+	if m.watchCancel != nil {
+		m.watchCancel()
+	}
 	m.mu.Lock()
 	conns := make([]*Connection, 0, len(m.conns))
 	for _, conn := range m.conns {
@@ -648,10 +734,8 @@ func (m *Manager) Register(ctx context.Context, cfg config.Cluster) (Summary, er
 	}
 	m.mu.Unlock()
 
-	conn := &Connection{cfg: cfg}
-	srv, err := m.dial(ctx, cfg)
-	if err != nil {
-		conn.err = err
+	conn := &Connection{cfg: cfg, endpoints: config.ClusterEndpoints(cfg)}
+	if err := conn.connect(ctx, m.dial); err != nil {
 		m.mu.Lock()
 		m.order = append(m.order, cfg.Name)
 		m.conns[cfg.Name] = conn
@@ -659,8 +743,6 @@ func (m *Manager) Register(ctx context.Context, cfg config.Cluster) (Summary, er
 		m.logger.Warn("cluster connection failed", "cluster", cfg.Name, "error", err)
 		return conn.Summary(), fmt.Errorf("clusters: register %s: %w", cfg.Name, err)
 	}
-
-	conn.reconnect(ctx, srv)
 
 	m.mu.Lock()
 	m.order = append(m.order, cfg.Name)
