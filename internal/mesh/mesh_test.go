@@ -973,3 +973,85 @@ func TestAdminForwardingToLeader(t *testing.T) {
 		t.Fatal("forward without known leader expected error")
 	}
 }
+
+func TestRaftRelayDispatchEndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("raft integration test")
+	}
+	ids := []string{"center-a", "center-b", "witness"}
+	raftAddrs := []string{freePort(t), freePort(t), freePort(t)}
+	controlAddrs := []string{freePort(t), freePort(t), freePort(t)}
+	peers := make([]Peer, len(ids))
+	for i := range ids {
+		peers[i] = Peer{ID: ids[i], Address: raftAddrs[i], ControlAddress: controlAddrs[i]}
+	}
+	nodes := make([]*Mesh, 0, len(ids))
+	servers := make([]*http.Server, 0, len(ids))
+	for i, id := range ids {
+		m, err := New(Config{
+			Enabled: true, NodeID: id, Address: raftAddrs[i], ControlAddress: controlAddrs[i],
+			DataDir: t.TempDir(), Peers: peers, Secret: "mesh-secret",
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Start(); err != nil {
+			t.Fatal(err)
+		}
+		listener, err := net.Listen("tcp", controlAddrs[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		server := &http.Server{Handler: m.DispatchHandler()}
+		go func() { _ = server.Serve(listener) }()
+		nodes = append(nodes, m)
+		servers = append(servers, server)
+	}
+	defer func() {
+		for _, server := range servers {
+			_ = server.Close()
+		}
+		for _, m := range nodes {
+			_ = m.Close()
+		}
+	}()
+
+	leaderIndex := -1
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		for i, m := range nodes {
+			if m.IsLeader() {
+				leaderIndex = i
+				break
+			}
+		}
+		if leaderIndex >= 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if leaderIndex < 0 {
+		t.Fatal("no leader")
+	}
+	ownerIndex := (leaderIndex + 1) % len(nodes)
+	requesterIndex := (leaderIndex + 2) % len(nodes)
+	owner := nodes[ownerIndex]
+	owner.SetDispatcher(&stubDispatcher{})
+	if err := nodes[leaderIndex].SetOwner("agent-relay", ids[ownerIndex]); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if nodes[requesterIndex].Owner("agent-relay") == ids[ownerIndex] {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	result, err := nodes[requesterIndex].Dispatch(context.Background(), "agent-relay", agentpb.TaskType_TASK_TYPE_NODENET_SNAPSHOT, nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("relay dispatch: %v", err)
+	}
+	if string(result.Payload) != "ok" {
+		t.Fatalf("relay payload = %q", result.Payload)
+	}
+}
