@@ -74,6 +74,8 @@ type App struct {
 }
 
 // agentDispatch is the transport used by both async tasks and sync node ops.
+const meshOwnerTTL = 60 * time.Second
+
 type agentDispatch interface {
 	Dispatch(ctx context.Context, agentID string, typ agentpb.TaskType, payload []byte, timeout time.Duration) (*agentpb.TaskResult, error)
 }
@@ -255,13 +257,18 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		if centerMesh != nil {
 			options = append(options,
 				agentgw.WithConnectHook(func(agentID string) {
-					if err := centerMesh.SetOwnerAny(agentID, cfg.Mesh.NodeID); err != nil {
+					if err := centerMesh.SetOwnerAny(agentID, cfg.Mesh.NodeID, meshOwnerTTL); err != nil {
 						logger.Warn("mesh: record agent owner failed", "agent", agentID, "error", err)
 					}
 				}),
 				agentgw.WithDisconnectHook(func(agentID string) {
 					if err := centerMesh.ClearOwnerAny(agentID); err != nil {
 						logger.Warn("mesh: clear agent owner failed", "agent", agentID, "error", err)
+					}
+				}),
+				agentgw.WithHeartbeatHook(func(agentID string) {
+					if err := centerMesh.SetOwnerAny(agentID, cfg.Mesh.NodeID, meshOwnerTTL); err != nil {
+						logger.Warn("mesh: refresh agent owner failed", "agent", agentID, "error", err)
 					}
 				}),
 			)

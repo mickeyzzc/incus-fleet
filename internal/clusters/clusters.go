@@ -540,9 +540,22 @@ func (m *Manager) watch(ctx context.Context) {
 			m.mu.RUnlock()
 			for _, conn := range conns {
 				conn.mu.RLock()
-				down := conn.client == nil
+				client := conn.client
 				conn.mu.RUnlock()
-				if !down {
+				if client != nil {
+					if _, _, err := client.GetServer(); err != nil {
+						m.logger.Warn("cluster health check failed", "cluster", conn.Name(), "error", err)
+						conn.setError(err)
+						endpoints := config.ClusterEndpoints(conn.cfg)
+						if len(endpoints) > 1 {
+							conn.mu.Lock()
+							conn.endpointIndex = (conn.endpointIndex + 1) % len(endpoints)
+							conn.mu.Unlock()
+						}
+						client = nil
+					}
+				}
+				if client != nil {
 					continue
 				}
 				if err := conn.connect(ctx, m.dial); err != nil {

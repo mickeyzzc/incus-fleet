@@ -381,7 +381,7 @@ func TestRaftThreeNodeConsensus(t *testing.T) {
 			follower.cfg.Peers[i].ControlAddress = badLeader.Listener.Addr().String()
 		}
 	}
-	if err := follower.SetOwnerAny("forwarded", "other"); err == nil {
+	if err := follower.SetOwnerAny("forwarded", "other", time.Minute); err == nil {
 		t.Fatal("forward to bad leader expected error")
 	}
 
@@ -744,15 +744,15 @@ func TestOwnerHandlerAndAny(t *testing.T) {
 		t.Fatalf("owner clear without raft = %d", rec.Code)
 	}
 
-	if err := m.SetOwnerAny("a1", "center-a"); err == nil {
+	if err := m.SetOwnerAny("a1", "center-a", 0); err == nil {
 		t.Fatal("SetOwnerAny without leader expected error")
 	}
 	if err := m.ClearOwnerAny("a1"); err == nil {
 		t.Fatal("ClearOwnerAny without leader expected error")
 	}
 	applyCommand(t, m.fsm, command{Op: opSetOwner, AgentID: "a2", Owner: "center-a"}, 1)
-	if err := m.SetOwnerAny("a2", "center-a"); err != nil {
-		t.Fatalf("SetOwnerAny known owner = %v", err)
+	if err := m.SetOwnerAny("a2", "center-a", 0); err == nil {
+		t.Fatal("SetOwnerAny without leader expected error")
 	}
 }
 
@@ -773,7 +773,7 @@ func TestOwnerAnyOnLeader(t *testing.T) {
 	if err := m.WaitForLeader(10 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.SetOwnerAny("a1", "app-a"); err != nil {
+	if err := m.SetOwnerAny("a1", "app-a", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if m.Owner("a1") != "app-a" {
@@ -785,4 +785,108 @@ func TestOwnerAnyOnLeader(t *testing.T) {
 	if m.Owner("a1") != "" {
 		t.Fatal("owner not cleared")
 	}
+}
+
+func TestOwnerExpiry(t *testing.T) {
+	fsm := NewFSM()
+	applyCommand(t, fsm, command{
+		Op: opSetOwner, AgentID: "a1", Owner: "center-a", ExpiresAt: time.Now().Add(30 * time.Millisecond).UnixMilli(),
+	}, 1)
+	if fsm.Owner("a1") != "center-a" {
+		t.Fatal("owner missing before expiry")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := fsm.Owner("a1"); got != "" {
+		t.Fatalf("expired owner = %q", got)
+	}
+}
+
+func TestRaftLeaderFailover(t *testing.T) {
+	if testing.Short() {
+		t.Skip("raft integration test")
+	}
+	ids := []string{"center-a", "center-b", "witness"}
+	addresses := []string{freePort(t), freePort(t), freePort(t)}
+	peers := make([]Peer, len(ids))
+	for i := range ids {
+		peers[i] = Peer{ID: ids[i], Address: addresses[i], ControlAddress: addresses[i]}
+	}
+	nodes := make([]*Mesh, 0, len(ids))
+	for i, id := range ids {
+		m, err := New(Config{
+			Enabled: true, NodeID: id, Address: addresses[i], ControlAddress: addresses[i],
+			DataDir: t.TempDir(), Peers: peers, Secret: "mesh-secret", Witness: id == "witness",
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Start(); err != nil {
+			t.Fatal(err)
+		}
+		nodes = append(nodes, m)
+	}
+
+	leaderIndex := -1
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		for i, m := range nodes {
+			if m.IsLeader() {
+				leaderIndex = i
+				break
+			}
+		}
+		if leaderIndex >= 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if leaderIndex < 0 {
+		t.Fatal("no initial leader")
+	}
+	if err := nodes[leaderIndex].Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	remaining := make([]*Mesh, 0, len(nodes)-1)
+	for i, m := range nodes {
+		if i != leaderIndex {
+			remaining = append(remaining, m)
+		}
+	}
+	defer func() {
+		for _, m := range remaining {
+			_ = m.Close()
+		}
+	}()
+
+	newLeader := -1
+	deadline = time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		for i, m := range remaining {
+			if m.IsLeader() {
+				newLeader = i
+				break
+			}
+		}
+		if newLeader >= 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if newLeader < 0 {
+		t.Fatal("no leader after failure")
+	}
+	if err := remaining[newLeader].SetOwner("agent-failover", ids[0]); err != nil {
+		t.Fatalf("set owner after failover: %v", err)
+	}
+	// The surviving voter set is 2/3, so the owner must replicate to the peer.
+	peer := remaining[(newLeader+1)%len(remaining)]
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if peer.Owner("agent-failover") == ids[0] {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("owner not replicated after failover: %q", peer.Owner("agent-failover"))
 }

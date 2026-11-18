@@ -678,8 +678,9 @@ What the mesh replicates:
 
 - Leader election and a fencing term. With 3 voters, one node can fail without losing write quorum.
 - Agent connection ownership: when an agent connects, the local center records the owner in Raft,
-  forwarding the update to the leader if the WebSocket landed on a follower. Any center can then
-  relay a task through `control_address` to the owner. This is what makes
+  forwarding the update to the leader if the WebSocket landed on a follower. Ownership carries a
+  60-second lease refreshed by agent heartbeats (15s by default), so a crashed center cannot leave a
+  permanently stale owner. Any center can then relay a task through `control_address` to the owner. This is what makes
   async and synchronous node operations work when the task lands on a different center.
 - Browser sessions are stored in the shared PostgreSQL database, so a user is not logged out after
   leader failover. SQLite is not supported for a multi-center mesh.
@@ -688,7 +689,8 @@ Agents keep connecting to the single virtual `agent.install.gateway_url` (Caddy/
 know which center is leader. The agent CA and server certificate must be shared by all centers.
 
 Cluster endpoints can also fail over. Configure `endpoints` in addition to `endpoint`; the manager
-tries them in order and re-dials offline clusters in the background every 10 seconds:
+tries them in order, health-checks the active client every 10 seconds, and moves to the next endpoint
+when the current one stops answering:
 
 ```yaml
 clusters:

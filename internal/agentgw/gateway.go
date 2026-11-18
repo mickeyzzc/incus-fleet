@@ -73,6 +73,11 @@ func WithDisconnectHook(fn func(string)) Option {
 	return func(g *Gateway) { g.onDisconnect = fn }
 }
 
+// WithHeartbeatHook refreshes mesh ownership on each agent heartbeat.
+func WithHeartbeatHook(fn func(string)) Option {
+	return func(g *Gateway) { g.onHeartbeat = fn }
+}
+
 // Gateway serves enrollment and mTLS WebSocket connections.
 type Gateway struct {
 	store             *store.SQLStore
@@ -83,6 +88,7 @@ type Gateway struct {
 	telemetry         *telemetry.Store
 	onConnect         func(string)
 	onDisconnect      func(string)
+	onHeartbeat       func(string)
 
 	mu      sync.Mutex
 	conns   map[string]*agentConn
@@ -458,6 +464,9 @@ func (g *Gateway) handleEnvelope(_ context.Context, agent *store.Agent, env *age
 		agent.LastSeen = time.Now().UTC()
 		agent.UpdatedAt = agent.LastSeen
 		g.saveAgent(agent)
+		if g.onHeartbeat != nil {
+			g.onHeartbeat(agent.ID)
+		}
 		g.send(agent.ID, &agentpb.Envelope{Body: &agentpb.Envelope_HeartbeatAck{HeartbeatAck: &agentpb.HeartbeatAck{
 			ServerTimeMs: time.Now().UTC().UnixMilli(),
 		}}})

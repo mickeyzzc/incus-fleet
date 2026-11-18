@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/hashicorp/raft"
 )
@@ -15,14 +16,20 @@ const (
 )
 
 type command struct {
-	Op      string `json:"op"`
-	AgentID string `json:"agent_id"`
-	Owner   string `json:"owner,omitempty"`
+	Op        string `json:"op"`
+	AgentID   string `json:"agent_id"`
+	Owner     string `json:"owner,omitempty"`
+	ExpiresAt int64  `json:"expires_at,omitempty"`
+}
+
+type ownerRecord struct {
+	Owner     string `json:"owner"`
+	ExpiresAt int64  `json:"expires_at,omitempty"`
 }
 
 type fsmState struct {
-	Owners map[string]string `json:"owners"`
-	Epoch  uint64            `json:"epoch"`
+	Owners map[string]ownerRecord `json:"owners"`
+	Epoch  uint64                 `json:"epoch"`
 }
 
 // FSM is the replicated state: which center owns each agent connection.
@@ -33,7 +40,7 @@ type FSM struct {
 
 // NewFSM builds an empty replicated state.
 func NewFSM() *FSM {
-	return &FSM{state: fsmState{Owners: make(map[string]string)}}
+	return &FSM{state: fsmState{Owners: make(map[string]ownerRecord)}}
 }
 
 // Apply implements raft.FSM.
@@ -49,7 +56,7 @@ func (f *FSM) Apply(log *raft.Log) any {
 		if cmd.AgentID == "" || cmd.Owner == "" {
 			return fmt.Errorf("mesh: invalid set-owner command")
 		}
-		f.state.Owners[cmd.AgentID] = cmd.Owner
+		f.state.Owners[cmd.AgentID] = ownerRecord{Owner: cmd.Owner, ExpiresAt: cmd.ExpiresAt}
 	case opClearOwner:
 		delete(f.state.Owners, cmd.AgentID)
 	default:
@@ -63,9 +70,17 @@ func (f *FSM) Apply(log *raft.Log) any {
 
 // Owner returns the current owner of an agent.
 func (f *FSM) Owner(agentID string) string {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.state.Owners[agentID]
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	record, ok := f.state.Owners[agentID]
+	if !ok {
+		return ""
+	}
+	if record.ExpiresAt > 0 && time.Now().UnixMilli() > record.ExpiresAt {
+		delete(f.state.Owners, agentID)
+		return ""
+	}
+	return record.Owner
 }
 
 // Epoch returns the highest applied log index, used as a fencing hint.
@@ -79,7 +94,7 @@ func (f *FSM) Epoch() uint64 {
 func (f *FSM) Reset() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.state = fsmState{Owners: make(map[string]string)}
+	f.state = fsmState{Owners: make(map[string]ownerRecord)}
 }
 
 type fsmSnapshot struct {
@@ -117,7 +132,7 @@ func (f *FSM) Restore(reader io.ReadCloser) error {
 		return err
 	}
 	if state.Owners == nil {
-		state.Owners = make(map[string]string)
+		state.Owners = make(map[string]ownerRecord)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()

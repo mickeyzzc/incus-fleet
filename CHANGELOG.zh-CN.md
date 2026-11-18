@@ -48,8 +48,8 @@
   `fleet_instance_block_latency_seconds_*`。
 - direct HTTP SD 已用 Prometheus 3.8 抓取 agent `/metrics` 做端到端验证；新增 `metrics-serve`
   用于独立抓取验证，并保持 bearer token 大小写敏感。
-- Raft center mesh：leader 选举、agent 归属复制与中继派发、共享 PostgreSQL 会话，以及有序的集群
-  endpoint 故障切换。提供强制单机恢复和 learner 重新加入 API。
+- Raft center mesh：leader 选举、带心跳续租的 agent 归属复制与中继派发、共享 PostgreSQL 会话，以及
+  带主动健康检查的有序集群 endpoint 故障切换。提供强制单机恢复和 learner 重新加入 API。
 - 中心提供一键 Linux agent 安装器（`agent.install`）：校验 agent/helper、安装 CA/sudoers/systemd、
   自动注册并启动服务。UI 显示该命令，不再假设 agent 已手动安装。
 - UI 的 **Add node** 支持 agent-first：显示一次性注册 token 并轮询上线、调用签名 agent

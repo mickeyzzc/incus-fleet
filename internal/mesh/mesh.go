@@ -259,8 +259,14 @@ func (m *Mesh) WaitForLeader(timeout time.Duration) error {
 	return errors.New("mesh: no leader elected")
 }
 
-// SetOwner replicates agent ownership to the mesh. Only the leader may apply.
+// SetOwner replicates agent ownership without an expiry.
 func (m *Mesh) SetOwner(agentID, owner string) error {
+	return m.SetOwnerTTL(agentID, owner, 0)
+}
+
+// SetOwnerTTL replicates ownership with an expiry so a crashed center cannot
+// leave a permanently stale owner.
+func (m *Mesh) SetOwnerTTL(agentID, owner string, ttl time.Duration) error {
 	m.mu.RLock()
 	node := m.raft
 	m.mu.RUnlock()
@@ -270,7 +276,11 @@ func (m *Mesh) SetOwner(agentID, owner string) error {
 	if node.State() != raft.Leader {
 		return raft.ErrNotLeader
 	}
-	data, err := json.Marshal(command{Op: opSetOwner, AgentID: agentID, Owner: owner})
+	cmd := command{Op: opSetOwner, AgentID: agentID, Owner: owner}
+	if ttl > 0 {
+		cmd.ExpiresAt = time.Now().Add(ttl).UnixMilli()
+	}
+	data, err := json.Marshal(cmd)
 	if err != nil {
 		return err
 	}
@@ -294,14 +304,17 @@ func (m *Mesh) ClearOwner(agentID string) error {
 
 // SetOwnerAny records ownership on the leader, relaying when this node is a
 // follower. Agent WebSockets may land on any center behind the virtual URL.
-func (m *Mesh) SetOwnerAny(agentID, owner string) error {
-	if m.Owner(agentID) == owner && owner != "" {
-		return nil
+func (m *Mesh) SetOwnerAny(agentID, owner string, ttl time.Duration) error {
+	expires := int64(0)
+	if ttl > 0 {
+		expires = time.Now().Add(ttl).UnixMilli()
 	}
 	if m.IsLeader() {
-		return m.SetOwner(agentID, owner)
+		return m.SetOwnerTTL(agentID, owner, ttl)
 	}
-	return m.forwardOwner(ownerRequest{Op: opSetOwner, AgentID: agentID, Owner: owner})
+	return m.forwardOwner(ownerRequest{
+		Op: opSetOwner, AgentID: agentID, Owner: owner, ExpiresAt: expires,
+	})
 }
 
 // ClearOwnerAny removes ownership on the leader, relaying when needed.
@@ -313,9 +326,10 @@ func (m *Mesh) ClearOwnerAny(agentID string) error {
 }
 
 type ownerRequest struct {
-	Op      string `json:"op"`
-	AgentID string `json:"agent_id"`
-	Owner   string `json:"owner,omitempty"`
+	Op        string `json:"op"`
+	AgentID   string `json:"agent_id"`
+	Owner     string `json:"owner,omitempty"`
+	ExpiresAt int64  `json:"expires_at,omitempty"`
 }
 
 func (m *Mesh) forwardOwner(req ownerRequest) error {
@@ -366,7 +380,11 @@ func (m *Mesh) OwnerHandler() http.Handler {
 		var err error
 		switch req.Op {
 		case opSetOwner:
-			err = m.SetOwner(req.AgentID, req.Owner)
+			ttl := time.Duration(0)
+			if req.ExpiresAt > 0 {
+				ttl = time.Until(time.UnixMilli(req.ExpiresAt))
+			}
+			err = m.SetOwnerTTL(req.AgentID, req.Owner, ttl)
 		case opClearOwner:
 			err = m.ClearOwner(req.AgentID)
 		default:

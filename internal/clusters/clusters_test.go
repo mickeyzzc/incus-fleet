@@ -564,3 +564,61 @@ func TestConnectionWithoutEndpoints(t *testing.T) {
 		t.Fatalf("ActiveEndpoint = %q", got)
 	}
 }
+
+type unhealthyServer struct {
+	*incusfake.Server
+	fail atomic.Bool
+}
+
+func (s *unhealthyServer) GetServer() (*api.Server, string, error) {
+	if s.fail.Load() {
+		return nil, "", errors.New("endpoint unhealthy")
+	}
+	return s.Server.GetServer()
+}
+
+func TestClusterWatchHealthCheckSwitchesEndpoint(t *testing.T) {
+	first := &unhealthyServer{Server: &incusfake.Server{}}
+	cfg := testConfig("c1")
+	cfg.Endpoints = []string{"https://192.0.2.10:8443", "https://192.0.2.11:8443"}
+	var calls atomic.Int32
+	dial := func(_ context.Context, target config.Cluster) (InstanceServer, error) {
+		calls.Add(1)
+		if target.Endpoint == cfg.Endpoints[0] {
+			return first, nil
+		}
+		return &incusfake.Server{}, nil
+	}
+	m, err := NewWithDialer(context.Background(), []config.Cluster{cfg}, dial, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Close)
+	conn, err := m.Connection("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conn.ActiveEndpoint() != cfg.Endpoints[0] {
+		t.Fatalf("initial endpoint = %q", conn.ActiveEndpoint())
+	}
+	first.fail.Store(true)
+	m.watchInterval = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.watch(ctx)
+		close(done)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if conn.ActiveEndpoint() == cfg.Endpoints[1] {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if conn.ActiveEndpoint() != cfg.Endpoints[1] {
+		t.Fatalf("failover endpoint = %q", conn.ActiveEndpoint())
+	}
+}

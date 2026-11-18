@@ -649,15 +649,16 @@ mesh 复制以下状态：
 
 - leader 选举和 fencing term。3 个投票节点可容忍 1 个故障而不失去写 quorum。
 - agent 连接归属：agent 连接后，本地 center 把 owner 写入 Raft；如果 WebSocket 落在 follower 上，
-  会把更新转发给 leader。其他 center 通过 `control_address` 把任务中继给 owner。这样即使异步任务在另一台 center 上领取，同步节点操作
+  会把更新转发给 leader。owner 带 60 秒 lease，由 agent 心跳（默认 15 秒）续租，因此崩溃的 center
+  不会留下永久过期的 owner。其他 center 通过 `control_address` 把任务中继给 owner。这样即使异步任务在另一台 center 上领取，同步节点操作
   也能正确派发。
 - 浏览器会话写入共享 PostgreSQL，leader 切换后用户不会被登出。多 center mesh 不支持 SQLite。
 
 agent 始终连接虚拟的 `agent.install.gateway_url`（Caddy/VIP），不知道当前 leader 是谁。所有
 center 必须共享 agent CA 和服务端证书。
 
-集群 endpoint 也支持故障切换：在 `endpoint` 之外配置 `endpoints`，manager 按顺序尝试，并在后台
-每 10 秒重连离线集群：
+集群 endpoint 也支持故障切换：在 `endpoint` 之外配置 `endpoints`，manager 按顺序尝试，并每 10 秒
+对当前 client 做健康检查，发现无响应时切到下一个 endpoint：
 
 ```yaml
 clusters:

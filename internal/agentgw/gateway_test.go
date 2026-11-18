@@ -681,13 +681,15 @@ func TestGatewayHooks(t *testing.T) {
 	gw := New(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)),
 		WithConnectHook(func(string) { called++ }),
 		WithDisconnectHook(func(string) { called++ }),
+		WithHeartbeatHook(func(string) { called++ }),
 	)
-	if gw.onConnect == nil || gw.onDisconnect == nil {
+	if gw.onConnect == nil || gw.onDisconnect == nil || gw.onHeartbeat == nil {
 		t.Fatal("hooks not installed")
 	}
 	gw.onConnect("a")
 	gw.onDisconnect("a")
-	if called != 2 {
+	gw.onHeartbeat("a")
+	if called != 3 {
 		t.Fatalf("hook calls = %d", called)
 	}
 }
