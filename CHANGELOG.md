@@ -52,6 +52,9 @@ All notable changes to this project are documented here. The format follows
   `fleet_instance_block_latency_seconds_*`.
 - Direct HTTP SD validated end-to-end with Prometheus 3.8 scraping the agent `/metrics` listener;
   add `metrics-serve` for standalone scrape validation and keep bearer tokens case-sensitive.
+- Raft center mesh with leader election, replicated agent ownership and relay dispatch, shared
+  PostgreSQL sessions, and ordered cluster endpoint failover. Includes forced single-node recovery
+  and learner rejoin APIs.
 - One-command Linux agent installer served by the center (`agent.install`): checksummed agent/helper
   downloads, CA/sudoers/systemd setup, automatic enrollment, and service start. The UI shows this
   command instead of assuming the agent is already installed.

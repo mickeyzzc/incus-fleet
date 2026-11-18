@@ -644,6 +644,89 @@ The dialog skips SSH host key verification by default for convenience on a new n
 `ssh_known_hosts` and uncheck that option for production. SSH and sudo passwords are used only for
 the request and are never stored.
 
+### Center mesh (Raft HA)
+
+The center can run as an active-active mesh. Use an odd number of voters: three centers, or two
+centers plus one lightweight witness (the witness votes but runs no gateway or task runner).
+
+```yaml
+mesh:
+  enabled: true
+  node_id: app-a
+  address: 192.0.2.20:9400          # Raft transport
+  control_address: 192.0.2.20:9401  # internal dispatch relay
+  data_dir: /home/incus/data/mesh
+  peers:
+    - id: app-a
+      address: 192.0.2.20:9400
+      control_address: 192.0.2.20:9401
+    - id: app-b
+      address: 192.0.2.21:9400
+      control_address: 192.0.2.21:9401
+    - id: witness
+      address: 192.0.2.22:9400
+      control_address: 192.0.2.22:9401
+  witness: false                    # true on the witness host only
+  force_single: false
+```
+
+Set `INCUS_FLEET_MESH_SECRET` to the same value on every voter. Do not commit the secret. All voters
+must list the same `peers`, including the witness. The witness uses the same binary with `witness:
+true` and `agent.enabled: false`; do not send browser or agent traffic to it.
+
+What the mesh replicates:
+
+- Leader election and a fencing term. With 3 voters, one node can fail without losing write quorum.
+- Agent connection ownership: when an agent connects, the local center records the owner in Raft,
+  forwarding the update to the leader if the WebSocket landed on a follower. Any center can then
+  relay a task through `control_address` to the owner. This is what makes
+  async and synchronous node operations work when the task lands on a different center.
+- Browser sessions are stored in the shared PostgreSQL database, so a user is not logged out after
+  leader failover. SQLite is not supported for a multi-center mesh.
+
+Agents keep connecting to the single virtual `agent.install.gateway_url` (Caddy/VIP). They do not
+know which center is leader. The agent CA and server certificate must be shared by all centers.
+
+Cluster endpoints can also fail over. Configure `endpoints` in addition to `endpoint`; the manager
+tries them in order and re-dials offline clusters in the background every 10 seconds:
+
+```yaml
+clusters:
+  - name: c1
+    endpoint: https://192.0.2.10:8443
+    endpoints:
+      - https://192.0.2.10:8443
+      - https://192.0.2.11:8443
+```
+
+#### Disaster recovery
+
+Losing quorum (two of three voters down) stops writes. To temporarily restore a single-center
+service, fence the lost nodes first, back up the survivor, then call:
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"confirm":true}' \
+  https://fleet.example/api/v1/mesh/force-single
+```
+
+This resets the survivor into a one-voter cluster. Point Caddy/VIP only at the survivor; agents
+reconnect to the same URL. When the other nodes return, wipe their mesh data directories and add
+them as non-voters, then promote after they catch up:
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"app-b","address":"192.0.2.21:9400","control_address":"192.0.2.21:9401","voter":false}' \
+  https://fleet.example/api/v1/mesh/join
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"id":"app-b"}' \
+  https://fleet.example/api/v1/mesh/promote
+```
+
+`GET /api/v1/mesh/status` reports the leader, term, and voter set.
+
 ## 5. Configure Caddy
 
 Caddy must pin each browser to one app instance because sessions are in memory. The sample

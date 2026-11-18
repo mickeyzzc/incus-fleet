@@ -629,6 +629,21 @@ operation may have completed; it is not treated as a failure. Audit records incl
 IP, backend, action, task ID, result, and a redacted plan. Wi-Fi passwords, SSH passwords, sudo
 passwords, Incus join tokens, and private keys are never stored in tasks or audit records.
 
+## Center mesh
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/v1/mesh/status` | leader, term, local state, and voter set |
+| `POST /api/v1/mesh/force-single` | destructive recovery: `{"confirm":true}` resets to one voter |
+| `POST /api/v1/mesh/join` | add a recovered node as voter or non-voter |
+| `POST /api/v1/mesh/promote` | promote a caught-up non-voter to voter |
+| `POST /api/v1/mesh/remove` | remove a node from the voter set |
+| `POST /internal/mesh/dispatch` | internal authenticated relay; guarded by `X-Fleet-Mesh-Secret` |
+| `POST /internal/mesh/owner` | internal forwarded owner registration; same secret guard |
+
+`clusters[].endpoints` can list additional Incus API endpoints for failover; the manager retries
+offline clusters in the background.
+
 ## Instances
 
 ```json

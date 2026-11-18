@@ -34,8 +34,8 @@ from the language switcher.*
   JSON/Prometheus/CSV export, Prometheus/VictoriaMetrics remote write and query proxy, HTTP SD,
   database task leases, certificate rotation/revocation, signed agent upgrade, audit export,
   native netlink writes, agent-backed node network routing, agent-first onboarding with a
-  one-command installer, an HA task dispatcher, automatic certificate renewal, and direct agent
-  metrics scraping
+  one-command installer, an HA task dispatcher with an optional Raft center mesh, automatic
+  certificate renewal, and direct agent metrics scraping
 
 > Live migration preserves guest network state. When clusters use different subnets,
 > renew DHCP inside the guest after the move (or use matching subnets).

@@ -71,10 +71,36 @@ database:
 #   lease: 30s
 #   interval: 2s
 
+# Optional Raft center mesh (3 voters: app-a, app-b, witness).
+# Set INCUS_FLEET_MESH_SECRET in the service environment; do not commit it.
+# mesh:
+#   enabled: true
+#   node_id: app-a
+#   address: 192.0.2.20:9400
+#   control_address: 192.0.2.20:9401
+#   data_dir: /home/incus/data/mesh
+#   peers:
+#     - id: app-a
+#       address: 192.0.2.20:9400
+#       control_address: 192.0.2.20:9401
+#     - id: app-b
+#       address: 192.0.2.21:9400
+#       control_address: 192.0.2.21:9401
+#     - id: witness
+#       address: 192.0.2.22:9400
+#       control_address: 192.0.2.22:9401
+#   witness: false
+#   force_single: false
+
 clusters:
   - name: c1
     display_name: Primary site
     endpoint: https://192.0.2.10:8443
+    # Optional failover endpoints, tried in order, then re-tried in the
+    # background every 10s while the cluster is offline.
+    # endpoints:
+    #   - https://192.0.2.10:8443
+    #   - https://192.0.2.11:8443
     project: default
     tls_cert: /home/incus/certs/app-a.crt
     tls_key: /home/incus/certs/app-a.key

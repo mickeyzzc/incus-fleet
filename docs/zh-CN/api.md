@@ -561,6 +561,20 @@ POST /api/v1/tasks
 记录包含 actor、来源 IP、backend、action、task ID、result 和脱敏后的 plan。Wi-Fi 密码、SSH
 密码、sudo 密码、Incus join token 和私钥永远不会写入任务或审计。
 
+## 中心 mesh
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/mesh/status` | leader、term、本地状态和 voter 集合 |
+| `POST /api/v1/mesh/force-single` | 破坏性恢复：`{"confirm":true}` 重置为单 voter |
+| `POST /api/v1/mesh/join` | 添加恢复的节点为 voter 或非 voter |
+| `POST /api/v1/mesh/promote` | 将追平的非 voter 提升为 voter |
+| `POST /api/v1/mesh/remove` | 从 voter 集合移除节点 |
+| `POST /internal/mesh/dispatch` | 内部认证中继；由 `X-Fleet-Mesh-Secret` 保护 |
+| `POST /internal/mesh/owner` | 内部转发的 owner 注册；同样由该密钥保护 |
+
+`clusters[].endpoints` 可配置额外的 Incus API 地址用于故障切换；manager 会在后台重连离线集群。
+
 ## 实例
 
 ```json
@@ -661,158 +675,7 @@ bearer）。exec 的第一帧是 JSON：
 
 任意一端关闭或 Incus 操作结束时，会话结束。
 
-### 实例指标
-
-`GET .../metrics` 返回 `{"metrics": {...}}`，其中包含单个实例的实时状态：
-`status`、`pid`、`processes`、`cpu.usage`（累计纳秒）、`memory`（用量/峰值/总量/
-交换，单位为字节）、`disk`（每个挂载点的用量/总量）以及 `network`（每个接口的
-累计计数器，不含回环）。计数器自实例启动起累计；客户端通过对相邻采样做差来推算
-速率。
-
-### 文件
-
-所有路径必须是绝对路径。`GET .../files?action=list&path=/var/log` 返回
-`{"files": [{"name", "size", "mode", "is_dir", "modtime"}]}`（目录在前）。下载会以
-附件形式流式返回文件。上传使用 `multipart/form-data`，包含一个 `file` 字段
-（请求体上限 32 MiB，权限 0644）。`action=mkdir` 创建目录。删除操作移除一个文件。
-
-### 集群资源与管理
-
-`GET .../resources` 返回存储池（含 `config`、用量、`used_by`）和网络（含 `config`、
-托管标志、地址）。创建存储池接受 `name` + `driver`，以及可选的 `description`/
-`config`；更新会合并 config，并删除被设为空字符串的键。网络遵循相同的合并规则；
-只有托管网络可以更新或删除。
-
-Profile 支持完整的 CRUD；当请求中提供 `devices` 时，更新会整体替换设备映射。
-
-`PATCH .../members/{member}` 接受 `description`、`failure_domain` 和 `groups`
-（为 nil 时保留当前分组）。
-
-### 卷与镜像
-
-`GET .../storage-pools/{pool}/volumes` 只列出自定义卷。创建接受 `name`、
-`description`、`size`（会校验的字节字符串）以及额外的 `config`。`DELETE` 删除
-一个自定义卷。`DELETE .../images/{fingerprint}` 删除本地镜像；UI 的清理操作会
-删除所有 `cached=true` 的镜像。
-
-## 迁移
-
-### 提交
-
-```http
-POST /api/v1/migrations
-Content-Type: application/json
-
-{
-  "source_cluster": "c1",
-  "target_cluster": "c2",
-  "instance": "web",
-  "mode": "move",
-  "live": false,
-  "include_snapshots": false,
-  "auto_start": true
-}
-```
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `source_cluster` | 是 | 必须存在且已连接 |
-| `target_cluster` | 是 | 必须与源集群不同 |
-| `instance` | 是 | 必须存在于源集群，且不存在于目标集群 |
-| `mode` | 否 | `move`（默认）或 `copy` |
-| `live` | 否 | 仅用于 `move`；要求虚拟机正在运行且 `migration.stateful=true` |
-| `include_snapshots` | 否 | 默认 `false`；为 `false` 时仅复制实例本身（不含快照） |
-| `auto_start` | 否 | 默认 `true`；当源实例此前在运行时启动目标实例 |
-
-返回 `202 Accepted` 及迁移对象。任务异步执行。
-
-### 迁移对象
-
-```json
-{
-  "id": "8f14e45fceea167a5a36dedd4bea2543",
-  "source_cluster": "c1",
-  "target_cluster": "c2",
-  "instance": "web",
-  "instance_type": "container",
-  "mode": "move",
-  "live": false,
-  "status": "transferring",
-  "progress": "transferring instance",
-  "error": "",
-  "created_at": "2026-11-11T09:30:00Z",
-  "updated_at": "2026-11-11T09:30:04Z"
-}
-```
-
-状态推进顺序：
-
-```mermaid
-flowchart LR
-    pending --> preflight --> stopping --> transferring --> verifying --> starting --> done
-```
-
-并非每个阶段都会出现。对于 `auto_start=false` 的已停止实例，会跳过 `starting`；
-在线迁移以及源实例本来就已停止时，会跳过 `stopping`。失败时停在 `failed`，
-`progress` 指明失败的阶段，`error` 包含详细信息。
-
-`GET /api/v1/migrations?limit=20` 返回 `{"migrations": [...]}`。`limit` 必须是
-正整数。`GET /api/v1/migrations/{id}` 返回单个对象。
-
-## 镜像
-
-### 导入
-
-```http
-POST /api/v1/clusters/{cluster}/images/import?type=container&alias=debian/13
-Content-Type: multipart/form-data
-```
-
-Multipart 字段：
-
-- `image` —— 镜像元数据 tar 包，或统一镜像 tar 包（必填）；
-- `rootfs` —— `.root` 根文件系统，仅用于拆分导出。
-
-`type` 接受 `container`（默认）或 `virtual-machine`；`alias` 可选。请求体上限为
-8 GiB。导入成功返回 `{"fingerprint": "<sha256>"}`；如果 Incus 守护进程未上报
-指纹，响应为 `204 No Content`。
-
-### 分发
-
-`POST /clusters/{cluster}/images/{fingerprint}/copy`，请求体为
-`{"target_cluster": "c2", "alias": "debian/13"}`，会把镜像直接流式传输到另一个
-集群，并返回 `204 No Content`。目标必须与源不同且处于已连接状态。
-
-### 刷新
-
-`POST /clusters/{cluster}/images/{fingerprint}/refresh` 让 Incus 从镜像来源重新
-拉取该缓存镜像，然后返回 `204 No Content`。别名会保留。
-
-## ISO 安装镜像
-
-| 方法 | 路径 | 结果 |
-| --- | --- | --- |
-| GET | `.../iso` | `{"isos": [{"name", "pool", "description", "size"}]}` |
-| POST | `.../iso?pool=default` | 上传（`image` multipart 字段，上限 12 GiB）→ `201 {"name","pool"}` |
-| DELETE | `.../iso/{pool}/{name}` | `204 No Content` |
-| POST | `.../iso/{pool}/{name}/launch` | 用该 ISO 创建虚拟机 → `201` 实例详情 |
-
-启动请求体：
-
-```json
-{
-  "name": "db-installer",
-  "storage_pool": "default",
-  "network": "incusbr0",
-  "root_disk": "20GiB",
-  "start": true
-}
-```
-
-`iso_name` 来自 URL 路径，无需在请求体中重复。为兼容安装程序，fleet 会放宽
-Secure Boot，并自动配置 SPICE。
-
-## 实例操作
+### 实例操作
 
 ### 克隆
 

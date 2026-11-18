@@ -615,6 +615,86 @@ SSH 路径需要：
 为了方便新节点接入，对话框默认跳过 SSH 主机密钥校验；生产环境请配置 `ssh_known_hosts` 并
 取消该选项。SSH 和 sudo 密码只用于本次请求，不会被存储。
 
+### 中心 mesh（Raft 高可用）
+
+center 可以运行为 active-active mesh。使用奇数投票节点：三个 center，或两个 center 加一个轻量
+witness（witness 只投票，不运行 gateway 和任务 dispatcher）。
+
+```yaml
+mesh:
+  enabled: true
+  node_id: app-a
+  address: 192.0.2.20:9400          # Raft 传输地址
+  control_address: 192.0.2.20:9401  # 内部派发中继地址
+  data_dir: /home/incus/data/mesh
+  peers:
+    - id: app-a
+      address: 192.0.2.20:9400
+      control_address: 192.0.2.20:9401
+    - id: app-b
+      address: 192.0.2.21:9400
+      control_address: 192.0.2.21:9401
+    - id: witness
+      address: 192.0.2.22:9400
+      control_address: 192.0.2.22:9401
+  witness: false                    # 仅 witness 主机设为 true
+  force_single: false
+```
+
+在所有投票节点上把 `INCUS_FLEET_MESH_SECRET` 设为同一个值；不要提交到仓库。所有节点的 `peers`
+必须相同且包含 witness。witness 使用同一个二进制，设置 `witness: true` 和 `agent.enabled: false`；
+不要把浏览器或 agent 流量指向它。
+
+mesh 复制以下状态：
+
+- leader 选举和 fencing term。3 个投票节点可容忍 1 个故障而不失去写 quorum。
+- agent 连接归属：agent 连接后，本地 center 把 owner 写入 Raft；如果 WebSocket 落在 follower 上，
+  会把更新转发给 leader。其他 center 通过 `control_address` 把任务中继给 owner。这样即使异步任务在另一台 center 上领取，同步节点操作
+  也能正确派发。
+- 浏览器会话写入共享 PostgreSQL，leader 切换后用户不会被登出。多 center mesh 不支持 SQLite。
+
+agent 始终连接虚拟的 `agent.install.gateway_url`（Caddy/VIP），不知道当前 leader 是谁。所有
+center 必须共享 agent CA 和服务端证书。
+
+集群 endpoint 也支持故障切换：在 `endpoint` 之外配置 `endpoints`，manager 按顺序尝试，并在后台
+每 10 秒重连离线集群：
+
+```yaml
+clusters:
+  - name: c1
+    endpoint: https://192.0.2.10:8443
+    endpoints:
+      - https://192.0.2.10:8443
+      - https://192.0.2.11:8443
+```
+
+#### 灾难恢复
+
+失去 quorum（3 个节点挂 2 个）后会停止写入。要临时恢复单中心服务，先隔离失效节点、备份幸存
+节点，然后调用：
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"confirm":true}' \
+  https://fleet.example/api/v1/mesh/force-single
+```
+
+这会把幸存节点重置为单 voter 集群。Caddy/VIP 只指向该节点；agent 用同一个 URL 重连。其他节点
+恢复后，清空它们的 mesh 数据目录，并以非 voter 身份加入，追平后再提升：
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"app-b","address":"192.0.2.21:9400","control_address":"192.0.2.21:9401","voter":false}' \
+  https://fleet.example/api/v1/mesh/join
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"id":"app-b"}' \
+  https://fleet.example/api/v1/mesh/promote
+```
+
+`GET /api/v1/mesh/status` 可查看 leader、term 和 voter 集合。
+
 ## 5. 配置 Caddy
 
 由于会话保存在内存中，Caddy 必须把每个浏览器固定到同一个应用实例。示例 `deploy/caddy/Caddyfile` 使用 `lb_policy cookie` 加上被动/主动健康检查：

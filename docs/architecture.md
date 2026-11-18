@@ -202,6 +202,16 @@ host package manager when requested, runs `incus admin init --preseed`, waits fo
 and records idempotent steps under `/var/lib/incus-fleet-helper`. Telemetry and eBPF remain later
 phases.
 
+## Center mesh
+
+The optional Raft mesh gives centers leader election, a fencing term, and replicated agent-connection
+ownership. Any center can claim a durable host task, then relay it to the center holding the agent
+WebSocket through the operator-configured `control_address`. Browser sessions live in the shared
+PostgreSQL database, so leader failover does not log users out. Use three voters (two centers plus
+one witness is supported); losing quorum stops writes until an operator performs the documented
+forced-single recovery and rejoins the other nodes as learners. Cluster connections also support an
+ordered `endpoints` list with background failover.
+
 ## High availability and lifecycle
 
 Host tasks carry `lease_owner`/`lease_until` and can be claimed by a worker with PostgreSQL

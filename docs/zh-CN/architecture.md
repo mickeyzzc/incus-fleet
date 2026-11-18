@@ -162,6 +162,14 @@ spec：中心构建 join 或 init preseed，并用 agent CA 私钥签名；helpe
 包管理器安装，执行 `incus admin init --preseed`，等待本地 API，并把幂等步骤记录在
 `/var/lib/incus-fleet-helper`。指标和 eBPF 仍在后续阶段。
 
+## 中心 mesh
+
+可选 Raft mesh 为 center 提供 leader 选举、fencing term 和复制的 agent 连接归属。任意 center 都可以
+领取持久任务，并通过运维配置的 `control_address` 中继给持有 agent WebSocket 的 center。浏览器会话
+保存在共享 PostgreSQL 中，leader 切换不会让用户登出。使用 3 个投票节点（支持 2 个 center 加 1 个
+witness）；失去 quorum 会停止写入，需要按文档执行强制单机恢复，并让其他节点以 learner 身份重新加入。
+集群连接也支持有序的 `endpoints` 列表和后台故障切换。
+
 ## 高可用与生命周期
 
 主机任务带有 `lease_owner`/`lease_until`，可由 worker 通过 PostgreSQL 的
