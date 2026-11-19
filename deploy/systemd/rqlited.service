@@ -1,0 +1,49 @@
+[Unit]
+Description=rqlite node (replicated SQLite for incus-fleet)
+Documentation=https://rqlite.io/docs/
+After=network-online.target
+Wants=network-online.target
+
+# One node per host. Copy /etc/rqlite/rqlite.env.example to rqlite.env and set:
+#
+#   RQLITE_NODE_ID=1
+#   RQLITE_HTTP_ADDR=192.0.2.20:4001
+#   RQLITE_RAFT_ADDR=192.0.2.20:4002
+#   RQLITE_DATA_DIR=/var/lib/rqlite
+#   RQLITE_JOIN_ARGS=
+#
+# The first node leaves RQLITE_JOIN_ARGS empty. Later nodes set it to
+#   RQLITE_JOIN_ARGS=-join 192.0.2.20:4001
+#
+# Bring the first node up, then start the joiners. Three voters tolerate the
+# loss of one node; two voters tolerate none.
+
+[Service]
+Type=simple
+User=rqlite
+Group=rqlite
+EnvironmentFile=/etc/rqlite/rqlite.env
+ExecStart=/usr/local/bin/rqlited -node-id ${RQLITE_NODE_ID} -http-addr ${RQLITE_HTTP_ADDR} -raft-addr ${RQLITE_RAFT_ADDR} $RQLITE_JOIN_ARGS ${RQLITE_DATA_DIR}
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+# rqlite keeps its SQLite files and Raft log under the data directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/rqlite
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

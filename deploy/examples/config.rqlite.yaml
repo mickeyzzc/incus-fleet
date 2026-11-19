@@ -1,0 +1,69 @@
+# Example configuration for a multi-instance deployment backed by rqlite.
+# Copy to /home/incus/config.yaml, replace placeholders, and keep mode 0600.
+#
+# rqlite is a single Go binary that keeps a replicated SQLite database on every
+# node. It gives several fleet instances one shared store without running a
+# PostgreSQL server, and keeps working when one node is down.
+#
+# Node layout (three voters tolerate one failure):
+#   rqlited -node-id 1 -http-addr 192.0.2.20:4001 -raft-addr 192.0.2.20:4002 /var/lib/rqlite
+#   rqlited -node-id 2 -http-addr 192.0.2.21:4001 -raft-addr 192.0.2.21:4002 \
+#     -join 192.0.2.20:4001 /var/lib/rqlite
+#   rqlited -node-id 3 -http-addr 192.0.2.22:4001 -raft-addr 192.0.2.22:4002 \
+#     -join 192.0.2.20:4001 /var/lib/rqlite
+#
+# Prefer environment variables so a password is not written to YAML:
+#   INCUS_FLEET_DATABASE_DRIVER=rqlite
+#   INCUS_FLEET_DATABASE_DSN=http://node-a:4001
+server:
+  listen: 0.0.0.0:8080
+  auth_token: ""
+  log_level: info
+
+database:
+  driver: rqlite
+  # Point at any node. The driver discovers the rest of the cluster and
+  # retries against it, so a leader change needs no config update.
+  dsn: http://192.0.2.20:4001
+
+# Optional: SSH identity for node network management and adding members.
+# The account must have passwordless sudo on every member (see nodesudoers).
+# node_access:
+#   ssh_user: mickey
+#   ssh_key: /home/incus/.ssh/id_ed25519
+#   ssh_port: 22
+#   ssh_known_hosts: /home/incus/.ssh/known_hosts
+#   ssh_insecure_ignore_host_key: false
+#
+# Optional: local Incus member name when it differs from the hostname.
+# local_member: app-a
+
+# Optional HA dispatcher for queued async host tasks. rqlite is a shared store,
+# so several center instances can run the dispatcher.
+# ha:
+#   enabled: true
+#   worker_id: app-a
+#   lease: 30s
+#   interval: 2s
+
+# Optional metrics remote write. With rqlite there is no database directory on
+# this host, so set spool_dir explicitly if the default temp directory is wrong.
+# metrics:
+#   remote_write:
+#     spool_dir: /home/incus/data/remote-write
+
+clusters:
+  - name: c1
+    display_name: Primary site
+    endpoint: https://192.0.2.10:8443
+    project: default
+    tls_cert: /home/incus/certs/app-a.crt
+    tls_key: /home/incus/certs/app-a.key
+    # tls_server_cert: /home/incus/certs/incus-server.crt
+
+  - name: c2
+    display_name: Secondary site
+    endpoint: https://192.0.2.11:8443
+    project: default
+    tls_cert: /home/incus/certs/app-a.crt
+    tls_key: /home/incus/certs/app-a.key

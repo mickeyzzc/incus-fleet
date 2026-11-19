@@ -70,8 +70,8 @@ database:
 #     token: replace-with-a-random-token
 #     public_url: https://fleet.example
 
-# Optional HA dispatcher for queued async host tasks. Use PostgreSQL when more
-# than one center instance runs the dispatcher.
+# Optional HA dispatcher for queued async host tasks. Use a shared database
+# (rqlite or PostgreSQL) when more than one center instance runs the dispatcher.
 # ha:
 #   enabled: false
 #   worker_id: app-a
