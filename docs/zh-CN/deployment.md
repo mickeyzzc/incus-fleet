@@ -29,7 +29,29 @@ flowchart LR
     apps -->|HTTPS · 客户端证书| clusters
 ```
 
-每个应用实例都是独立的：独立的二进制、配置、证书、数据库和内存会话。不要把两个应用实例指向同一个 SQLite 文件。
+每个应用实例都是独立的：独立的二进制、配置和证书。实例之间是否共享状态由数据库驱动决定。
+
+## 选择数据库
+
+支持三种驱动，按实例数量和对单点故障的容忍度选择。
+
+| 驱动 | 实例数 | 状态 | 故障转移 | 额外软件 |
+| --- | --- | --- | --- | --- |
+| `sqlite`（默认） | 单个 | 本地文件 | 无 | 无 |
+| `rqlite` | 多个 | 复制的 SQLite | 自动；需要 3 个投票节点 | `rqlited`（单个二进制） |
+| `postgres` | 多个 | 共享服务器 | 需要 PostgreSQL 自身的高可用 | PostgreSQL |
+
+**`sqlite`** —— 默认。单个实例、单个数据库文件。会话存在进程内存，所以 UI 必须固定到该实例（见下方 Caddy）。单管理主机的正确选择。
+
+**`rqlite`** —— 一个 Go 二进制，在每个节点上保存复制的 SQLite 数据库。每个实例连任意节点即可，驱动会发现其余节点，因此 leader 切换无需改配置。请用三个投票节点：两个投票节点无法容忍任何故障，因为 Raft 需要多数派，而 2 个中的 2 个仍然是全部。会话和所有其他表都在共享库里，所以任意实例都能处理任意请求，实例消失时浏览器不会被登出。
+
+**`postgres`** —— 共享的 PostgreSQL 服务器。行为与 `rqlite` 相同，区别是数据库服务本身需要独立的备份与高可用方案。
+
+### 需要注意的限制
+
+迁移任务（实例在集群之间移动）由提交它的实例内的 goroutine 执行。如果该实例在传输中途宕机，任务会被标记为失败，需要重新提交。共享数据库能保住记录和资产，但不会续跑传输。任何驱动都是如此。
+
+选择 `rqlite` 或 `postgres` 会自动启用数据库会话。`internal/config` 里的 `Database.IsShared()` 是决定这一点的唯一位置。
 
 ## 前置条件
 
@@ -178,6 +200,72 @@ INCUS_FLEET_DATABASE_DSN=postgres://...
 ```
 
 迁移历史属于运维数据。要把现有部署从 SQLite 迁移到 PostgreSQL：先准备新数据库，停止应用，切换 driver/DSN，再重新启动。历史会从头开始；实例状态从不存储在这个数据库中。（目前尚未提供 dump/restore 辅助工具。）
+
+### 用 rqlite 替代单个 SQLite 文件
+
+rqlite 在每个节点上保存一份复制的 SQLite 数据库，不需要 PostgreSQL 服务器。这是让多个应用实例共享一份存储的最轻量方式。
+
+在所有要参与投票的节点上安装二进制：
+
+```bash
+curl -fsSL -o rqlite.tar.gz \
+  https://github.com/rqlite/rqlite/releases/download/v10.7.3/rqlite-v10.7.3-linux-amd64.tar.gz
+tar xzf rqlite.tar.gz
+sudo install -m 0755 rqlite-v10.7.3-linux-amd64/rqlited /usr/local/bin/rqlited
+sudo useradd --system --home-dir /var/lib/rqlite --shell /usr/sbin/nologin rqlite
+sudo install -d -o rqlite -g rqlite -m 0750 /var/lib/rqlite
+```
+
+在 `/etc/rqlite/rqlite.env` 中配置每个节点（复制 `deploy/examples/rqlite.env.example`）。第一个节点留空 `RQLITE_JOIN_ARGS`；其余节点指向第一个节点的 **Raft** 端口，而不是 HTTP 端口：
+
+```bash
+# 节点 1
+RQLITE_NODE_ID=1
+RQLITE_HTTP_ADDR=192.0.2.20:4001
+RQLITE_RAFT_ADDR=192.0.2.20:4002
+
+# 节点 2（及 3）
+RQLITE_NODE_ID=2
+RQLITE_HTTP_ADDR=192.0.2.21:4001
+RQLITE_RAFT_ADDR=192.0.2.21:4002
+RQLITE_JOIN_ARGS=-join 192.0.2.20:4002
+```
+
+安装并启动 unit，先启动节点 1：
+
+```bash
+sudo install -m 644 deploy/systemd/rqlited.service /etc/systemd/system/rqlited.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now rqlited
+curl -fsS http://192.0.2.20:4001/ready && echo ready
+curl -fsS http://192.0.2.20:4001/nodes
+```
+
+让应用连接任意节点即可。驱动会发现集群其余节点并在失败时重试，因此 leader 切换无需重启：
+
+```yaml
+database:
+  driver: rqlite
+  dsn: http://192.0.2.20:4001
+```
+
+**要三个投票节点，不是两个。** Raft 选出 leader 需要多数派：两个投票节点时，失去任意一个就只剩 1/2，不是多数派，集群会停止接受写入直到它恢复。三个投票节点可以容忍失去一个。
+
+把现有 SQLite 部署迁移到 rqlite 时，在切换应用之前先把现有记录通过 HTTP API 写入。不需要建表：应用启动时会自己建 schema。
+
+```bash
+sqlite3 /home/incus/data/fleet.db .dump | grep -v '^CREATE\|^BEGIN\|^COMMIT\|schema_migrations' \
+  > /tmp/seed.sql
+python3 - <<'PY'
+import json, urllib.request
+stmts = [s.strip() for s in open('/tmp/seed.sql').read().split(';') if s.strip()]
+req = urllib.request.Request('http://192.0.2.20:4001/db/execute?transaction',
+    data=json.dumps(stmts).encode(), headers={'Content-Type': 'application/json'})
+print(urllib.request.urlopen(req).read()[:200])
+PY
+```
+
+操作前请备份 SQLite 文件。每个节点都保存完整副本，因此重建集群时任意节点的 `/var/lib/rqlite` 都足以恢复。
 
 ## 4. 安装 systemd 单元
 
@@ -652,7 +740,7 @@ mesh 复制以下状态：
   会把更新转发给 leader。owner 带 60 秒 lease，由 agent 心跳（默认 15 秒）续租，因此崩溃的 center
   不会留下永久过期的 owner。其他 center 通过 `control_address` 把任务中继给 owner。这样即使异步任务在另一台 center 上领取，同步节点操作
   也能正确派发。
-- 浏览器会话写入共享 PostgreSQL，leader 切换后用户不会被登出。多 center mesh 不支持 SQLite。
+- 浏览器会话写入共享数据库（`rqlite` 或 `postgres`），leader 切换后用户不会被登出。单节点 SQLite 文件不能支撑多个 center。
 
 agent 始终连接虚拟的 `agent.install.gateway_url`（Caddy/VIP），不知道当前 leader 是谁。所有
 center 必须共享 agent CA 和服务端证书。

@@ -10,6 +10,8 @@
 
 ### 新增
 
+- 新增 `rqlite` 作为第三种数据库驱动，让多个 fleet 实例共享一份复制的 SQLite，无需运行 PostgreSQL。包含把 rqlite 的 JSON 浮点数还原为 int64 时间戳的包装驱动、不依赖事务的原子任务抢占，以及驱动为共享型时自动启用数据库会话。
+- migrations 表新增 `owner` 列，实例重启时只把自己中断的任务标记为失败。
 - 从 UI 添加集群成员：SSH 准备、可选安装 Incus、加入集群、sudo 白名单和 fleet SSH 公钥授权。
 - 本地应用主机与远程成员的按成员节点网络管理。
 - 类型化主机操作路由（`hostops`），支持 `node_access.mode`（`auto`、`agent`、`ssh`、`local`）

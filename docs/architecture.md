@@ -33,8 +33,8 @@ flowchart LR
 
     subgraph apps["App tier · independent instances"]
         direction TB
-        appA["incus-fleet<br/>@ host A<br/>HTTP :8080<br/>SQLite / PostgreSQL"]
-        appB["incus-fleet<br/>@ host B<br/>HTTP :8080<br/>SQLite / PostgreSQL"]
+        appA["incus-fleet<br/>@ host A<br/>HTTP :8080<br/>SQLite / rqlite / PostgreSQL"]
+        appB["incus-fleet<br/>@ host B<br/>HTTP :8080<br/>SQLite / rqlite / PostgreSQL"]
     end
 
     subgraph clusters["Incus clusters"]
@@ -68,7 +68,7 @@ other. Caddy load-balances browsers and pins each browser to one app instance (s
 | `internal/assets` | Shared SSH key/script library and per-instance batch execution |
 | `internal/migrations` | Validates migration requests, persists tasks, runs copy/move, rollback |
 | `internal/store` | SQLite/PostgreSQL schema for migrations, keys, and scripts |
-| `internal/auth` | Constant-time admin token check and in-memory session table |
+| `internal/auth` | Constant-time admin token check; sessions in memory for a single SQLite node, in the database for rqlite/PostgreSQL |
 | `internal/httpapi` | REST routes, auth middleware, error mapping, security headers, SPA fallback |
 | `internal/app` | Dependency wiring, HTTP server timeouts, graceful shutdown |
 | `web` | Embedded Vue 3 SPA |

@@ -10,6 +10,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `rqlite` as a third database driver, so several fleet instances can share one replicated
+  SQLite store without running PostgreSQL. Includes a wrapper driver that converts rqlite's
+  JSON-decoded floats back to int64 timestamps, a single-statement task claim that stays atomic
+  without transactions, and database-backed sessions whenever the driver is shared.
+- A `owner` column on migrations so a restarting instance fails only its own interrupted tasks.
 - Add a cluster member from the UI: SSH provisioning, optional Incus installation, join, sudo
   whitelist, and fleet SSH key authorization.
 - Per-member node network management for the local app host and remote members.

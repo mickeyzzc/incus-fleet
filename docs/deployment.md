@@ -31,8 +31,43 @@ flowchart LR
     apps -->|HTTPS · client cert| clusters
 ```
 
-Each app instance is independent: separate binary, config, certificates, database, and
-in-memory sessions. Do not point both app instances at one SQLite file.
+Each app instance is independent: separate binary, config, and certificates. What the database
+driver decides is whether the instances share state.
+
+## Choosing a database
+
+Three drivers are supported. Pick the one that matches how many instances you run and how much
+you need one node failure to cost.
+
+| Driver | Instances | State | Failover | Extra software |
+| --- | --- | --- | --- | --- |
+| `sqlite` (default) | One | Local file | None | None |
+| `rqlite` | Several | Replicated SQLite | Automatic; needs 3 voters | `rqlited` (one binary) |
+| `postgres` | Several | Shared server | Requires a PostgreSQL HA setup | PostgreSQL |
+
+**`sqlite`** — the default. One app instance, one database file. Sessions live in process memory,
+so the UI must be pinned to that instance (see Caddy below). This is the right choice for a single
+management host.
+
+**`rqlite`** — a single Go binary that keeps a replicated SQLite database on every node. Each
+instance connects to any node and the driver discovers the rest of the cluster, so a leader change
+needs no config update. Use three voting nodes: two voters tolerate no failure at all, because
+Raft needs a majority and 2 of 2 is still all of them. Sessions and every other table live in the
+shared database, so any instance can serve any request and a browser is not logged out when an
+instance goes away.
+
+**`postgres`** — a shared PostgreSQL server. Everything behaves as with `rqlite`; the difference is
+that the database server itself is a separate deployment with its own backup and HA story.
+
+### Limits worth knowing
+
+A migration task (an instance move between clusters) runs as a goroutine inside the instance that
+submitted it. If that instance dies mid-transfer, the task is marked failed and must be resubmitted.
+The shared database preserves the record and the assets; it does not resume the transfer. This is
+the same with any driver.
+
+Choosing `rqlite` or `postgres` turns on database-backed sessions automatically. `Database.IsShared()`
+in `internal/config` is the single place that decides this.
 
 ## Prerequisites
 
@@ -41,7 +76,7 @@ On each app host:
 - Linux with systemd, Go is **not** required if you deploy a release binary.
 - Network access to every Incus API endpoint on port 8443.
 - A dedicated service account and directory (examples use `/home/incus`).
-- SQLite (default) or a PostgreSQL server.
+- SQLite (default), an rqlite cluster, or a PostgreSQL server.
 
 On each Incus cluster:
 
@@ -187,6 +222,80 @@ Migration history is operational data. To move an existing deployment from SQLit
 provision the new database, stop the app, switch the driver/DSN, and start it again. History
 starts fresh; instance state is never stored in this database. (A dump/restore helper is not
 included yet.)
+
+### rqlite instead of a single SQLite file
+
+rqlite keeps a replicated SQLite database on every node and needs no PostgreSQL server. It is the
+lightest way to give several app instances one shared store.
+
+Install the binary on every node that will vote:
+
+```bash
+curl -fsSL -o rqlite.tar.gz \
+  https://github.com/rqlite/rqlite/releases/download/v10.7.3/rqlite-v10.7.3-linux-amd64.tar.gz
+tar xzf rqlite.tar.gz
+sudo install -m 0755 rqlite-v10.7.3-linux-amd64/rqlited /usr/local/bin/rqlited
+sudo useradd --system --home-dir /var/lib/rqlite --shell /usr/sbin/nologin rqlite
+sudo install -d -o rqlite -g rqlite -m 0750 /var/lib/rqlite
+```
+
+Configure each node in `/etc/rqlite/rqlite.env` (copy `deploy/examples/rqlite.env.example`). The
+first node leaves `RQLITE_JOIN_ARGS` empty; the others point it at the first node's **Raft** port,
+not its HTTP port:
+
+```bash
+# node 1
+RQLITE_NODE_ID=1
+RQLITE_HTTP_ADDR=192.0.2.20:4001
+RQLITE_RAFT_ADDR=192.0.2.20:4002
+
+# node 2 (and 3)
+RQLITE_NODE_ID=2
+RQLITE_HTTP_ADDR=192.0.2.21:4001
+RQLITE_RAFT_ADDR=192.0.2.21:4002
+RQLITE_JOIN_ARGS=-join 192.0.2.20:4002
+```
+
+Install and start the unit, bringing node 1 up first:
+
+```bash
+sudo install -m 644 deploy/systemd/rqlited.service /etc/systemd/system/rqlited.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now rqlited
+curl -fsS http://192.0.2.20:4001/ready && echo ready
+curl -fsS http://192.0.2.20:4001/nodes
+```
+
+Point the app at any node. The driver discovers the rest of the cluster and retries against it, so
+a leader change needs no restart:
+
+```yaml
+database:
+  driver: rqlite
+  dsn: http://192.0.2.20:4001
+```
+
+**Three voters, not two.** Raft needs a majority to elect a leader: with two voters, losing either
+one leaves 1 of 2, which is not a majority, and the cluster stops accepting writes until it comes
+back. Three voters tolerate the loss of one.
+
+To move an existing SQLite deployment onto rqlite, write the existing rows through the HTTP API
+before switching the app over. Table creation is not needed: the app applies its schema at startup.
+
+```bash
+sqlite3 /home/incus/data/fleet.db .dump | grep -v '^CREATE\|^BEGIN\|^COMMIT\|schema_migrations' \
+  > /tmp/seed.sql
+python3 - <<'PY'
+import json, urllib.request
+stmts = [s.strip() for s in open('/tmp/seed.sql').read().split(';') if s.strip()]
+req = urllib.request.Request('http://192.0.2.20:4001/db/execute?transaction',
+    data=json.dumps(stmts).encode(), headers={'Content-Type': 'application/json'})
+print(urllib.request.urlopen(req).read()[:200])
+PY
+```
+
+Back up the SQLite file before doing this. Every node keeps a full copy, so a single node's
+`/var/lib/rqlite` is enough to restore from if the cluster is rebuilt.
 
 ## 4. Install the systemd unit
 
@@ -683,8 +792,8 @@ What the mesh replicates:
   60-second lease refreshed by agent heartbeats (15s by default), so a crashed center cannot leave a
   permanently stale owner. Any center can then relay a task through `control_address` to the owner. This is what makes
   async and synchronous node operations work when the task lands on a different center.
-- Browser sessions are stored in the shared PostgreSQL database, so a user is not logged out after
-  leader failover. SQLite is not supported for a multi-center mesh.
+- Browser sessions are stored in the shared database (`rqlite` or `postgres`), so a user is not
+  logged out after leader failover. A single-node SQLite file cannot back more than one center.
 
 Agents keep connecting to the single virtual `agent.install.gateway_url` (Caddy/VIP). They do not
 know which center is leader. The agent CA and server certificate must be shared by all centers.
@@ -736,17 +845,38 @@ curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 ## 5. Configure Caddy
 
-Caddy must pin each browser to one app instance because sessions are in memory. The sample
-`deploy/caddy/Caddyfile` uses `lb_policy cookie` plus passive/active health checks:
+The policy depends on the database driver.
+
+With `rqlite` or `postgres`, sessions and all state live in the shared database, so any instance
+can serve any request. Use plain round-robin; the health check drops a failing instance and the
+browser needs no re-login:
 
 ```caddyfile
 fleet.example.internal {
     encode zstd gzip
 
     reverse_proxy 192.0.2.20:8080 192.0.2.21:8080 {
-        lb_policy cookie incus_fleet_lb
+        lb_policy round_robin
         lb_try_duration 5s
         lb_try_interval 250ms
+        fail_duration 30s
+        max_fails 2
+        health_uri /api/v1/healthz
+        health_interval 10s
+        health_timeout 2s
+    }
+}
+```
+
+With `sqlite`, sessions are in process memory, so Caddy must pin each browser to one instance.
+Use `lb_policy cookie` and do not run a second instance behind the proxy:
+
+```caddyfile
+fleet.example.internal {
+    encode zstd gzip
+
+    reverse_proxy 192.0.2.20:8080 {
+        lb_policy cookie incus_fleet_lb
         fail_duration 30s
         max_fails 2
         health_uri /api/v1/healthz
@@ -762,14 +892,15 @@ app marks the session cookie `Secure` even though the upstream connection is HTT
 plain-HTTP access to an app instance also works for initial LAN testing, but the cookie is not
 marked `Secure` in that case.
 
-If you round-robin without stickiness, browser logins will intermittently fail because the
-session cookie is only valid on the instance that created it.
+With `sqlite`, round-robin without stickiness makes logins fail intermittently: the session cookie
+is only valid on the instance that created it. This is the whole reason to move to a shared
+database.
 
 Caddy proxies WebSockets transparently: the terminal, VGA, SPICE, and file endpoints
-(`/api/v1/.../console|exec|vga|spice|files`) ride the same sticky cookie as the UI, so no extra
-configuration is needed. SPICE clients open several websocket connections per session, and all
-of them must reach the same app instance; the sticky cookie covers this when the browser
-supports it.
+(`/api/v1/.../console|exec|vga|spice|files`) need no extra configuration. With `sqlite` the sticky
+cookie keeps them on one instance. With a shared database any instance can serve them, except that
+SPICE clients open several websocket connections per session, and a reconnect may land on a
+different instance; keep sticky sessions if you rely on long-lived SPICE connections.
 
 ## 6. Firewall and SPICE
 
