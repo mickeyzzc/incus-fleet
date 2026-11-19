@@ -63,6 +63,16 @@ var schemaMigrations = []schemaMigration{
 			`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)`,
 		},
 	},
+	{
+		// owner records which fleet instance submitted the migration. It lets a
+		// restarting instance fail only its own interrupted tasks instead of
+		// clobbering migrations another instance is still running.
+		version: 6,
+		statements: []string{
+			`ALTER TABLE migrations ADD COLUMN owner TEXT NOT NULL DEFAULT ''`,
+			`CREATE INDEX IF NOT EXISTS idx_migrations_owner ON migrations(owner)`,
+		},
+	},
 }
 
 func (s *SQLStore) migrate(ctx context.Context) error {

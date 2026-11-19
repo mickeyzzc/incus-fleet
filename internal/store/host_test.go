@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -27,8 +29,8 @@ func TestSchemaMigrations(t *testing.T) {
 	if err := s.db.QueryRowContext(context.Background(), `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if version != 5 {
-		t.Fatalf("schema version = %d, want 5", version)
+	if version != 6 {
+		t.Fatalf("schema version = %d, want 6", version)
 	}
 }
 
@@ -61,7 +63,7 @@ func TestSchemaMigrationFromLegacyDatabase(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	version, err := s.SchemaVersion(context.Background())
-	if err != nil || version != 5 {
+	if err != nil || version != 6 {
 		t.Fatalf("SchemaVersion() = %d, %v", version, err)
 	}
 	old, err := s.GetMigration(context.Background(), "old")
@@ -495,6 +497,48 @@ func TestHostTaskLeases(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if _, err := s.ClaimHostTask(ctx, "worker-4", time.Second); err != nil {
 		t.Fatalf("expired lease not claimable: %v", err)
+	}
+}
+
+func TestHostTaskClaimIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+	now := time.Now().UTC()
+	if err := s.CreateHostTask(ctx, &HostTask{ID: "task-race", Cluster: "c1", Member: "node-a",
+		Type: "x", State: HostTaskQueued, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two workers race for a single queued task: exactly one must win. This
+	// guards the single-statement claim, which is the only form that stays
+	// atomic on rqlite (its database/sql transactions are no-ops).
+	const workers = 8
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		winners []string
+	)
+	for i := 0; i < workers; i++ {
+		worker := fmt.Sprintf("worker-%d", i)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			task, err := s.ClaimHostTask(ctx, worker, time.Minute)
+			if err != nil {
+				if !errors.Is(err, ErrNotFound) {
+					t.Errorf("claim %s: unexpected error %v", worker, err)
+				}
+				return
+			}
+			mu.Lock()
+			winners = append(winners, task.LeaseOwner)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	if len(winners) != 1 {
+		t.Fatalf("winners = %v, want exactly 1", winners)
 	}
 }
 

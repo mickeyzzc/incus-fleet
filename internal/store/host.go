@@ -262,7 +262,7 @@ func (s *SQLStore) CreateHostTask(ctx context.Context, task *HostTask) error {
 		 progress, result, error_code, error, attempt, lease_owner, lease_until, created_by,
 		 created_at, dispatched_at, started_at, finished_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := s.db.ExecContext(ctx, s.rebind(query),
+	_, err := s.db.ExecContext(ctx, s.rebind(query), //nolint:gosec // query is a constant; rebind only swaps placeholders
 		task.ID, task.AgentID, task.Cluster, task.Member, task.Type, task.State,
 		task.IdempotencyKey, task.Plan, task.PlanHash, task.Progress, task.Result,
 		task.ErrorCode, task.Error, task.Attempt, task.LeaseOwner, unixNanos(task.LeaseUntil), task.CreatedBy,
@@ -289,7 +289,7 @@ func (s *SQLStore) UpdateHostTask(ctx context.Context, task *HostTask) error {
 		attempt = ?, lease_owner = ?, lease_until = ?, dispatched_at = ?, started_at = ?, finished_at = ?,
 		updated_at = ?
 		WHERE id = ?`
-	result, err := s.db.ExecContext(ctx, s.rebind(query),
+	result, err := s.db.ExecContext(ctx, s.rebind(query), //nolint:gosec // query is a constant; rebind only swaps placeholders
 		task.AgentID, task.State, task.Progress, task.Result, task.ErrorCode, task.Error,
 		task.Attempt, task.LeaseOwner, unixNanos(task.LeaseUntil), unixNanos(task.DispatchedAt),
 		unixNanos(task.StartedAt), unixNanos(task.FinishedAt), unixNanos(task.UpdatedAt),
@@ -314,7 +314,7 @@ func (s *SQLStore) GetHostTask(ctx context.Context, id string) (*HostTask, error
 		plan, plan_hash, progress, result, error_code, error, attempt, lease_owner, lease_until,
 		created_by, created_at, dispatched_at, started_at, finished_at, updated_at
 		FROM host_tasks WHERE id = ?`
-	row := s.db.QueryRowContext(ctx, s.rebind(query), id)
+	row := s.db.QueryRowContext(ctx, s.rebind(query), id) //nolint:gosec // query is a constant; rebind only swaps placeholders
 	task, err := scanHostTask(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: host task %q: %w", id, ErrNotFound)
@@ -580,7 +580,7 @@ func (s *SQLStore) GetAgent(ctx context.Context, id string) (*Agent, error) {
 	const query = `SELECT id, cluster, member, hostname, status, cert_fingerprint,
 		cert_not_after, version, os, kernel, arch, capabilities, facts, last_seen,
 		created_at, updated_at FROM agents WHERE id = ?`
-	row := s.db.QueryRowContext(ctx, s.rebind(query), id)
+	row := s.db.QueryRowContext(ctx, s.rebind(query), id) //nolint:gosec // query is a constant; rebind only swaps placeholders
 	agent, err := scanAgent(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: agent %q: %w", id, ErrNotFound)
@@ -745,39 +745,53 @@ func scanAgent(row rowScanner) (*Agent, error) {
 	return &agent, nil
 }
 
-// ClaimHostTask leases one queued/dispatched task to a worker. PostgreSQL uses
-// FOR UPDATE SKIP LOCKED; SQLite serializes through a transaction.
+// ClaimHostTask leases one queued/dispatched task to a worker.
+//
+// The claim is a single conditional UPDATE: the row is selected by subquery and
+// re-checked in the same statement, so exactly one racer can flip the state.
+// This matters because rqlite's database/sql transactions are no-ops — a
+// SELECT-then-UPDATE inside BeginTx would let two workers claim the same task.
+// The winner is read back by the exact lease_until it just wrote.
 func (s *SQLStore) ClaimHostTask(ctx context.Context, worker string, lease time.Duration) (*HostTask, error) {
 	if lease <= 0 {
 		lease = 30 * time.Second
 	}
 	now := time.Now().UTC()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("store: begin claim: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
+	leaseUntil := now.Add(lease)
+	expiry := unixNanos(now)
 
-	query := `SELECT id FROM host_tasks
+	const pick = `SELECT id FROM host_tasks
 		WHERE state IN (?, ?) AND (lease_until = 0 OR lease_until < ?)
 		ORDER BY created_at LIMIT 1`
-	if s.driver == "postgres" {
-		query += " FOR UPDATE SKIP LOCKED"
-	}
-	var id string
-	if err := tx.QueryRowContext(ctx, s.rebind(query), HostTaskQueued, HostTaskDispatched, unixNanos(now)).Scan(&id); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("store: host task: %w", ErrNotFound)
-		}
+
+	query := `UPDATE host_tasks
+		SET state = ?, lease_owner = ?, lease_until = ?, updated_at = ?
+		WHERE id = (` + pick + `)
+		  AND state IN (?, ?) AND (lease_until = 0 OR lease_until < ?)`
+
+	// Argument order follows the SQL text: SET clause first, then the
+	// subquery inside WHERE, then the outer re-check.
+	result, err := s.db.ExecContext(ctx, s.rebind(query), //nolint:gosec // query is a constant; rebind only swaps placeholders
+		HostTaskDispatched, worker, unixNanos(leaseUntil), expiry,
+		HostTaskQueued, HostTaskDispatched, expiry,
+		HostTaskQueued, HostTaskDispatched, expiry,
+	)
+	if err != nil {
 		return nil, fmt.Errorf("store: claim host task: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, s.rebind(`UPDATE host_tasks SET state = ?, lease_owner = ?, lease_until = ?, updated_at = ? WHERE id = ?`),
-		HostTaskDispatched, worker, unixNanos(now.Add(lease)), unixNanos(now), id)
+	affected, err := result.RowsAffected()
 	if err != nil {
-		return nil, fmt.Errorf("store: claim host task update: %w", err)
+		return nil, fmt.Errorf("store: claim host task: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("store: commit claim: %w", err)
+	if affected == 0 {
+		return nil, fmt.Errorf("store: host task: %w", ErrNotFound)
+	}
+
+	var id string
+	if err := s.db.QueryRowContext(ctx, s.rebind( //nolint:gosec // query is a constant; rebind only swaps placeholders
+		`SELECT id FROM host_tasks WHERE lease_owner = ? AND lease_until = ?`),
+		worker, unixNanos(leaseUntil)).Scan(&id); err != nil {
+		return nil, fmt.Errorf("store: claim host task lookup: %w", err)
 	}
 	return s.GetHostTask(ctx, id)
 }

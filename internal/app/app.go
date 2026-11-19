@@ -94,12 +94,24 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		opt(&o)
 	}
 
+	// instanceOwner identifies this fleet instance across restarts. It must be
+	// stable (hostname, or the configured HA worker id) so that a restart can
+	// recognise its own interrupted work. A pid would change on every restart.
+	instanceOwner := strings.TrimSpace(cfg.HA.WorkerID)
+	if instanceOwner == "" {
+		hostname, err := os.Hostname()
+		if err != nil || strings.TrimSpace(hostname) == "" {
+			hostname = "center"
+		}
+		instanceOwner = hostname
+	}
+
 	st, err := store.Open(ctx, cfg.Database.Driver, cfg.Database.DSN)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := st.MarkInterrupted(ctx); err != nil {
+	if err := st.MarkInterrupted(ctx, instanceOwner); err != nil {
 		_ = st.Close()
 		return nil, err
 	}
@@ -116,7 +128,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	}
 
 	instancesService := instances.New(manager)
-	migrationsService := migrations.New(manager, st, logger)
+	migrationsService := migrations.New(manager, st, logger, migrations.WithOwner(instanceOwner))
 	assetsService := assets.New(st, instancesService)
 	localNodeNet := nodenet.NewService(nodenet.SudoRunner{})
 	nodeOptions := []nodeaccess.Option{}
@@ -126,7 +138,10 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	nodeAccess := nodeaccess.New(manager, localNodeNet, cfg.NodeAccess, nodeOptions...)
 	nodeJoin := nodejoin.New(manager, cfg.NodeAccess, logger)
 	var authenticator *auth.Authenticator
-	if cfg.Mesh.Enabled {
+	// Sessions live in the database whenever more than one instance can share
+	// state: a mesh deployment, rqlite, or PostgreSQL. Only a single-node
+	// SQLite deployment keeps them in process memory.
+	if cfg.Mesh.Enabled || cfg.Database.IsShared() {
 		authenticator = auth.NewWithStore(cfg.Server.AuthToken, 12*time.Hour, st)
 	} else {
 		authenticator = auth.New(cfg.Server.AuthToken, 12*time.Hour)

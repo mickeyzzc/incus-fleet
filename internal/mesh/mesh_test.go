@@ -1002,7 +1002,7 @@ func TestRaftRelayDispatchEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		server := &http.Server{Handler: m.DispatchHandler()}
+		server := &http.Server{Handler: m.DispatchHandler(), ReadHeaderTimeout: 10 * time.Second}
 		go func() { _ = server.Serve(listener) }()
 		nodes = append(nodes, m)
 		servers = append(servers, server)

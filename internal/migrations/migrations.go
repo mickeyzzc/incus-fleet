@@ -76,12 +76,22 @@ func WithRunTimeout(timeout time.Duration) Option {
 	}
 }
 
+// WithOwner sets the stable instance identity recorded on each submitted
+// migration. A restarting instance uses it to fail only its own interrupted
+// tasks instead of those another instance is still running.
+func WithOwner(owner string) Option {
+	return func(s *Service) {
+		s.owner = strings.TrimSpace(owner)
+	}
+}
+
 // Service schedules and executes migrations.
 type Service struct {
 	clusters   *clusters.Manager
 	store      store.Store
 	logger     *slog.Logger
 	runTimeout time.Duration
+	owner      string
 
 	mu     sync.Mutex
 	active map[string]struct{}
@@ -156,6 +166,7 @@ func (s *Service) Submit(ctx context.Context, req Request) (*store.Migration, er
 		Mode:          plan.request.Mode,
 		Live:          plan.request.Live,
 		Status:        StatusPending,
+		Owner:         s.owner,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}

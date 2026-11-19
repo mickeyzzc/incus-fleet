@@ -5,9 +5,12 @@ go 1.27.0
 require (
 	github.com/golang/snappy v1.0.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
+	github.com/hashicorp/raft v1.8.0
+	github.com/hashicorp/raft-boltdb/v2 v2.4.2
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/lxc/incus/v7 v7.0.2
 	github.com/pkg/sftp v1.13.11
+	github.com/rqlite/gorqlite v0.0.0-20261020015727-7224ce2bd419
 	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0
@@ -40,8 +43,6 @@ require (
 	github.com/hashicorp/go-metrics v0.7.0 // indirect
 	github.com/hashicorp/go-msgpack/v2 v2.1.5 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
-	github.com/hashicorp/raft v1.8.0 // indirect
-	github.com/hashicorp/raft-boltdb/v2 v2.4.2 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.3 // indirect

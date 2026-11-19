@@ -110,6 +110,42 @@ func TestLoadEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestDatabaseIsShared(t *testing.T) {
+	cases := []struct {
+		driver string
+		want   bool
+	}{
+		{"sqlite", false},
+		{"rqlite", true},
+		{"postgres", true},
+	}
+	for _, tc := range cases {
+		if got := (Database{Driver: tc.driver}).IsShared(); got != tc.want {
+			t.Fatalf("Database{%q}.IsShared() = %v, want %v", tc.driver, got, tc.want)
+		}
+	}
+}
+
+func TestLoadRqliteDriver(t *testing.T) {
+	t.Setenv("INCUS_FLEET_DATABASE_DRIVER", "rqlite")
+	t.Setenv("INCUS_FLEET_DATABASE_DSN", "http://127.0.0.1:4001")
+
+	path, _, _, _ := validConfig(t)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Database.Driver != "rqlite" {
+		t.Fatalf("Driver = %q, want rqlite", cfg.Database.Driver)
+	}
+	if cfg.Database.DSN != "http://127.0.0.1:4001" {
+		t.Fatalf("DSN = %q", cfg.Database.DSN)
+	}
+	if !cfg.Database.IsShared() {
+		t.Fatal("rqlite must be treated as a shared store")
+	}
+}
+
 func TestLoadMissingFile(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
 	if err == nil || !strings.Contains(err.Error(), "read config") {

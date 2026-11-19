@@ -159,6 +159,14 @@ type Database struct {
 	DSN    string `yaml:"dsn"`
 }
 
+// IsShared reports whether the driver stores state in a backend that more than
+// one fleet instance can read at the same time. Only a single-node SQLite file
+// is instance-local; rqlite and PostgreSQL are shared, so sessions and other
+// state must live in the database rather than in process memory.
+func (d Database) IsShared() bool {
+	return d.Driver == "rqlite" || d.Driver == "postgres"
+}
+
 // Cluster describes one Incus cluster endpoint.
 type Cluster struct {
 	Name          string   `yaml:"name"`
@@ -354,7 +362,7 @@ func (c *Config) Validate() error {
 	}
 
 	switch c.Database.Driver {
-	case "sqlite", "postgres":
+	case "sqlite", "rqlite", "postgres":
 	default:
 		return fmt.Errorf("config: unsupported database.driver %q", c.Database.Driver)
 	}
