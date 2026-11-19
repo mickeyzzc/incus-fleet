@@ -108,7 +108,11 @@ func Open(ctx context.Context, driver, dsn string) (*SQLStore, error) {
 		// driver probes /status and /nodes on Open and retries failed requests
 		// against the rest of the cluster. PRAGMA and single-connection limits
 		// are SQLite-file concerns and must not be applied here.
-		db, err = sql.Open("rqlite", dsn)
+		//
+		// The wrapper driver is used rather than the upstream one because
+		// rqlite returns integers as JSON numbers, which decode to float64 and
+		// then fail to Scan into int64. See rqlite_driver.go.
+		db, err = sql.Open(rqliteDriverName, dsn)
 		if err != nil {
 			return nil, fmt.Errorf("store: open rqlite: %w", err)
 		}
