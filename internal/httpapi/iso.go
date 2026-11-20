@@ -21,6 +21,7 @@ func (a *API) listISOs(w http.ResponseWriter, r *http.Request) {
 func (a *API) importISO(w http.ResponseWriter, r *http.Request) {
 	// ISO files are several GB; the body is bounded well above any
 	// realistic installer image while the parser spills to temp files.
+	extendUploadDeadline(w)
 	r.Body = http.MaxBytesReader(w, r.Body, 12<<30)
 	if err := r.ParseMultipartForm(8 << 20); err != nil { //nolint:gosec // body bounded via MaxBytesReader
 		writeError(w, http.StatusBadRequest, "invalid_request", "multipart form required")

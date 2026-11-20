@@ -670,6 +670,7 @@ func (a *API) detachDevice(w http.ResponseWriter, r *http.Request) {
 func (a *API) importImage(w http.ResponseWriter, r *http.Request) {
 	// Image uploads can be large; the body is bounded well above any
 	// realistic image while the multipart parser spills to temp files.
+	extendUploadDeadline(w)
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<30)
 	if err := r.ParseMultipartForm(8 << 20); err != nil { //nolint:gosec // body bounded via MaxBytesReader
 		writeError(w, http.StatusBadRequest, "invalid_request", "multipart form required")
@@ -1118,6 +1119,14 @@ type statusRecorder struct {
 	http.ResponseWriter
 	status int
 	bytes  int
+}
+
+// Unwrap exposes the wrapped writer so http.ResponseController can reach the
+// connection to adjust deadlines. Without it every SetReadDeadline /
+// SetWriteDeadline call through this wrapper fails with ErrNotSupported, which
+// silently capped long uploads and node joins at the global server timeout.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 // Hijack lets websocket upgrades pass through the logging wrapper.
