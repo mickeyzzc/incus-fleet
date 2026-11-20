@@ -1081,7 +1081,9 @@ func (s *Server) GetStoragePoolVolume(pool string, volType string, name string) 
 		}
 	}
 
-	return nil, "", fmt.Errorf("storage volume %q not found", name)
+	// Mirror the real client, which answers with a StatusError so callers can
+	// distinguish "missing" from a transport failure.
+	return nil, "", api.StatusErrorf(http.StatusNotFound, "storage volume %q not found", name)
 }
 
 // CreateStoragePoolVolume implements clusters.InstanceServer.

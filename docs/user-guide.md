@@ -394,6 +394,16 @@ online terminal for `systemctl status postgresql`, logs, and database creation.
 > itself** cannot reach a macvlan instance on the same parent NIC, but other LAN machines
 > (including instances on other hosts) can. Verify from another machine.
 
+## Cross-cluster migration and guest networking
+
+Moving an instance to another cluster also moves it to that cluster's bridge subnet. After the
+transfer the fleet asks the guest to release its old DHCP lease and request a new one, so the
+instance comes back with an address from the target subnet, a correct default route, and
+working connectivity — no manual `dhclient` needed.
+
+If the guest uses a static address, or has no DHCP client installed, the migration still
+succeeds and the fleet only logs a warning; you then need to adjust that address yourself.
+
 ## Shared asset library and batch operations
 
 Keeping common content in one place and reusing it is key to reducing repetitive operations.

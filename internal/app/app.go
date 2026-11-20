@@ -128,7 +128,25 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	}
 
 	instancesService := instances.New(manager)
-	migrationsService := migrations.New(manager, st, logger, migrations.WithOwner(instanceOwner))
+	// The instance ops service runs commands inside a guest; the migration
+	// service uses it to renew the DHCP lease after a cross-cluster move.
+	networkFixer := migrations.NewNetworkFixer(
+		migrations.GuestOpsFunc(func(ctx context.Context, cluster, instance, script string) (string, string, int, error) {
+			result, err := instancesService.RunOps(ctx, cluster, instance, instances.OpsRequest{
+				Action: "run-script",
+				Script: script,
+			})
+			if err != nil {
+				return "", "", 0, err
+			}
+			return result.Stdout, result.Stderr, result.ExitCode, nil
+		}),
+		logger,
+	)
+	migrationsService := migrations.New(manager, st, logger,
+		migrations.WithOwner(instanceOwner),
+		migrations.WithNetworkFixer(networkFixer),
+	)
 	assetsService := assets.New(st, instancesService)
 	localNodeNet := nodenet.NewService(nodenet.SudoRunner{})
 	nodeOptions := []nodeaccess.Option{}

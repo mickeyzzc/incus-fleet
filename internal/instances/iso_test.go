@@ -162,3 +162,17 @@ func TestLaunchFromISO(t *testing.T) {
 		t.Fatal("LaunchFromISO() expected unknown pool error")
 	}
 }
+
+func TestLaunchFromISOMissingVolume(t *testing.T) {
+	source := &incusfake.Server{NetworkNames: []string{"incusbr0"}}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": source})
+
+	_, err := svc.LaunchFromISO(context.Background(), "c1", LaunchISORequest{
+		Name:        "installer",
+		ISOName:     "does-not-exist",
+		StoragePool: "default",
+	})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("LaunchFromISO() with a missing volume = %v, want ErrNotFound", err)
+	}
+}

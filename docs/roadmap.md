@@ -195,7 +195,25 @@ Compatibility target: Prometheus node-exporter metric names and label
 conventions, verified against a standard node-exporter instance in CI where
 feasible.
 
-## 5. Cross-node / cross-cluster networking
+## 5. Cross-node / cross-cluster networking — **DELIVERED (migration DHCP handoff)**
+
+Shipped: a cross-cluster move no longer strands the guest on its old subnet. After the
+transfer completes, the fleet asks the guest to release its DHCP lease and take a new one
+from the cluster it now lives on, so its address, default route, and connectivity come back
+without operator intervention.
+
+Verified live in both directions on the production clusters:
+
+| Direction | Before | After (automatic) | Gateway |
+| --- | --- | --- | --- |
+| c63 → c62 | `203.0.113.18/24` | `198.51.100.18/24` | 0% packet loss |
+| c62 → c63 | `198.51.100.18/24` | `203.0.113.18/24` | 0% packet loss |
+
+The step covers `dhclient`, `udhcpc`, `systemd-networkd`, and `NetworkManager`, and is
+best-effort: a guest with a static address or no DHCP client logs a warning and the
+migration still succeeds.
+
+Still open:
 
 ### Research conclusion
 
