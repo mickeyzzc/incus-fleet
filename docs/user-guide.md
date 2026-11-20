@@ -60,6 +60,27 @@ Only administrators see **Users** in the sidebar.
 
 ![Users page: account list with roles and status](images/auth/users-redacted.png)
 
+## Remote desktop: current limitation
+
+The **Remote desktop** button targets the VM's graphical console, but it does not work on
+current Incus builds and you will see `Unexpected protocol mismatch.`
+
+Why: the browser client (`spice-client`) speaks SPICE protocol 2.2, while current QEMU
+servers negotiate a newer dialect. Two remedies were evaluated and both are blocked by the
+platform itself:
+
+- **WebVNC** (QEMU `-vnc` + noVNC). The QEMU shipped by Incus, and Debian 13's own
+  `qemu-system-x86`, are both built without the VNC display backend:
+  `qemu-system-x86_64: -vnc: invalid option`, and `-display help` lists only
+  `none`, `gtk`, `sdl`, `egl-headless`, `curses`, `spice-app`, `dbus`.
+- **Incus VGA channel**. Relaying the Incus `vga` websocket does not help; the endpoint does
+  not answer a standard SPICE RedLink handshake.
+
+To get a working graphical console you need a platform change outside this repository: a
+QEMU built with `--enable-vnc`, a standalone VNC server bound to the VM display, or a
+maintained modern SPICE client. Use the **online terminal** in the meantime; it runs real
+commands and is fully verified.
+
 ## Online terminal
 
 Open the instance drawer and click **Terminal**. Containers start in **Command** mode (Incus
@@ -202,6 +223,27 @@ From the instance list or the detail drawer you can:
   the same panel.
 - **Delete instance**: asks for confirmation and can delete the instance's storage volumes at
   the same time.
+
+## Remote desktop: current limitation
+
+The **Remote desktop** button targets the VM's graphical console, but it does not work on
+current Incus builds and you will see `Unexpected protocol mismatch.`
+
+Why: the browser client (`spice-client`) speaks SPICE protocol 2.2, while current QEMU
+servers negotiate a newer dialect. Two remedies were evaluated and both are blocked by the
+platform itself:
+
+- **WebVNC** (QEMU `-vnc` + noVNC). The QEMU shipped by Incus, and Debian 13's own
+  `qemu-system-x86`, are both built without the VNC display backend:
+  `qemu-system-x86_64: -vnc: invalid option`, and `-display help` lists only
+  `none`, `gtk`, `sdl`, `egl-headless`, `curses`, `spice-app`, `dbus`.
+- **Incus VGA channel**. Relaying the Incus `vga` websocket does not help; the endpoint does
+  not answer a standard SPICE RedLink handshake.
+
+To get a working graphical console you need a platform change outside this repository: a
+QEMU built with `--enable-vnc`, a standalone VNC server bound to the VM display, or a
+maintained modern SPICE client. Use the **online terminal** in the meantime; it runs real
+commands and is fully verified.
 
 ## Online terminals and remote desktop
 

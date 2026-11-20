@@ -110,3 +110,25 @@ describe('RemoteDesktopDialog', () => {
     )
   })
 })
+
+describe('RemoteDesktopDialog protocol errors', () => {
+  it('explains the platform limitation instead of echoing the client error', async () => {
+    // Simulate the client reporting the protocol mismatch it actually produces.
+    // The mock is constructible, so replace its implementation with one that
+    // immediately reports the error the real client produces.
+    vi.mocked(SpiceMainConn).mockImplementation(function (this: unknown, options: { onerror?: (e: unknown) => void }) {
+      options.onerror?.(new Error('Unexpected protocol mismatch.'))
+      return { stop: vi.fn() }
+    } as never)
+
+    const wrapper = mountDialog(true)
+    await flushPromises()
+    await waitReal(250)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('QEMU build cannot stream')
+    expect(wrapper.text()).not.toContain('protocol mismatch')
+
+    wrapper.unmount()
+  })
+})

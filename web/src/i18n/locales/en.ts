@@ -563,6 +563,7 @@ export default {
     result: 'Exit code: {code}',
   },
   desktop: {
+    incompatible: 'This server\'s QEMU build cannot stream a graphical console to the browser (the SPICE client and QEMU server protocols differ, and the packaged QEMU has no VNC backend). Use the online terminal instead.',
     open: 'Remote desktop',
     title: 'Remote desktop',
     connecting: 'Connecting to the graphical console…',

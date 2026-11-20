@@ -55,6 +55,25 @@
 
 ![用户管理页面:账号列表、角色与状态](images/auth/users-redacted.png)
 
+## 远程桌面：当前限制
+
+「远程桌面」按钮连接的是虚拟机图形控制台,但在当前 Incus 版本上**不可用**,会显示
+`Unexpected protocol mismatch.`。
+
+原因:浏览器端 `spice-client` 使用 SPICE 协议 2.2,而当前 QEMU 服务端协商的是更新的方言。
+评估过两条替代路径,都被平台本身阻塞:
+
+- **WebVNC**(QEMU `-vnc` + noVNC)。Incus 打包的 QEMU 与 Debian 13 自带的
+  `qemu-system-x86` 都**未编译 VNC 显示后端**:执行 `-vnc` 报
+  `qemu-system-x86_64: -vnc: invalid option`,而 `-display help` 只列出
+  `none`、`gtk`、`sdl`、`egl-headless`、`curses`、`spice-app`、`dbus`。
+- **Incus VGA 通道**。转发 Incus 的 `vga` websocket 无效:该端点对标准 SPICE RedLink
+  握手没有任何响应。
+
+要获得可用的图形控制台,需要本仓库之外的平台改动:自行编译带 `--enable-vnc` 的 QEMU、
+部署绑定 VM 显示的独立 VNC 服务端,或换用维护中的现代 SPICE 客户端。在此之前请使用
+**在线终端**,它可真实执行命令且已完整验证。
+
 ## 在线终端
 
 在实例详情抽屉中点击「终端」。容器默认进入「命令行」模式(Incus 容器没有串口控制台),
@@ -178,6 +197,25 @@ ISO 镜像保存在存储池中,可随时在列表中删除。
 - **文件管理**:浏览实例文件系统、上传、下载、新建目录、删除文件。
 - **设备挂载**:为实例追加磁盘(挂载存储卷或宿主路径)或第二块网卡,卸载同样在此操作。
 - **删除实例**:需二次确认,勾选可同时删除其存储卷。
+
+## 远程桌面：当前限制
+
+「远程桌面」按钮连接的是虚拟机图形控制台,但在当前 Incus 版本上**不可用**,会显示
+`Unexpected protocol mismatch.`。
+
+原因:浏览器端 `spice-client` 使用 SPICE 协议 2.2,而当前 QEMU 服务端协商的是更新的方言。
+评估过两条替代路径,都被平台本身阻塞:
+
+- **WebVNC**(QEMU `-vnc` + noVNC)。Incus 打包的 QEMU 与 Debian 13 自带的
+  `qemu-system-x86` 都**未编译 VNC 显示后端**:执行 `-vnc` 报
+  `qemu-system-x86_64: -vnc: invalid option`,而 `-display help` 只列出
+  `none`、`gtk`、`sdl`、`egl-headless`、`curses`、`spice-app`、`dbus`。
+- **Incus VGA 通道**。转发 Incus 的 `vga` websocket 无效:该端点对标准 SPICE RedLink
+  握手没有任何响应。
+
+要获得可用的图形控制台,需要本仓库之外的平台改动:自行编译带 `--enable-vnc` 的 QEMU、
+部署绑定 VM 显示的独立 VNC 服务端,或换用维护中的现代 SPICE 客户端。在此之前请使用
+**在线终端**,它可真实执行命令且已完整验证。
 
 ## 在线终端与远程桌面
 

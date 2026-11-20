@@ -555,6 +555,7 @@ export default {
     result: '退出码:{code}',
   },
   desktop: {
+    incompatible: '该服务器的 QEMU 构建无法向浏览器串流图形控制台(SPICE 客户端与服务端协议版本不一致,且打包的 QEMU 未启用 VNC 后端)。请改用在线终端。',
     open: '远程桌面',
     title: '远程桌面',
     connecting: '正在连接图形控制台…',

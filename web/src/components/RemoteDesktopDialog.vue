@@ -64,15 +64,32 @@ async function connect(): Promise<void> {
         status.value = ''
       },
       onerror: (err: unknown) => {
-        status.value = errorMessage(err)
+        status.value = describeDesktopError(err)
         connected.value = false
       },
     })
   } catch (err) {
-    status.value = errorMessage(err)
+    status.value = describeDesktopError(err)
   } finally {
     connecting.value = false
   }
+}
+
+/**
+ * Turns the SPICE client's protocol errors into something actionable.
+ *
+ * The bundled client speaks SPICE protocol 2.2 while current QEMU servers
+ * negotiate a newer dialect, and neither the Incus QEMU build nor Debian's own
+ * ships the VNC display backend. That is a platform limitation, so the message
+ * points at the working alternative instead of echoing "protocol mismatch".
+ */
+function describeDesktopError(err: unknown): string {
+  const raw = errorMessage(err)
+  if (/protocol mismatch|unexpected close|connection refused|websocket/i.test(raw)) {
+    return t('desktop.incompatible')
+  }
+
+  return raw
 }
 
 /** Polls for the dialog-mounted host element (up to ~4s). */
