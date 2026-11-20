@@ -212,6 +212,7 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore", a.requireWriter(http.HandlerFunc(a.restoreSnapshot)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}", a.requireWriter(http.HandlerFunc(a.deleteSnapshot)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/devices", a.requireWriter(http.HandlerFunc(a.attachDevice)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/instances/{instance}/devices/{device}", a.requireWriter(http.HandlerFunc(a.updateDevice)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/devices/{device}", a.requireWriter(http.HandlerFunc(a.detachDevice)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/console", a.requireAuth(http.HandlerFunc(a.instanceTerminal)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/vga", a.requireAuth(http.HandlerFunc(a.instanceVga)))
@@ -672,6 +673,24 @@ func (a *API) attachDevice(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) detachDevice(w http.ResponseWriter, r *http.Request) {
 	detail, err := a.instances.DetachDevice(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), r.PathValue("device"))
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// updateDevice applies one device edit and returns the refreshed detail.
+func (a *API) updateDevice(w http.ResponseWriter, r *http.Request) {
+	var req instances.DeviceRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	detail, err := a.instances.UpdateDevice(
+		r.Context(), r.PathValue("cluster"), r.PathValue("instance"), r.PathValue("device"), req)
 	if err != nil {
 		a.serviceError(w, r, err)
 		return

@@ -39,7 +39,7 @@ class MockWebSocket {
   binaryType = 'blob'
   sent: (string | ArrayBuffer)[] = []
   onopen: (() => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((event?: { code: number; reason: string }) => void) | null = null
   onmessage: ((event: { data: unknown }) => void) | null = null
   onerror: (() => void) | null = null
 
@@ -223,10 +223,34 @@ describe('TerminalDialog', () => {
 
     socket.onmessage?.({ data: 'plain text' })
     socket.onmessage?.({ data: new TextEncoder().encode('bytes').buffer })
-    socket.onclose?.()
+    socket.onclose?.({ code: 1000, reason: '' })
     await flushPromises()
 
     expect(wrapper.text()).toBeTruthy()
+  })
+
+  it('surfaces the backend close reason instead of a bare disconnect', async () => {
+    const wrapper = mountDialog()
+    await settle()
+
+    const socket = MockWebSocket.instances[0]
+    if (!socket) {
+      throw new Error('socket missing')
+    }
+
+    // A failed exec (agent missing) closes with 1011 plus the server reason.
+    socket.onclose?.({ code: 1011, reason: 'Failed to connect to the incus-agent' })
+    await flushPromises()
+
+    const status = wrapper.find('.terminal-toolbar .el-tag')
+    expect(status.text()).toContain('Failed to connect to the incus-agent')
+
+    // A normal close without a reason still reads as a plain disconnect.
+    socket.onclose?.({ code: 1000, reason: '' })
+    await flushPromises()
+    expect(status.text()).toBe('Disconnected.')
+
+    wrapper.unmount()
   })
 
   it('sends resize frames on demand and reports socket errors', async () => {

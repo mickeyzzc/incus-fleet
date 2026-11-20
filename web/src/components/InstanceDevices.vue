@@ -36,6 +36,23 @@ const form = reactive({
   connect: '',
 })
 
+// Edit dialog state. editingDevice keeps the pre-edit map so legacy NICs
+// (nictype+parent) can keep those keys when the network is not switched.
+const editOpen = ref(false)
+const editName = ref('')
+const editingDevice = ref<Record<string, string>>({})
+const editForm = reactive({
+  pool: '',
+  source: '',
+  path: '',
+  size: '',
+  network: '',
+  ipv4: '',
+  ipv6: '',
+  listen: '',
+  connect: '',
+})
+
 // Rows are populated after mount so el-table renders them once its columns
 // have registered; a static first render would leave the cells empty in tests.
 const rows = ref<Array<{ name: string; device: Record<string, string> }>>([])
@@ -56,6 +73,14 @@ watch(
 
 const pools = computed(() => instances.resources(props.cluster)?.storage_pools ?? [])
 const networks = computed(() => instances.resources(props.cluster)?.networks ?? [])
+
+// A legacy NIC has no "network" key; its parent is offered as a selectable
+// option so the edit form can also migrate it onto a managed network.
+const editLegacyParent = computed(() =>
+  editingDevice.value.type === 'nic' && !editingDevice.value.network && editingDevice.value.parent
+    ? editingDevice.value.parent
+    : '',
+)
 
 watch(attachOpen, (open) => {
   if (!open) {
@@ -126,6 +151,64 @@ async function submitAttach(): Promise<void> {
   }
 }
 
+async function openEdit(row: { name: string; device: Record<string, string> }): Promise<void> {
+  await instances.fetchResources(props.cluster)
+  editName.value = row.name
+  editingDevice.value = { ...row.device }
+  editForm.pool = row.device.pool ?? ''
+  editForm.source = row.device.source ?? ''
+  editForm.path = row.device.path ?? ''
+  editForm.size = row.device.size ?? ''
+  editForm.network = row.device.network ?? row.device.parent ?? ''
+  editForm.ipv4 = row.device['ipv4.address'] ?? ''
+  editForm.ipv6 = row.device['ipv6.address'] ?? ''
+  editForm.listen = row.device.listen ?? ''
+  editForm.connect = row.device.connect ?? ''
+  editOpen.value = true
+}
+
+/** Builds the edit request; empty NIC addresses clear back to DHCP. */
+function editRequest(): DeviceRequest {
+  const device = editingDevice.value
+  const payload: DeviceRequest = { name: editName.value, type: 'nic' }
+
+  if (device.type === 'nic') {
+    // Only send a network when it differs from the legacy parent: a legacy
+    // nictype+parent NIC keeps its keys unless the user switches networks.
+    const current = device.network ?? device.parent ?? ''
+    if (editForm.network && editForm.network !== current) {
+      payload.network = editForm.network
+    }
+    payload.ipv4 = editForm.ipv4.trim()
+    payload.ipv6 = editForm.ipv6.trim()
+    return payload
+  }
+
+  payload.type = 'disk'
+  if (editForm.pool.trim()) payload.pool = editForm.pool.trim()
+  if (editForm.source.trim()) payload.source = editForm.source.trim()
+  if (editForm.path.trim()) payload.path = editForm.path.trim()
+  if (editForm.size.trim()) payload.size = editForm.size.trim()
+  if (device.type === 'proxy') {
+    payload.type = 'proxy'
+    if (editForm.listen.trim()) payload.listen = editForm.listen.trim()
+    if (editForm.connect.trim()) payload.connect = editForm.connect.trim()
+  }
+
+  return payload
+}
+
+async function submitEdit(): Promise<void> {
+  try {
+    const detail = await instances.updateDevice(props.cluster, props.instance, editName.value, editRequest())
+    ElMessage.success(t('devices.updated', { name: editName.value }))
+    editOpen.value = false
+    emit('changed', detail)
+  } catch (err) {
+    ElMessage.error(t('devices.failed', { error: errorMessage(err) }))
+  }
+}
+
 async function detach(name: string): Promise<void> {
   try {
     await ElMessageBox.confirm(
@@ -156,25 +239,38 @@ async function detach(name: string): Promise<void> {
     </div>
 
     <el-table :data="rows" size="small" stripe>
+      <el-table-column type="expand">
+        <template #default="{ row }">
+          <div class="device-detail">
+            <div v-for="(value, key) in row.device" :key="key" class="device-detail-row">
+              <span class="device-detail-key">{{ key }}</span>
+              <code>{{ value === '' ? '—' : value }}</code>
+            </div>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column :label="t('common.name')" min-width="110">
         <template #default="{ row }">
           <strong>{{ row.name }}</strong>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.type')" width="100">
+      <el-table-column :label="t('common.type')" width="90">
         <template #default="{ row }">
           <el-tag size="small" effect="plain">{{ deviceLabel(row.device.type) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="t('admin.config')" min-width="200">
+      <el-table-column :label="t('admin.config')" min-width="220">
         <template #default="{ row }">
           <span class="mono device-config">
             {{ Object.entries(row.device).filter(([key]) => key !== 'type').map(([key, value]) => `${key}=${value}`).join(' · ') }}
           </span>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.actions')" width="90">
+      <el-table-column :label="t('common.actions')" width="130" fixed="right">
         <template #default="{ row }">
+          <el-button link type="primary" @click="openEdit(row)">
+            {{ t('common.edit') }}
+          </el-button>
           <el-button link type="danger" @click="detach(row.name)">
             {{ t('devices.detach') }}
           </el-button>
@@ -258,6 +354,69 @@ async function detach(name: string): Promise<void> {
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="editOpen"
+      :title="t('devices.editTitle', { name: editName })"
+      width="480px"
+      destroy-on-close
+    >
+      <el-form label-position="top" @submit.prevent="submitEdit">
+        <template v-if="editingDevice.type === 'nic'">
+          <el-form-item :label="t('form.network')">
+            <el-select v-model="editForm.network" style="width: 100%">
+              <el-option
+                v-for="network in networks"
+                :key="network.name"
+                :label="`${network.name} · ${network.type}`"
+                :value="network.name"
+              />
+              <el-option
+                v-if="editLegacyParent"
+                :label="`${editLegacyParent} · ${t('devices.customParent')}`"
+                :value="editLegacyParent"
+              />
+            </el-select>
+            <p class="field-hint">{{ t('devices.networkHint') }}</p>
+          </el-form-item>
+          <el-form-item :label="t('form.ipv4')">
+            <el-input v-model="editForm.ipv4" :placeholder="t('form.ipv4Placeholder')" />
+            <p class="field-hint">{{ t('devices.addressHint') }}</p>
+          </el-form-item>
+          <el-form-item :label="t('form.ipv6')">
+            <el-input v-model="editForm.ipv6" :placeholder="t('form.ipv6Placeholder')" />
+          </el-form-item>
+        </template>
+
+        <template v-else-if="editingDevice.type === 'proxy'">
+          <el-form-item :label="t('devices.listen')">
+            <el-input v-model="editForm.listen" placeholder="tcp:0.0.0.0:8080" />
+          </el-form-item>
+          <el-form-item :label="t('devices.connect')">
+            <el-input v-model="editForm.connect" placeholder="tcp:127.0.0.1:80" />
+          </el-form-item>
+        </template>
+
+        <template v-else>
+          <el-form-item :label="t('devices.source')">
+            <el-input v-model="editForm.source" />
+          </el-form-item>
+          <el-form-item :label="t('devices.path')">
+            <el-input v-model="editForm.path" />
+          </el-form-item>
+          <el-form-item :label="t('devices.size')">
+            <el-input v-model="editForm.size" :placeholder="t('form.rootDiskPlaceholder')" />
+            <p class="field-hint">{{ t('devices.sizeHint') }}</p>
+          </el-form-item>
+        </template>
+      </el-form>
+      <template #footer>
+        <el-button @click="editOpen = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="instances.saving" @click="submitEdit">
+          {{ t('common.save') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -273,6 +432,29 @@ async function detach(name: string): Promise<void> {
   white-space: nowrap;
   display: block;
 }
+
+.device-detail {
+  padding: 4px 12px 8px 48px;
+}
+
+.device-detail-row {
+  display: flex;
+  gap: 12px;
+  padding: 2px 0;
+  align-items: baseline;
+}
+
+.device-detail-key {
+  color: var(--fleet-ink-soft);
+  font-size: 12px;
+  min-width: 120px;
+}
+
+.device-detail-row code {
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
 .field-hint {
   margin-top: 4px;
   color: var(--fleet-ink-soft);

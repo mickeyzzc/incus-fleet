@@ -309,6 +309,11 @@ func (s *Service) Update(ctx context.Context, clusterName, name string, req Upda
 				return Detail{}, fmt.Errorf("%w: network %q does not exist on %s", ErrInvalidRequest, network, clusterName)
 			}
 			nic["network"] = network
+			// "network" and "nictype"/"parent" are mutually exclusive in Incus;
+			// a legacy NIC (nictype+parent) must drop those keys on switch or
+			// the update is rejected outright.
+			delete(nic, "nictype")
+			delete(nic, "parent")
 		}
 
 		if req.IPv4 != nil {

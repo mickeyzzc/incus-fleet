@@ -306,6 +306,30 @@ func TestUpdateUsesExpandedNIC(t *testing.T) {
 	}
 }
 
+// A legacy nictype+parent NIC cannot carry "network"; switching networks must
+// drop the legacy keys or Incus rejects the whole update.
+func TestUpdateLegacyNICSwitchDropsNictype(t *testing.T) {
+	instance := manageInstance("vm1")
+	instance.Devices["eth0"] = map[string]string{"type": "nic", "nictype": "bridged", "parent": "incusbr0"}
+	srv := &incusfake.Server{Instance: instance, NetworkNames: []string{"incusbr0", "incusbr1"}}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	network := "incusbr1"
+	if _, err := svc.Update(context.Background(), "c1", "vm1", UpdateRequest{Device: "eth0", Network: &network}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	nic := srv.UpdateArgs()[0].Instance.Devices["eth0"]
+	if nic["network"] != "incusbr1" {
+		t.Fatalf("nic = %#v", nic)
+	}
+	if _, has := nic["nictype"]; has {
+		t.Fatalf("nictype must be dropped on network switch: %#v", nic)
+	}
+	if _, has := nic["parent"]; has {
+		t.Fatalf("parent must be dropped on network switch: %#v", nic)
+	}
+}
+
 func TestUpdateValidation(t *testing.T) {
 	srv := &incusfake.Server{Instance: manageInstance("vm1"), NetworkNames: []string{"incusbr0"}}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})

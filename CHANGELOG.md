@@ -93,8 +93,21 @@ All notable changes to this project are documented here. The format follows
 - Native Linux netlink for link/address/fleet-route writes, an opt-in detached network rollback
   timer, and agent-backed node network routing for the existing UI.
 
+- Device editing: `PATCH /clusters/{cluster}/instances/{instance}/devices/{device}` merges an
+  edit into the attached device (network switch, static addresses, size), preserving keys the
+  form does not manage; the devices panel shows an expandable full-configuration view per
+  device.
+- The remote desktop toolbar gains start/restart/stop controls and the guest power state, so a
+  stopped VM can be booted without leaving the console.
+- Terminal dialogs now surface the server's websocket close reason (missing incus agent,
+  stopped instance, busy console) and hint VM serial-console expectations.
+
 ### Fixed
 
+- Instance NIC edits no longer fail or silently do nothing: switching a legacy
+  `nictype`/`parent` NIC to a managed network now drops the conflicting keys instead of
+  sending both, and the edit form disables device-level addresses for physical NICs (which
+  take their addresses from the LAN DHCP server) instead of dropping them quietly.
 - Cluster TLS certificate fields accept inline PEM bodies as well as file paths.
 - `.gitignore` excludes `*.crt` certificate files.
 - Large uploads no longer die at the 60-second handler deadline; image and ISO imports get an

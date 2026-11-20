@@ -444,6 +444,164 @@ func (s *Service) DetachDevice(ctx context.Context, clusterName, name, deviceNam
 	return s.Get(clusterName, name)
 }
 
+// UpdateDevice applies an edit to one attached device and waits for the
+// operation.
+//
+// The request is merged into the existing device map, so keys the form does
+// not manage (boot priority, hardware address, legacy nictype/parent) survive
+// an edit. A NIC switched to a managed network drops the legacy nictype and
+// parent keys, which Incus rejects when combined with "network". Empty
+// addresses and sizes clear their key, matching the instance update semantics.
+func (s *Service) UpdateDevice(ctx context.Context, clusterName, name, deviceName string, req DeviceRequest) (Detail, error) {
+	deviceName = strings.TrimSpace(deviceName)
+	if validateName(deviceName) != nil {
+		return Detail{}, fmt.Errorf("%w: device name is invalid", ErrInvalidRequest)
+	}
+
+	client, err := s.client(clusterName)
+	if err != nil {
+		return Detail{}, err
+	}
+
+	instance, etag, err := client.GetInstance(name)
+	if err != nil {
+		if isNotFound(err) {
+			return Detail{}, fmt.Errorf("%w: %s:%s", ErrNotFound, clusterName, name)
+		}
+
+		return Detail{}, fmt.Errorf("instances: get %s:%s: %w", clusterName, name, err)
+	}
+
+	put := instance.InstancePut
+	put.Config = copyConfig(instance.Config)
+	put.Devices = copyDevices(instance.Devices)
+	put.Profiles = append([]string{}, instance.Profiles...)
+
+	device, ok := put.Devices[deviceName]
+	if !ok {
+		expanded, exists := instance.ExpandedDevices[deviceName]
+		if !exists {
+			return Detail{}, fmt.Errorf("%w: device %q is not attached to %s", ErrInvalidRequest, deviceName, name)
+		}
+
+		// Editing a profile-provided device copies it to instance level first:
+		// Incus only applies instance device changes to the instance map.
+		device = copyDevice(expanded)
+	}
+
+	merged, err := mergeDevice(client, clusterName, device, req)
+	if err != nil {
+		return Detail{}, err
+	}
+
+	put.Devices[deviceName] = merged
+
+	ctx, cancel := context.WithTimeout(ctx, updateTimeout)
+	defer cancel()
+
+	op, err := client.UpdateInstance(name, put, etag)
+	if err != nil {
+		return Detail{}, fmt.Errorf("instances: update device %s:%s/%s: %w", clusterName, name, deviceName, err)
+	}
+	if err := waitOperation(ctx, op, "update device "+name+"/"+deviceName); err != nil {
+		return Detail{}, err
+	}
+
+	return s.Get(clusterName, name)
+}
+
+// mergeDevice applies one DeviceRequest onto an existing device map.
+//
+// Fields the request leaves empty keep their current value except for the NIC
+// addresses, where an empty value removes the key so the device falls back to
+// DHCP. An empty request type keeps the device's existing type.
+func mergeDevice(
+	client clusters.InstanceServer,
+	clusterName string,
+	device map[string]string,
+	req DeviceRequest,
+) (map[string]string, error) {
+	merged := copyDevice(device)
+
+	deviceType := strings.TrimSpace(req.Type)
+	if deviceType == "" {
+		deviceType = merged["type"]
+	}
+
+	switch deviceType {
+	case "nic":
+		merged["type"] = "nic"
+		if network := strings.TrimSpace(req.Network); network != "" {
+			networks, err := client.GetNetworkNames()
+			if err != nil {
+				return nil, fmt.Errorf("instances: list networks for %s: %w", clusterName, err)
+			}
+			if !containsString(networks, network) {
+				return nil, fmt.Errorf("%w: network %q does not exist on %s", ErrInvalidRequest, network, clusterName)
+			}
+
+			merged["network"] = network
+			delete(merged, "nictype")
+			delete(merged, "parent")
+		}
+
+		if err := validateIP("ipv4", req.IPv4, false); err != nil {
+			return nil, err
+		}
+		if err := validateIP("ipv6", req.IPv6, true); err != nil {
+			return nil, err
+		}
+
+		setOrDelete(merged, "ipv4.address", strings.TrimSpace(req.IPv4))
+		setOrDelete(merged, "ipv6.address", strings.TrimSpace(req.IPv6))
+
+		return merged, nil
+	case "disk":
+		merged["type"] = "disk"
+		if path := strings.TrimSpace(req.Path); path != "" {
+			merged["path"] = path
+		}
+		if pool := strings.TrimSpace(req.Pool); pool != "" {
+			merged["pool"] = pool
+		}
+		if source := strings.TrimSpace(req.Source); source != "" {
+			merged["source"] = source
+		}
+		if size := strings.TrimSpace(req.Size); size != "" {
+			if err := validateSize("size", size); err != nil {
+				return nil, err
+			}
+
+			merged["size"] = size
+		}
+
+		return merged, nil
+	case "proxy":
+		merged["type"] = "proxy"
+		if listen := strings.TrimSpace(req.Listen); listen != "" {
+			if err := validateProxyEndpoint("listen", listen); err != nil {
+				return nil, err
+			}
+
+			merged["listen"] = listen
+		}
+		if connect := strings.TrimSpace(req.Connect); connect != "" {
+			if err := validateProxyEndpoint("connect", connect); err != nil {
+				return nil, err
+			}
+
+			merged["connect"] = connect
+		}
+		if merged["listen"] == "" || merged["connect"] == "" {
+			return nil, fmt.Errorf("%w: proxy device requires listen and connect", ErrInvalidRequest)
+		}
+
+		return merged, nil
+	default:
+		return nil, fmt.Errorf("%w: device type must be disk, nic, or proxy", ErrInvalidRequest)
+	}
+}
+
 // DeleteImage removes an image from a cluster and waits for the operation.
 func (s *Service) DeleteImage(ctx context.Context, clusterName, fingerprint string) error {
 	fingerprint = strings.TrimSpace(fingerprint)

@@ -778,6 +778,28 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
+  /** Updates one device's configuration and caches the returned detail. */
+  async function updateDevice(
+    cluster: string,
+    instance: string,
+    device: string,
+    request: DeviceRequest,
+  ): Promise<InstanceDetail> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const detail = await api.updateDevice(cluster, instance, device, request)
+      details.value[detailKey(cluster, instance)] = detail
+      return detail
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
   /** Lists one directory inside an instance, caching per path. */
   async function fetchFiles(cluster: string, instance: string, dir: string): Promise<void> {
     const key = fileKey(cluster, instance, dir)
@@ -969,6 +991,7 @@ export const useInstancesStore = defineStore('instances', () => {
     deleteVolume,
     attachDevice,
     detachDevice,
+    updateDevice,
     fetchFiles,
     uploadFile,
     mkdirDir,

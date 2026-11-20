@@ -65,13 +65,22 @@ func relayTerminal(ctx context.Context, browser *websocket.Conn, op incus.Operat
 
 	go incusToBrowser(browser, data, done)
 	go browserToIncus(browser, data, controlConn, done)
+	opDone := make(chan error, 1)
 	go func() {
 		waitErr := op.WaitContext(ctx)
 		debugf("relay: operation finished: %v", waitErr)
-		done <- nil
+		opDone <- waitErr
 	}()
 
 	first := <-done
+
+	// Give the operation a moment to report its own failure (missing agent,
+	// stopped instance); that error is the reason the terminal should show.
+	var opErr error
+	select {
+	case opErr = <-opDone:
+	case <-time.After(2 * time.Second):
+	}
 
 	// Best-effort teardown of the remote operation. When a client vanishes
 	// the container-side console session can outlive the websocket and leave
@@ -85,10 +94,26 @@ func relayTerminal(ctx context.Context, browser *websocket.Conn, op incus.Operat
 	// Send websocket close frames before dropping the sockets. A bare TCP
 	// FIN looks like an abnormal closure (1006) to incusd, and its console
 	// handler then leaves the container-side forkconsole process running.
+	// A failed operation closes with its error text (bounded to the close
+	// frame's payload limit, on a rune boundary for UTF-8 safety) so the
+	// browser can show why the session died instead of a bare disconnect.
+	code := websocket.CloseNormalClosure
+	reason := ""
+	if opErr != nil {
+		code = websocket.CloseInternalServerErr
+		reason = opErr.Error()
+		if len(reason) > 120 {
+			runes := []rune(reason)
+			for len(string(runes)) > 120 {
+				runes = runes[:len(runes)-1]
+			}
+			reason = string(runes)
+		}
+	}
 	closeFrame := func(conn *websocket.Conn) {
 		deadline := time.Now().Add(time.Second)
 		_ = conn.WriteControl(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), deadline)
+			websocket.FormatCloseMessage(code, reason), deadline)
 	}
 	closeFrame(data)
 	closeFrame(browser)

@@ -106,8 +106,15 @@ function connect(kind: 'console' | 'exec'): void {
   socket.onmessage = (event) => {
     term?.write(decodePayload(event.data))
   }
-  socket.onclose = () => {
+  socket.onclose = (event) => {
     connected.value = false
+    // The backend reports session failures (agent missing, instance stopped,
+    // console busy) through the close reason; hiding it left dead terminals
+    // that only said "disconnected".
+    if ((event?.code ?? 1000) !== 1000 && event?.reason) {
+      statusMessage.value = t('terminal.failed', { error: event.reason })
+      return
+    }
     statusMessage.value = t('terminal.disconnected')
   }
   socket.onerror = () => {
@@ -239,6 +246,15 @@ onBeforeUnmount(closeSession)
 
     <div id="terminal-host" class="terminal-host" />
 
+    <el-alert
+      v-if="mode === 'console' && instanceType === 'virtual-machine'"
+      :title="t('terminal.vmConsoleHint')"
+      type="info"
+      :closable="false"
+      class="terminal-hint"
+      show-icon
+    />
+
     <div v-if="mode === 'exec'" class="exec-bar">
       <el-input
         v-model="command"
@@ -266,6 +282,10 @@ onBeforeUnmount(closeSession)
   background: #14171c;
   border-radius: 6px;
   padding: 6px;
+}
+
+.terminal-hint {
+  margin-top: 10px;
 }
 
 .exec-bar {

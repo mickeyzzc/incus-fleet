@@ -4,6 +4,8 @@ import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import { api } from '@/api'
+import type { InstanceAction } from '@/api/types'
+import { useInstancesStore } from '@/stores/instances'
 import { errorMessage } from '@/utils/errors'
 
 // Screenshot polling interval. QEMU's screendump round trip is well under a
@@ -26,11 +28,13 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const instances = useInstancesStore()
 
 const preparing = ref(false)
 const live = ref(false)
 const status = ref('')
 const frameInfo = ref('')
+const powerBusy = ref(false)
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
@@ -43,11 +47,17 @@ const visible = computed({
   set: (value: boolean) => emit('update:modelValue', value),
 })
 
+// The guest's power state drives the toolbar buttons; a stopped VM shows the
+// offline notice instead of a confusing screenshot error.
+const guest = computed(() => instances.detail(props.cluster, props.instance))
+const running = computed(() => (guest.value?.status ?? '').toLowerCase() === 'running')
+
 watch(
   () => props.modelValue,
   (open) => {
     if (open) {
       void openConsole()
+      void instances.fetchDetail(props.cluster, props.instance)
       return
     }
 
@@ -88,6 +98,19 @@ async function openConsole(): Promise<void> {
   schedulePoll(session, 0)
 }
 
+/** Starts, stops, or restarts the guest from the console toolbar. */
+async function power(action: InstanceAction): Promise<void> {
+  powerBusy.value = true
+  try {
+    await instances.instanceAction(props.cluster, props.instance, action)
+    ElMessage.success(t('desktop.powerDone', { action: t(`common.${action}`) }))
+  } catch (err) {
+    ElMessage.error(t('desktop.powerFailed', { error: errorMessage(err) }))
+  } finally {
+    powerBusy.value = false
+  }
+}
+
 /** Polls for the dialog-mounted host element (up to ~4s). */
 async function waitForHost(session: number): Promise<void> {
   for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -125,7 +148,9 @@ async function pollFrame(session: number): Promise<void> {
   } catch (err) {
     // Transient errors (guest restarting, member busy) keep the loop alive.
     if (session === generation) {
-      status.value = errorMessage(err)
+      // A stopped guest cannot serve frames; the offline notice explains the
+      // situation, so the raw host error would only add noise.
+      status.value = running.value ? errorMessage(err) : ''
     }
   } finally {
     pollBusy = false
@@ -334,13 +359,42 @@ onBeforeUnmount(stopConsole)
       <el-tag :type="live ? 'success' : 'info'" size="small" effect="light">
         {{ preparing ? t('desktop.preparing') : live ? t('desktop.connected') : t('desktop.waiting') }}
       </el-tag>
+      <el-tag v-if="guest" size="small" effect="plain" :type="running ? 'success' : 'info'">
+        {{ guest.status }}
+      </el-tag>
       <span v-if="frameInfo" class="desktop-frame">{{ frameInfo }}</span>
       <span v-if="status" class="desktop-error">{{ status }}</span>
       <div class="desktop-actions">
+        <el-button
+          v-if="!running"
+          size="small"
+          type="primary"
+          :loading="powerBusy"
+          @click="power('start')"
+        >
+          {{ t('common.start') }}
+        </el-button>
+        <template v-else>
+          <el-button size="small" :loading="powerBusy" @click="power('restart')">
+            {{ t('common.restart') }}
+          </el-button>
+          <el-button size="small" type="danger" plain :loading="powerBusy" @click="power('stop')">
+            {{ t('common.stop') }}
+          </el-button>
+        </template>
         <el-button size="small" @click="refreshFrame">{{ t('common.refresh') }}</el-button>
         <el-button size="small" @click="sendCtrlAltDel">{{ t('desktop.ctrlAltDel') }}</el-button>
       </div>
     </div>
+
+    <el-alert
+      v-if="guest && !running"
+      :title="t('desktop.offline')"
+      type="warning"
+      :closable="false"
+      class="desktop-offline"
+      show-icon
+    />
 
     <canvas
       id="remote-desktop-host"
@@ -383,6 +437,10 @@ onBeforeUnmount(stopConsole)
   margin-left: auto;
   display: flex;
   gap: 8px;
+}
+
+.desktop-offline {
+  margin-bottom: 10px;
 }
 
 .desktop-host {

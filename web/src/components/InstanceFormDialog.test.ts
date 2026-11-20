@@ -170,17 +170,67 @@ describe('InstanceFormDialog', () => {
     await buttonByText(wrapper, 'Save changes').trigger('click')
     await flushPromises()
 
+    // An unchanged network is not re-sent; only the edited fields travel.
     expect(api.updateInstance).toHaveBeenCalledWith('c1', 'web', {
       description: 'web frontend',
       cpu: '2',
       memory: '',
       root_disk_size: '20GiB',
       device: 'eth0',
-      network: 'incusbr0',
       ipv4: '10.0.0.60',
       ipv6: 'fd42::50',
     })
     expect(ElMessage.success).toHaveBeenCalledWith('Updated web.')
+  })
+
+  it('sends the network when the NIC switches to another network', async () => {
+    const detail = instanceDetail({
+      devices: {
+        root: { type: 'disk', pool: 'default', path: '/' },
+        eth0: { type: 'nic', network: 'incusbr0' },
+      },
+    })
+
+    const wrapper = mountDialog({ mode: 'edit', instance: detail })
+    await flushPromises()
+
+    selectAt(wrapper, 0, 'incusbr1')
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Save changes').trigger('click')
+    await flushPromises()
+
+    expect(api.updateInstance).toHaveBeenCalledWith(
+      'c1',
+      'web',
+      expect.objectContaining({ device: 'eth0', network: 'incusbr1' }),
+    )
+  })
+
+  it('leaves physical NIC addresses alone in edit mode and says why', async () => {
+    const detail = instanceDetail({
+      devices: {
+        root: { type: 'disk', pool: 'default', path: '/' },
+        eth0: { type: 'nic', nictype: 'macvlan', parent: 'lan0' },
+      },
+    })
+
+    const wrapper = mountDialog({ mode: 'edit', instance: detail })
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Save changes').trigger('click')
+    await flushPromises()
+
+    expect(api.updateInstance).toHaveBeenCalledWith(
+      'c1',
+      'web',
+      expect.objectContaining({ device: 'eth0' }),
+    )
+    expect(api.updateInstance).toHaveBeenCalledWith(
+      'c1',
+      'web',
+      expect.not.objectContaining({ ipv4: expect.anything() }),
+    )
   })
 
   it('omits network fields when the instance has no NIC device', async () => {

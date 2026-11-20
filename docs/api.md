@@ -121,6 +121,7 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | POST | `/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore` | yes | Restore a snapshot |
 | DELETE | `/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}` | yes | Delete a snapshot |
 | POST | `/clusters/{cluster}/instances/{instance}/devices` | yes | Attach a disk or NIC device |
+| PATCH | `/clusters/{cluster}/instances/{instance}/devices/{device}` | yes | Edit one device (merged into the existing config; empty NIC addresses fall back to DHCP) |
 | DELETE | `/clusters/{cluster}/instances/{instance}/devices/{device}` | yes | Detach a device |
 | GET | `/clusters/{cluster}/instances/{instance}/console` | yes | Interactive console (WebSocket) |
 | GET | `/clusters/{cluster}/instances/{instance}/exec` | yes | Interactive exec session (WebSocket) |

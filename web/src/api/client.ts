@@ -538,6 +538,19 @@ export class ApiClient {
     )
   }
 
+  async updateDevice(
+    cluster: string,
+    instance: string,
+    device: string,
+    request: DeviceRequest,
+  ): Promise<InstanceDetail> {
+    return this.request<InstanceDetail>(
+      'PATCH',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/devices/${encodeURIComponent(device)}`,
+      request,
+    )
+  }
+
   async getResources(cluster: string): Promise<ClusterResources> {
     return this.request<ClusterResources>(
       'GET',

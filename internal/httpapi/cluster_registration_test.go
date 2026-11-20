@@ -8,7 +8,6 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
 )
 
-
 func TestUnregisterClusterRequiresStore(t *testing.T) {
 	// Cluster registration is a runtime feature; without a persistent store the
 	// endpoint must say so instead of failing later on a nil pointer.

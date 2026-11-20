@@ -488,6 +488,7 @@ describe('ApiClient', () => {
       [() => client.restoreSnapshot('c1', 'web', 'snap0'), 'POST', '/api/v1/clusters/c1/instances/web/snapshots/snap0/restore'],
       [() => client.deleteSnapshot('c1', 'web', 'snap0'), 'DELETE', '/api/v1/clusters/c1/instances/web/snapshots/snap0'],
       [() => client.attachDevice('c1', 'web', { name: 'data', type: 'disk' }), 'POST', '/api/v1/clusters/c1/instances/web/devices'],
+      [() => client.updateDevice('c1', 'web', 'data', { name: 'data', type: 'disk' }), 'PATCH', '/api/v1/clusters/c1/instances/web/devices/data'],
       [() => client.detachDevice('c1', 'web', 'data'), 'DELETE', '/api/v1/clusters/c1/instances/web/devices/data'],
       [() => client.instanceMetrics('c1', 'web'), 'GET', '/api/v1/clusters/c1/instances/web/metrics'],
       [() => client.deleteInstance('c1', 'web', true), 'DELETE', '/api/v1/clusters/c1/instances/web?force=true'],

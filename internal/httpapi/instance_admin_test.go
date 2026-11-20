@@ -187,6 +187,35 @@ func TestInstanceAdminEndpoints(t *testing.T) {
 		t.Fatalf("detach missing status = %d body = %s", rec.Code, rec.Body.String())
 	}
 
+	// Devices: PATCH edits an existing device (legacy NIC keeps its keys).
+	legacy := *source.Instance
+	legacy.Devices = api.DevicesMap{
+		"root": {"type": "disk", "path": "/", "pool": "default"},
+		"eth0": {"type": "nic", "nictype": "bridged", "parent": "incusbr0", "ipv4.address": "10.0.0.9"},
+	}
+	source.Instance = &legacy
+
+	rec = f.request(t, http.MethodPatch, "/api/v1/clusters/c1/instances/web/devices/eth0", map[string]any{
+		"type": "nic", "ipv4": "",
+	}, cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch device status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	patched := source.UpdateArgs()[4].Instance.Devices["eth0"]
+	if patched["nictype"] != "bridged" || patched["parent"] != "incusbr0" {
+		t.Fatalf("patched nic = %#v", patched)
+	}
+	if _, has := patched["ipv4.address"]; has {
+		t.Fatalf("patched nic must clear the address: %#v", patched)
+	}
+
+	rec = f.request(t, http.MethodPatch, "/api/v1/clusters/c1/instances/web/devices/missing", map[string]any{
+		"type": "nic",
+	}, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("patch missing device status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
 	// Images: delete.
 	rec = f.request(t, http.MethodDelete, "/api/v1/clusters/c1/images/053059ea4e28", nil, cookie, "")
 	if rec.Code != http.StatusNoContent {

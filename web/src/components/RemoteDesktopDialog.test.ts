@@ -1,8 +1,10 @@
+import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus, { ElMessage } from 'element-plus'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
+import { instanceDetail } from '@/test/fixtures'
 import RemoteDesktopDialog from './RemoteDesktopDialog.vue'
 
 // The dialog arms the console, then polls screenshots on a timer; fake timers
@@ -10,15 +12,19 @@ import RemoteDesktopDialog from './RemoteDesktopDialog.vue'
 function mountDialog(open = true) {
   return mount(RemoteDesktopDialog, {
     props: { modelValue: open, cluster: 'c1', instance: 'vm-01' },
-    global: { plugins: [ElementPlus] },
+    global: { plugins: [ElementPlus, createPinia()] },
   })
 }
 
 describe('RemoteDesktopDialog', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     vi.useFakeTimers()
     vi.mocked(api.prepareDesktop).mockResolvedValue({ ready: true, restarted: false })
     vi.mocked(api.desktopScreenshot).mockResolvedValue(new Blob(['png']))
+    vi.mocked(api.getInstance).mockResolvedValue(
+      instanceDetail({ name: 'vm-01', type: 'virtual-machine', status: 'Running' }),
+    )
   })
 
   afterEach(() => {
@@ -151,6 +157,48 @@ describe('RemoteDesktopDialog', () => {
       key: 'Delete',
       modifiers: ['Control', 'Alt'],
     })
+  })
+
+  it('shows the guest status and sends power actions from the toolbar', async () => {
+    const wrapper = mountDialog(true)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Running')
+    expect(wrapper.findAll('button').some((b) => b.text().includes('Restart'))).toBe(true)
+
+    const stop = wrapper.findAll('button').find((b) => b.text().includes('Stop'))
+    await stop!.trigger('click')
+    await flushPromises()
+
+    expect(api.instanceAction).toHaveBeenCalledWith('c1', 'vm-01', { action: 'stop', force: false })
+    expect(ElMessage.success).toHaveBeenCalled()
+  })
+
+  it('restarts the guest from the toolbar', async () => {
+    const wrapper = mountDialog(true)
+    await flushPromises()
+
+    const restart = wrapper.findAll('button').find((b) => b.text().includes('Restart'))
+    await restart!.trigger('click')
+    await flushPromises()
+
+    expect(api.instanceAction).toHaveBeenCalledWith('c1', 'vm-01', { action: 'restart', force: false })
+  })
+
+  it('offers Start and an offline notice when the guest is stopped', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(
+      instanceDetail({ name: 'vm-01', type: 'virtual-machine', status: 'Stopped' }),
+    )
+    const wrapper = mountDialog(true)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Stopped')
+    const start = wrapper.findAll('button').find((b) => b.text().includes('Start'))
+    expect(start).toBeDefined()
+    await start!.trigger('click')
+    await flushPromises()
+
+    expect(api.instanceAction).toHaveBeenCalledWith('c1', 'vm-01', { action: 'start', force: false })
   })
 
   it('stops polling when closed', async () => {

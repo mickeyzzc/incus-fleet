@@ -72,7 +72,9 @@ idempotent.
 In the console window: click into the picture to give it keyboard focus (arrow keys, Enter,
 Ctrl+Alt+Del all reach the guest), click or drag inside it to move the pointer and press
 buttons, and scroll to send wheel events. The picture refreshes automatically about once a
-second. Containers have no display device and do not offer this button.
+second. The toolbar also shows the guest power state with **Start**, **Restart**, and **Stop**
+buttons, so a stopped VM can be booted without leaving the console. Containers have no display
+device and do not offer this button.
 
 ## Online terminal
 
@@ -212,8 +214,11 @@ From the instance list or the detail drawer you can:
     normal shutdown).
 - **File management**: browse the instance filesystem, upload, download, create directories,
   and delete files.
-- **Devices**: attach a disk (storage volume or host path) or a second NIC; detach devices in
-  the same panel.
+- **Devices**: attach a disk (storage volume or host path) or a second NIC; edit any attached
+  device (switch networks, change static addresses, resize disks — the merge keeps keys the
+  form does not manage, such as boot priority); expand a row to see the full device
+  configuration; detach devices in the same panel. Clearing a NIC address falls back to DHCP.
+  Switching a NIC to a managed network rewrites legacy `nictype`/`parent` devices.
 - **Delete instance**: asks for confirmation and can delete the instance's storage volumes at
   the same time.
 

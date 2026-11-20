@@ -121,7 +121,7 @@ function resetForm(): void {
   form.storagePool = detail.storage_pool ?? ''
 
   if (nicDevice.value) {
-    form.network = nicDevice.value.device.network ?? ''
+    form.network = nicDevice.value.device.network ?? nicDevice.value.device.parent ?? ''
     form.ipv4 = nicDevice.value.device['ipv4.address'] ?? ''
     form.ipv6 = nicDevice.value.device['ipv6.address'] ?? ''
   }
@@ -251,14 +251,17 @@ function updateRequest(): UpdateInstanceRequest {
 
   if (nicDevice.value) {
     request.device = nicDevice.value.name
-    if (isPhysicalNetwork.value) {
-      return request
+    const currentNetwork = nicDevice.value.device.network ?? nicDevice.value.device.parent ?? ''
+    if (form.network && form.network !== currentNetwork) {
+      request.network = form.network
     }
 
-    request.ipv4 = form.ipv4.trim()
-    request.ipv6 = form.ipv6.trim()
-    if (form.network) {
-      request.network = form.network
+    // Physical NICs take their addresses from the LAN DHCP server; sending
+    // device-level addresses would silently do nothing, so they stay editable
+    // only for managed networks.
+    if (!isPhysicalNetwork.value) {
+      request.ipv4 = form.ipv4.trim()
+      request.ipv6 = form.ipv6.trim()
     }
   }
 
@@ -426,7 +429,7 @@ async function submit(): Promise<void> {
               :value="network.name"
             />
           </el-select>
-          <p v-if="isPhysicalNetwork && !isEdit" class="field-hint">
+          <p v-if="isPhysicalNetwork" class="field-hint">
             {{ t('form.networkPhysicalHint') }}
           </p>
         </el-form-item>
@@ -434,6 +437,9 @@ async function submit(): Promise<void> {
         <template v-if="!isPhysicalNetwork">
           <el-form-item :label="t('form.ipv4')">
             <el-input v-model="form.ipv4" :placeholder="t('form.ipv4Placeholder')" />
+            <p v-if="isEdit && instance?.type === 'virtual-machine'" class="field-hint">
+              {{ t('form.vmAddressHint') }}
+            </p>
           </el-form-item>
 
           <el-form-item :label="t('form.ipv6')">

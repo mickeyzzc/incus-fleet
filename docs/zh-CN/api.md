@@ -116,6 +116,7 @@ POST /api/v1/auth/logout
 | POST | `/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore` | 是 | 恢复快照 |
 | DELETE | `/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}` | 是 | 删除快照 |
 | POST | `/clusters/{cluster}/instances/{instance}/devices` | 是 | 挂载磁盘或 NIC 设备 |
+| PATCH | `/clusters/{cluster}/instances/{instance}/devices/{device}` | 是 | 编辑单个设备(合并进现有配置;网卡地址留空回退 DHCP) |
 | DELETE | `/clusters/{cluster}/instances/{instance}/devices/{device}` | 是 | 卸载设备 |
 | GET | `/clusters/{cluster}/instances/{instance}/console` | 是 | 交互式控制台（WebSocket） |
 | GET | `/clusters/{cluster}/instances/{instance}/exec` | 是 | 交互式 exec 会话（WebSocket） |
