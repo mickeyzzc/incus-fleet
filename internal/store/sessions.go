@@ -7,29 +7,51 @@ import (
 	"time"
 )
 
+// Session is a persisted browser session. User identity travels with the row so
+// any center can authorize a request without keeping local state.
+type Session struct {
+	ID        string
+	UserID    string
+	Username  string
+	Role      string
+	ExpiresAt time.Time
+}
+
 // CreateSession persists a browser session so multiple centers can share it.
-func (s *SQLStore) CreateSession(ctx context.Context, id string, expires time.Time) error {
-	if id == "" {
+func (s *SQLStore) CreateSession(ctx context.Context, session *Session) error {
+	if session == nil || session.ID == "" {
 		return errors.New("store: session id is required")
 	}
+
 	_, err := s.db.ExecContext(ctx, s.rebind(
-		`INSERT INTO sessions (id, expires_at) VALUES (?, ?)
-		 ON CONFLICT(id) DO UPDATE SET expires_at = excluded.expires_at`,
-	), id, expires.UnixNano())
+		`INSERT INTO sessions (id, user_id, username, role, expires_at) VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, username = excluded.username,
+			role = excluded.role, expires_at = excluded.expires_at`,
+	), session.ID, session.UserID, session.Username, session.Role, session.ExpiresAt.UnixNano())
+
 	return err
 }
 
-// GetSession returns a session expiry, or ErrNotFound when the id is unknown.
-func (s *SQLStore) GetSession(ctx context.Context, id string) (time.Time, error) {
-	var nanos int64
-	err := s.db.QueryRowContext(ctx, s.rebind(`SELECT expires_at FROM sessions WHERE id = ?`), id).Scan(&nanos)
+// GetSession returns a session, or ErrNotFound when the id is unknown.
+func (s *SQLStore) GetSession(ctx context.Context, id string) (*Session, error) {
+	var (
+		session   Session
+		expiresNS int64
+	)
+	err := s.db.QueryRowContext(ctx, s.rebind(
+		`SELECT id, user_id, username, role, expires_at FROM sessions WHERE id = ?`), //nolint:gosec // query is a constant
+		id,
+	).Scan(&session.ID, &session.UserID, &session.Username, &session.Role, &expiresNS)
 	if errors.Is(err, sql.ErrNoRows) {
-		return time.Time{}, ErrNotFound
+		return nil, ErrNotFound
 	}
 	if err != nil {
-		return time.Time{}, err
+		return nil, err
 	}
-	return time.Unix(0, nanos).UTC(), nil
+
+	session.ExpiresAt = time.Unix(0, expiresNS).UTC()
+
+	return &session, nil
 }
 
 // DeleteSession removes one session.

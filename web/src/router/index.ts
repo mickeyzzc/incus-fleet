@@ -56,6 +56,12 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'titles.assets' },
   },
   {
+    path: '/users',
+    name: 'users',
+    component: () => import('@/views/UsersView.vue'),
+    meta: { titleKey: 'titles.users', requiresAdmin: true },
+  },
+  {
     path: '/node',
     redirect: '/',
   },
@@ -110,6 +116,10 @@ export function createFleetRouter(history: RouterHistory = createWebHistory()): 
         name: 'login',
         query: to.fullPath === '/' ? {} : { redirect: to.fullPath },
       }
+    }
+
+    if (to.meta.requiresAdmin === true && !auth.canAdmin) {
+      return { name: 'dashboard' }
     }
 
     return true

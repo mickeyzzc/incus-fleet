@@ -132,6 +132,11 @@ async function reconnect(): Promise<void> {
 }
 
 function openDetail(instance: InstanceSummary): void {
+  // A poll can replace the row between the click and this handler, leaving an
+  // empty name. Ignore that click instead of opening an empty drawer.
+  if (!instance?.name) {
+    return
+  }
   detailName.value = instance.name
   detailOpen.value = true
 }

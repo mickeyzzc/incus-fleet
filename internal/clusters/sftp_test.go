@@ -80,3 +80,28 @@ func TestAugmentedClientSFTP(t *testing.T) {
 		t.Fatal("ListInstanceFiles() expected missing dir error")
 	}
 }
+
+func TestSFTPErrorPaths(t *testing.T) {
+	failing := &augmentedClient{
+		sftpFor: func(string) (*sftp.Client, error) {
+			return nil, os.ErrPermission
+		},
+	}
+
+	if _, err := failing.ListInstanceFiles("web", "/"); err == nil {
+		t.Fatal("ListInstanceFiles() with a broken client returned no error")
+	}
+	if err := failing.MkdirInstanceDir("web", "/tmp"); err == nil {
+		t.Fatal("MkdirInstanceDir() with a broken client returned no error")
+	}
+
+	// A real client pointed at a missing directory exercises the read failure.
+	wrapped := &augmentedClient{
+		sftpFor: func(string) (*sftp.Client, error) {
+			return pipeSFTPClient(t), nil
+		},
+	}
+	if _, err := wrapped.ListInstanceFiles("web", "/definitely/not/here"); err == nil {
+		t.Fatal("ListInstanceFiles() on a missing directory returned no error")
+	}
+}

@@ -94,3 +94,38 @@ describe('fleet router', () => {
     expect(document.title).toBe('实例 · Incus Fleet')
   })
 })
+
+describe('fleet router role guard', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    document.title = ''
+  })
+
+  it('blocks non-admins from the users page', async () => {
+    const { useAuthStore } = await import('@/stores/auth')
+    const auth = useAuthStore()
+    auth.authenticated = true
+    auth.initialized = true
+    auth.role = 'viewer'
+
+    const router = createFleetRouter(createMemoryHistory())
+    await router.push('/users')
+    await router.isReady()
+
+    expect(router.currentRoute.value.name).toBe('dashboard')
+  })
+
+  it('allows admins into the users page', async () => {
+    const { useAuthStore } = await import('@/stores/auth')
+    const auth = useAuthStore()
+    auth.authenticated = true
+    auth.initialized = true
+    auth.role = 'admin'
+
+    const router = createFleetRouter(createMemoryHistory())
+    await router.push('/users')
+    await router.isReady()
+
+    expect(router.currentRoute.value.name).toBe('users')
+  })
+})

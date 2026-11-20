@@ -36,9 +36,10 @@ CREATE TABLE IF NOT EXISTS registered_clusters (
 func (s *SQLStore) InsertCluster(ctx context.Context, cluster *RegisteredCluster) error {
 	cluster.CreatedAt = time.Now().UTC()
 
-	_, err := s.db.ExecContext(ctx, `
+	const query = `
 INSERT INTO registered_clusters (name, display_name, endpoint, project, tls_cert, tls_key, tls_server_cert, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := s.db.ExecContext(ctx, s.rebind(query), //nolint:gosec // query is a constant
 		cluster.Name, cluster.DisplayName, cluster.Endpoint, cluster.Project,
 		cluster.TLSCert, cluster.TLSKey, cluster.TLSServerCert, cluster.CreatedAt.Unix(),
 	)
@@ -79,9 +80,10 @@ FROM registered_clusters ORDER BY created_at`)
 
 // GetCluster loads one registered cluster by name.
 func (s *SQLStore) GetCluster(ctx context.Context, name string) (*RegisteredCluster, error) {
-	row := s.db.QueryRowContext(ctx, `
+	const getQuery = `
 SELECT name, display_name, endpoint, project, tls_cert, tls_key, tls_server_cert, created_at
-FROM registered_clusters WHERE name = ?`, name)
+FROM registered_clusters WHERE name = ?`
+	row := s.db.QueryRowContext(ctx, s.rebind(getQuery), name) //nolint:gosec // query is a constant
 
 	var cluster RegisteredCluster
 	var created int64
@@ -101,7 +103,8 @@ FROM registered_clusters WHERE name = ?`, name)
 
 // DeleteCluster removes one registered cluster.
 func (s *SQLStore) DeleteCluster(ctx context.Context, name string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM registered_clusters WHERE name = ?`, name)
+	const deleteQuery = `DELETE FROM registered_clusters WHERE name = ?`
+	result, err := s.db.ExecContext(ctx, s.rebind(deleteQuery), name) //nolint:gosec // query is a constant
 	if err != nil {
 		return fmt.Errorf("store: delete cluster: %w", err)
 	}

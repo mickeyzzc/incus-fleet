@@ -1055,3 +1055,13 @@ func TestRaftRelayDispatchEndToEnd(t *testing.T) {
 		t.Fatalf("relay payload = %q", result.Payload)
 	}
 }
+
+func TestFSMSnapshotRelease(t *testing.T) {
+	fsm := NewFSM()
+	snapshot, err := fsm.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() = %v", err)
+	}
+	// Release is a no-op; calling it must not panic.
+	snapshot.Release()
+}

@@ -131,9 +131,13 @@ func (o *Operator) ListFirewall() ([]nodenet.FirewallRule, error) {
 
 // AddFirewallRule adds one rule through the agent.
 func (o *Operator) AddFirewallRule(req nodenet.FirewallRequest) error {
+	//nolint:gosec // port is range-validated by the helper and the UI
 	return o.apply(context.Background(), &agentpb.NodenetApplySpec{
-		Action: "firewall-add", Port: int32(req.Port), //nolint:gosec // validated by the helper and UI range Proto: req.Proto,
-		FirewallAction: req.Action, Comment: req.Comment,
+		Action:         "firewall-add",
+		Port:           int32(req.Port),
+		Proto:          req.Proto,
+		FirewallAction: req.Action,
+		Comment:        req.Comment,
 	})
 }
 

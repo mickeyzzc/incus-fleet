@@ -29,8 +29,8 @@ func TestSchemaMigrations(t *testing.T) {
 	if err := s.db.QueryRowContext(context.Background(), `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if version != 6 {
-		t.Fatalf("schema version = %d, want 6", version)
+	if version != 7 {
+		t.Fatalf("schema version = %d, want 7", version)
 	}
 }
 
@@ -63,7 +63,7 @@ func TestSchemaMigrationFromLegacyDatabase(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	version, err := s.SchemaVersion(context.Background())
-	if err != nil || version != 6 {
+	if err != nil || version != 7 {
 		t.Fatalf("SchemaVersion() = %d, %v", version, err)
 	}
 	old, err := s.GetMigration(context.Background(), "old")
@@ -606,5 +606,137 @@ func TestClaimDefaultLeaseAndAuditMemberFilter(t *testing.T) {
 	}
 	if got, err := s.ExportHostAudit(ctx, "", "n1"); err != nil || len(got) != 1 {
 		t.Fatalf("ExportHostAudit(member) = %#v, %v", got, err)
+	}
+}
+
+// TestApplyMigrationIsReRunnable reproduces the crash-between-ALTER-and-version
+// case: the column already exists but the version row is missing. Re-applying
+// must succeed instead of failing forever on "duplicate column name".
+func TestApplyMigrationIsReRunnable(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+
+	// Simulate a partially applied v6: drop the version row and the index but
+	// leave the owner column in place.
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = 6`); err != nil {
+		t.Fatalf("delete version: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_migrations_owner`); err != nil {
+		t.Fatalf("drop index: %v", err)
+	}
+
+	var target schemaMigration
+	for _, migration := range schemaMigrations {
+		if migration.version == 6 {
+			target = migration
+		}
+	}
+	if target.version == 0 {
+		t.Fatal("version 6 migration not found")
+	}
+
+	if err := s.applyMigration(ctx, target); err != nil {
+		t.Fatalf("applyMigration() on partially applied schema = %v", err)
+	}
+
+	version, err := s.SchemaVersion(ctx)
+	if err != nil || version != 7 {
+		t.Fatalf("SchemaVersion() = %d, %v; want 7", version, err)
+	}
+}
+
+// TestApplyMigrationTwiceIsIdempotent covers two fleet instances starting at
+// once: both run the statements, and the loser must not error.
+func TestApplyMigrationTwiceIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+
+	var target schemaMigration
+	for _, migration := range schemaMigrations {
+		if migration.version == 6 {
+			target = migration
+		}
+	}
+
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = 6`); err != nil {
+		t.Fatalf("delete version: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if err := s.applyMigration(ctx, target); err != nil {
+			t.Fatalf("applyMigration() pass %d = %v", i+1, err)
+		}
+	}
+}
+
+func TestColumnExists(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+
+	exists, err := s.columnExists(ctx, "migrations", "owner")
+	if err != nil || !exists {
+		t.Fatalf("columnExists(migrations.owner) = %v, %v; want true", exists, err)
+	}
+
+	exists, err = s.columnExists(ctx, "migrations", "no_such_column")
+	if err != nil || exists {
+		t.Fatalf("columnExists(migrations.no_such_column) = %v, %v; want false", exists, err)
+	}
+}
+
+func TestIsDuplicateColumn(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{errors.New("some other failure"), false},
+		{errors.New("duplicate column name: lease_owner"), true},
+		{errors.New("column already exists"), true},
+	}
+
+	for _, tc := range cases {
+		if got := isDuplicateColumn(tc.err); got != tc.want {
+			t.Errorf("isDuplicateColumn(%v) = %v, want %v", tc.err, got, tc.want)
+		}
+	}
+}
+
+func TestApplyMigrationStatementError(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+
+	// A statement that cannot run must surface as an error.
+	broken := schemaMigration{
+		version:    99,
+		statements: []string{`THIS IS NOT SQL`},
+	}
+	if err := s.applyMigration(ctx, broken); err == nil {
+		t.Fatal("applyMigration() accepted invalid SQL")
+	}
+
+	// The version must not be recorded, so a retry still sees the migration as
+	// pending rather than silently skipping an incomplete schema.
+	version, err := s.SchemaVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version >= 99 {
+		t.Fatalf("failed migration recorded version %d", version)
+	}
+}
+
+func TestColumnExistsUnknownTable(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+
+	// PRAGMA table_info on an unknown table yields no rows rather than an error,
+	// so the probe reports "missing" and the caller attempts the ALTER.
+	exists, err := s.columnExists(ctx, "no_such_table", "x")
+	if err != nil {
+		t.Fatalf("columnExists() error = %v", err)
+	}
+	if exists {
+		t.Fatal("columnExists() reported a column on a missing table")
 	}
 }

@@ -693,3 +693,71 @@ func TestGatewayHooks(t *testing.T) {
 		t.Fatalf("hook calls = %d", called)
 	}
 }
+
+func TestAgentConnEnqueue(t *testing.T) {
+	conn := &agentConn{id: "a", send: make(chan *agentpb.Envelope, 1), done: make(chan struct{})}
+
+	if !conn.enqueue(&agentpb.Envelope{}) {
+		t.Fatal("enqueue() on a free slot = false")
+	}
+	// The buffer is full now, so the next send is dropped.
+	if conn.enqueue(&agentpb.Envelope{}) {
+		t.Fatal("enqueue() on a full buffer = true")
+	}
+
+	// Once done is closed the connection refuses more work.
+	close(conn.done)
+	if conn.enqueue(&agentpb.Envelope{}) {
+		t.Fatal("enqueue() after done = true")
+	}
+}
+
+func TestAgentConnWriteLoopExitsOnDone(t *testing.T) {
+	conn := &agentConn{id: "a", send: make(chan *agentpb.Envelope), done: make(chan struct{})}
+	finished := make(chan struct{})
+	go func() {
+		conn.writeLoop()
+		close(finished)
+	}()
+
+	close(conn.done)
+
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writeLoop did not exit after done was closed")
+	}
+}
+
+func TestSaveAgentAndOffline(t *testing.T) {
+	gw := New(openAgentStore(t), mustTestCA(t), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	agent := &store.Agent{ID: "agent-1", Cluster: "c1", Member: "n1", Status: store.AgentOnline}
+
+	gw.saveAgent(agent)
+	stored, err := gw.store.GetAgent(context.Background(), "agent-1")
+	if err != nil {
+		t.Fatalf("GetAgent() = %v", err)
+	}
+	if stored.Status != store.AgentOnline {
+		t.Fatalf("status = %q", stored.Status)
+	}
+
+	gw.markOffline(agent)
+	stored, err = gw.store.GetAgent(context.Background(), "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != store.AgentOffline {
+		t.Fatalf("status = %q, want offline", stored.Status)
+	}
+}
+
+func TestConnectRejectsMissingCertificate(t *testing.T) {
+	gw := New(openAgentStore(t), mustTestCA(t), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agent/connect", nil)
+	gw.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}

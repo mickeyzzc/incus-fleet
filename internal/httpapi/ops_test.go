@@ -20,6 +20,7 @@ func TestISOEndpoints(t *testing.T) {
 	source := &incusfake.Server{
 		Volumes: []api.StorageVolume{
 			{Name: "debian-13", Type: "custom", ContentType: "iso", Description: "installer"},
+			{Name: "alpine", Type: "custom", ContentType: "iso"},
 		},
 		ExtraInstances: []api.Instance{
 			{Name: "installer", Type: "virtual-machine", Status: "Stopped", StatusCode: api.Stopped},
@@ -40,7 +41,7 @@ func TestISOEndpoints(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
 		t.Fatalf("decode iso list: %v", err)
 	}
-	if len(list.Isos) != 1 || list.Isos[0]["name"] != "debian-13" {
+	if len(list.Isos) != 2 || list.Isos[0]["name"] != "debian-13" {
 		t.Fatalf("isos = %#v", list.Isos)
 	}
 

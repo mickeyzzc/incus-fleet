@@ -51,6 +51,9 @@ import type {
   Keystone,
   StoredScript,
   SessionResponse,
+  User,
+  CreateUserRequest,
+  UpdateUserRequest,
   SnapshotRequest,
   StoragePoolRequest,
   StorageVolume,
@@ -110,8 +113,37 @@ export class ApiClient {
     this.bearerToken = token
   }
 
-  async login(token: string): Promise<SessionResponse> {
+  async login(username: string, password: string): Promise<SessionResponse> {
+    return this.request<SessionResponse>('POST', '/api/v1/auth/login', { username, password })
+  }
+
+  /** Exchanges the shared bootstrap token for a session. */
+  async loginWithToken(token: string): Promise<SessionResponse> {
     return this.request<SessionResponse>('POST', '/api/v1/auth/login', { token })
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await this.request<void>('POST', '/api/v1/auth/password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    })
+  }
+
+  async listUsers(): Promise<User[]> {
+    const data = await this.request<{ users: User[] }>('GET', '/api/v1/users')
+    return data.users ?? []
+  }
+
+  async createUser(request: CreateUserRequest): Promise<User> {
+    return this.request<User>('POST', '/api/v1/users', request)
+  }
+
+  async updateUser(id: string, request: UpdateUserRequest): Promise<User> {
+    return this.request<User>('PATCH', `/api/v1/users/${encodeURIComponent(id)}`, request)
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/users/${encodeURIComponent(id)}`)
   }
 
   async logout(): Promise<void> {

@@ -99,6 +99,9 @@ func TestLaunchFromISO(t *testing.T) {
 			StatusCode: api.Running,
 		},
 		NetworkNames: []string{"incusbr0"},
+		Volumes: []api.StorageVolume{
+			{Name: "debian-13", Type: "custom", Location: "node-a", ContentType: "iso"},
+		},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": source})
 	ctx := context.Background()
@@ -132,6 +135,14 @@ func TestLaunchFromISO(t *testing.T) {
 	iso := post.Devices["iso0"]
 	if iso["type"] != "disk" || iso["pool"] != "default" || iso["source"] != "debian-13" || iso["boot.priority"] != "1" {
 		t.Fatalf("iso device = %#v", iso)
+	}
+	// Incus rejects a non-root disk device without a path, replying "Storage
+	// volume not found" because it resolves the source as an instance volume.
+	// Incus rejects a path on a custom ISO volume ("Custom ISO volumes cannot
+	// have a path defined"), and rejects a source on the root disk. The device
+	// must therefore carry neither a path nor the root slot.
+	if iso["path"] != "" {
+		t.Fatalf("iso device must not define a path: %#v", iso)
 	}
 	root := post.Devices["root"]
 	if root["size"] != "20GiB" {

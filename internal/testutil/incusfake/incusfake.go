@@ -73,6 +73,7 @@ type Server struct {
 	DeleteSnapshotErr error
 	Volumes           []api.StorageVolume
 	VolumesErr        error
+	VolumeErr         error
 	CreateVolumeErr   error
 	DeleteVolumeErr   error
 	Pools             []api.StoragePool
@@ -1056,6 +1057,31 @@ func (s *Server) GetStoragePoolVolumes(pool string) ([]api.StorageVolume, error)
 	}
 
 	return append([]api.StorageVolume(nil), s.Volumes...), nil
+}
+
+// UseTarget returns the fake itself so member-bound calls still record against
+// the same server. The real client returns a client scoped to one member.
+func (s *Server) UseTarget(name string) incus.InstanceServer {
+	s.record("UseTarget:" + name)
+
+	return s
+}
+
+// GetStoragePoolVolume implements clusters.InstanceServer.
+func (s *Server) GetStoragePoolVolume(pool string, volType string, name string) (*api.StorageVolume, string, error) {
+	s.record("GetStoragePoolVolume:" + pool + "/" + volType + "/" + name)
+	if s.VolumeErr != nil {
+		return nil, "", s.VolumeErr
+	}
+
+	for i := range s.Volumes {
+		if s.Volumes[i].Name == name {
+			volume := s.Volumes[i]
+			return &volume, "", nil
+		}
+	}
+
+	return nil, "", fmt.Errorf("storage volume %q not found", name)
 }
 
 // CreateStoragePoolVolume implements clusters.InstanceServer.

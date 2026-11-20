@@ -304,6 +304,52 @@ func TestExecRelay(t *testing.T) {
 	}
 }
 
+// TestExecRelayForwardsTextStdin covers the regression where a plain text frame
+// from the browser (exec input typed into the UI) was classified as a console
+// control frame and silently dropped, leaving interactive sessions dead.
+func TestExecRelayForwardsTextStdin(t *testing.T) {
+	stub := incusfake.NewWebsocketStub()
+	defer stub.Close()
+
+	source := &incusfake.Server{
+		Instance:  &api.Instance{Name: "web"},
+		Operation: stub.Operation(),
+	}
+	f := newAPIFixture(t, source, &incusfake.Server{})
+	cookie := f.login(t)
+	server := f.wsServer(t)
+
+	execURL := "ws" + strings.TrimPrefix(server.URL, "http") +
+		"/api/v1/clusters/c1/instances/web/exec"
+
+	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+	header := http.Header{"Cookie": []string{cookie.Name + "=" + cookie.Value}}
+	browser, _, err := dialer.Dial(execURL, header)
+	if err != nil {
+		t.Fatalf("dial exec: %v", err)
+	}
+	defer browser.Close() //nolint:errcheck // test teardown
+
+	if err := browser.WriteMessage(websocket.TextMessage,
+		[]byte(`{"command":["bash"],"width":80,"height":24}`)); err != nil {
+		t.Fatalf("start write: %v", err)
+	}
+	incusConn := waitForConn(t, stub.Conns, "0")
+
+	// A text frame that is not JSON is user input and must reach the process.
+	if err := browser.WriteMessage(websocket.TextMessage, []byte("echo text-stdin\n")); err != nil {
+		t.Fatalf("stdin write: %v", err)
+	}
+	_ = incusConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, payload, err := incusConn.ReadMessage()
+	if err != nil {
+		t.Fatalf("incus read: %v", err)
+	}
+	if string(payload) != "echo text-stdin\n" {
+		t.Fatalf("stdin payload = %q, want the raw text forwarded", payload)
+	}
+}
+
 // Helpers -------------------------------------------------------------
 
 func waitForConn(t *testing.T, conns chan incusfake.StubConn, fd string) *websocket.Conn {

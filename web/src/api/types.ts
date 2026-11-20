@@ -518,6 +518,38 @@ export interface MigrationRequest {
 export interface SessionResponse {
   authenticated: boolean
   expires_at?: string
+  username?: string
+  role?: UserRole
+}
+
+/** Permission level of a signed-in account. */
+export type UserRole = 'admin' | 'operator' | 'viewer'
+
+/** One local account. Password material never leaves the server. */
+export interface User {
+  id: string
+  username: string
+  role: UserRole
+  disabled: boolean
+  must_change_password: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateUserRequest {
+  username: string
+  password: string
+  role: UserRole
+  disabled?: boolean
+  must_change_password?: boolean
+}
+
+export interface UpdateUserRequest {
+  username?: string
+  password?: string
+  role?: UserRole
+  disabled?: boolean
+  must_change_password?: boolean
 }
 
 export interface VersionResponse {

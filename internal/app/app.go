@@ -138,13 +138,20 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	nodeAccess := nodeaccess.New(manager, localNodeNet, cfg.NodeAccess, nodeOptions...)
 	nodeJoin := nodejoin.New(manager, cfg.NodeAccess, logger)
 	var authenticator *auth.Authenticator
-	// Sessions live in the database whenever more than one instance can share
-	// state: a mesh deployment, rqlite, or PostgreSQL. Only a single-node
-	// SQLite deployment keeps them in process memory.
+	// Local accounts are always backed by the database so a restart does not
+	// lose them. Sessions live in the database whenever more than one instance
+	// can share state: a mesh deployment, rqlite, or PostgreSQL. Only a
+	// single-node SQLite deployment keeps sessions in process memory.
+	authStore := auth.NewStoreAdapter(st)
+	authOptions := []auth.Option{auth.WithUserStore(authStore)}
 	if cfg.Mesh.Enabled || cfg.Database.IsShared() {
-		authenticator = auth.NewWithStore(cfg.Server.AuthToken, 12*time.Hour, st)
-	} else {
-		authenticator = auth.New(cfg.Server.AuthToken, 12*time.Hour)
+		authOptions = append(authOptions, auth.WithSessionStore(authStore))
+	}
+	authenticator = auth.New(cfg.Server.AuthToken, 12*time.Hour, authOptions...)
+	if err := bootstrapAdmin(ctx, st, authenticator, cfg.Server, logger); err != nil {
+		manager.Close()
+		_ = st.Close()
+		return nil, err
 	}
 
 	var (
@@ -514,4 +521,51 @@ func parseDuration(value string, fallback time.Duration) time.Duration {
 		return parsed
 	}
 	return fallback
+}
+
+// bootstrapAdmin creates the first administrator when the database has no
+// accounts and credentials were supplied. It is a no-op on every later start,
+// so an operator can safely leave the environment variables set.
+func bootstrapAdmin(ctx context.Context, st *store.SQLStore, authenticator *auth.Authenticator,
+	server config.Server, logger *slog.Logger,
+) error {
+	username := strings.TrimSpace(server.BootstrapAdminUsername)
+	password := server.BootstrapAdminPassword
+	if username == "" || password == "" {
+		return nil
+	}
+
+	existing, err := st.ListUsers(ctx)
+	if err != nil {
+		return fmt.Errorf("app: bootstrap admin: %w", err)
+	}
+	if len(existing) > 0 {
+		return nil
+	}
+
+	hash, err := authenticator.HashPassword(password)
+	if err != nil {
+		return fmt.Errorf("app: bootstrap admin password: %w", err)
+	}
+
+	now := time.Now().UTC()
+	user := &store.User{
+		ID:           store.NewID(),
+		Username:     strings.ToLower(username),
+		PasswordHash: hash,
+		Role:         string(auth.RoleAdmin),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := st.CreateUser(ctx, user); err != nil {
+		// Another instance may have won the race; that is success.
+		if errors.Is(err, store.ErrConflict) {
+			return nil
+		}
+		return fmt.Errorf("app: create bootstrap admin: %w", err)
+	}
+
+	logger.Info("created bootstrap administrator", "username", user.Username)
+
+	return nil
 }

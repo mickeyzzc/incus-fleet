@@ -571,3 +571,105 @@ func TestNewWithMeshWitness(t *testing.T) {
 		t.Fatalf("witness wiring: mesh=%v taskRunner=%v", application.mesh, application.taskRunner)
 	}
 }
+
+func TestBootstrapAdminCreatesFirstAccount(t *testing.T) {
+	ctx := context.Background()
+	cfg := testConfig(t)
+	cfg.Server.BootstrapAdminUsername = "admin"
+	cfg.Server.BootstrapAdminPassword = "test-admin-passw0rd"
+
+	app, err := New(ctx, cfg, testLogger(),
+		WithStaticFS(staticFS()),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+
+	users, err := app.store.ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("ListUsers() = %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("users = %d, want 1", len(users))
+	}
+	if users[0].Username != "admin" || users[0].Role != "admin" {
+		t.Fatalf("bootstrap user = %#v", users[0])
+	}
+}
+
+func TestBootstrapAdminIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	cfg := testConfig(t)
+	cfg.Server.BootstrapAdminUsername = "admin"
+	cfg.Server.BootstrapAdminPassword = "test-admin-passw0rd"
+
+	restart := func() {
+		app, err := New(ctx, cfg, testLogger(),
+			WithStaticFS(staticFS()),
+			WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		_ = app.Close()
+	}
+
+	restart()
+	restart()
+
+	// Reopen once more and confirm there is exactly one account.
+	app, err := New(ctx, cfg, testLogger(),
+		WithStaticFS(staticFS()),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+
+	users, err := app.store.ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("ListUsers() = %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("users after restarts = %d, want 1", len(users))
+	}
+}
+
+func TestBootstrapAdminRejectsWeakPassword(t *testing.T) {
+	ctx := context.Background()
+	cfg := testConfig(t)
+	cfg.Server.BootstrapAdminUsername = "admin"
+	cfg.Server.BootstrapAdminPassword = "short"
+
+	if _, err := New(ctx, cfg, testLogger(),
+		WithStaticFS(staticFS()),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+	); err == nil {
+		t.Fatal("New() accepted a weak bootstrap password")
+	}
+}
+
+func TestNoBootstrapWithoutCredentials(t *testing.T) {
+	ctx := context.Background()
+	cfg := testConfig(t)
+
+	app, err := New(ctx, cfg, testLogger(),
+		WithStaticFS(staticFS()),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+
+	users, err := app.store.ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("ListUsers() = %v", err)
+	}
+	if len(users) != 0 {
+		t.Fatalf("users = %d, want 0", len(users))
+	}
+}

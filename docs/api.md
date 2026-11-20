@@ -7,14 +7,44 @@ also serves the Vue SPA at `/`.
 
 ## Authentication
 
-The server has one shared admin token. There are two ways to authenticate:
+The server supports local accounts with role-based access control. There are three ways to
+authenticate:
 
-1. **Browser session.** `POST /api/v1/auth/login` with the token; the response sets an
-   `HttpOnly`, `SameSite=Lax` cookie named `incus_fleet_session`. The cookie is valid for 12
-   hours. It is marked `Secure` when the request is TLS or carries
+1. **Browser session.** `POST /api/v1/auth/login` with a username and password; the response
+   sets an `HttpOnly`, `SameSite=Lax` cookie named `incus_fleet_session`. The cookie is valid
+   for 12 hours. It is marked `Secure` when the request is TLS or carries
    `X-Forwarded-Proto: https` (as sent by Caddy).
 2. **Bearer token.** Send `Authorization: Bearer <admin token>` on protected endpoints. This is
-   intended for automation and does not need a login step.
+   the shared bootstrap credential: it is accepted **only while no local account exists**, and
+   is retired automatically once the first account is created.
+3. **Bootstrap environment variables.** `INCUS_FLEET_BOOTSTRAP_ADMIN_USERNAME` and
+   `INCUS_FLEET_BOOTSTRAP_ADMIN_PASSWORD` create the first administrator on startup. They are
+   ignored on later starts once an account exists.
+
+### Roles
+
+| Role | Read | Mutate fleet | Manage users |
+| --- | --- | --- | --- |
+| `admin` | yes | yes | yes |
+| `operator` | yes | yes | no |
+| `viewer` | yes | no (403) | no |
+
+Mutating endpoints enforce the role server-side; a read-only account receives
+`403 {"error":{"code":"forbidden"}}` even if it calls the API directly.
+
+### User management
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/users` | admin | List accounts |
+| POST | `/users` | admin (or bootstrap token for the first account) | Create an account |
+| PATCH | `/users/{id}` | admin | Update role, password, or disabled state |
+| DELETE | `/users/{id}` | admin | Delete an account (the last admin is refused) |
+| POST | `/auth/password` | any signed-in account | Change your own password |
+| GET | `/auth/sessions` | any signed-in account | Describe the current session |
+
+The last enabled administrator can neither be deleted nor demoted: both operations return
+`409 conflict`.
 
 `GET /api/v1/healthz`, `GET /api/v1/version`, `POST /auth/login`, and `POST /auth/logout` are
 public. Everything under `/clusters`, `/instances`, `/migrations`, `/keys`, `/scripts`, and
@@ -31,17 +61,23 @@ curl -sS https://fleet.example/api/v1/clusters \
 POST /api/v1/auth/login
 Content-Type: application/json
 
-{"token": "<admin token>"}
+{"username": "admin", "password": "<password>"}
 ```
 
 ```json
 {
   "authenticated": true,
-  "expires_at": "2026-11-12T09:30:00Z"
+  "expires_at": "2026-11-12T09:30:00Z",
+  "username": "admin",
+  "role": "admin"
 }
 ```
 
-Invalid tokens return `401` with code `invalid_token`.
+Wrong credentials return `401` with code `invalid_credentials`; a locked account returns `429`
+`account_locked`; a disabled account returns `403` `account_disabled`.
+
+For the bootstrap path, send `{"token": "<admin token>"}` instead. It returns `401` once any
+local account exists.
 
 ### Session
 

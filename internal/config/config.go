@@ -151,6 +151,13 @@ type Server struct {
 	Listen    string `yaml:"listen"`
 	AuthToken string `yaml:"auth_token"`
 	LogLevel  string `yaml:"log_level"`
+
+	// BootstrapAdminUsername and BootstrapAdminPassword create the first
+	// administrator on startup when no local account exists yet. They exist so a
+	// fresh deployment is usable without an out-of-band API call; once any
+	// account exists they are ignored.
+	BootstrapAdminUsername string `yaml:"bootstrap_admin_username"`
+	BootstrapAdminPassword string `yaml:"bootstrap_admin_password"`
 }
 
 // Database selects the persistent store.
@@ -214,6 +221,12 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("INCUS_FLEET_LOG_LEVEL"); v != "" {
 		c.Server.LogLevel = v
+	}
+	if v := os.Getenv("INCUS_FLEET_BOOTSTRAP_ADMIN_USERNAME"); v != "" {
+		c.Server.BootstrapAdminUsername = v
+	}
+	if v := os.Getenv("INCUS_FLEET_BOOTSTRAP_ADMIN_PASSWORD"); v != "" {
+		c.Server.BootstrapAdminPassword = v
 	}
 	if v := os.Getenv("INCUS_FLEET_DATABASE_DRIVER"); v != "" {
 		c.Database.Driver = v

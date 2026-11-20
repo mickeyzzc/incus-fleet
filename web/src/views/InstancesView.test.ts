@@ -251,3 +251,46 @@ describe('InstancesView', () => {
     expect(wrapper.find('.batch-bar').exists()).toBe(false)
   })
 })
+
+describe('InstancesView dialogs', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockFleet()
+    vi.mocked(api.listKeys).mockResolvedValue([])
+    vi.mocked(api.listScripts).mockResolvedValue([])
+  })
+
+  it('opens the create dialog', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Create instance').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+  })
+
+  it('opens the migrate dialog from a row', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const row = wrapper.findAll('.el-table__row')[0]!
+    const migrate = row.findAll('button').find((b) => b.text().includes('Migrate'))
+    await migrate!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+  })
+
+  it('opens the clone dialog from a row', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const row = wrapper.findAll('.el-table__row')[0]!
+    const clone = row.findAll('button').find((b) => b.text().includes('Clone'))
+    await clone!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+  })
+})

@@ -166,3 +166,42 @@ func TestSnapshotBackedMethodsFail(t *testing.T) {
 		t.Fatal("ListFirewall expected error")
 	}
 }
+
+// TestAddFirewallRuleCarriesEveryField pins the full spec. The original
+// implementation lost the protocol because the field assignment ended up
+// inside a line comment, and the loose test above passed because it only
+// checked the error. Every field the helper needs is asserted here.
+func TestAddFirewallRuleCarriesEveryField(t *testing.T) {
+	dispatcher := &fakeDispatcher{}
+	resolver := New(dispatcher, fakeLookup{agent: &store.Agent{ID: "agent-1", Status: store.AgentOnline}})
+	operator, ok := resolver.Resolve(context.Background(), "c1", "node-a")
+	if !ok {
+		t.Fatal("Resolve() did not find online agent")
+	}
+
+	req := nodenet.FirewallRequest{Port: 8443, Proto: "udp", Action: "drop", Comment: "deny admin"}
+	if err := operator.AddFirewallRule(req); err != nil {
+		t.Fatalf("AddFirewallRule() error = %v", err)
+	}
+
+	var spec agentpb.NodenetApplySpec
+	if err := proto.Unmarshal(dispatcher.payload, &spec); err != nil {
+		t.Fatalf("unmarshal spec: %v", err)
+	}
+
+	if spec.Action != "firewall-add" {
+		t.Errorf("action = %q, want firewall-add", spec.Action)
+	}
+	if spec.Port != int32(req.Port) { //nolint:gosec // test value is a small constant
+		t.Errorf("port = %d, want %d", spec.Port, req.Port)
+	}
+	if spec.Proto != req.Proto {
+		t.Errorf("proto = %q, want %q (field must not be swallowed by a comment)", spec.Proto, req.Proto)
+	}
+	if spec.FirewallAction != req.Action {
+		t.Errorf("firewall action = %q, want %q", spec.FirewallAction, req.Action)
+	}
+	if spec.Comment != req.Comment {
+		t.Errorf("comment = %q, want %q", spec.Comment, req.Comment)
+	}
+}

@@ -256,7 +256,7 @@ function onDevicesChanged(updated: InstanceDetail): void {
       <el-empty v-else-if="!instances.detailLoading" :description="t('detail.unavailable')" />
     </div>
 
-    <TerminalDialog v-model="terminalOpen" :cluster="cluster" :instance="name" />
+    <TerminalDialog v-model="terminalOpen" :cluster="cluster" :instance="name" :instance-type="detail?.type ?? ''" />
     <FileManagerDialog v-model="filesOpen" :cluster="cluster" :instance="name" />
     <RemoteDesktopDialog v-model="desktopOpen" :cluster="cluster" :instance="name" />
     <InstanceOpsDialog v-model="opsOpen" :cluster="cluster" :instance="name" @done="instances.fetchDetail(cluster, name)" />

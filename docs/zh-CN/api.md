@@ -7,14 +7,40 @@
 
 ## 认证
 
-服务器只有一个共享的管理员 token。有两种认证方式：
+服务器支持本地账号与基于角色的访问控制。有三种认证方式：
 
-1. **浏览器会话。** 用 token 调用 `POST /api/v1/auth/login`；响应会设置一个名为
+1. **浏览器会话。** 用用户名和密码调用 `POST /api/v1/auth/login`；响应会设置一个名为
    `incus_fleet_session` 的 `HttpOnly`、`SameSite=Lax` cookie。该 cookie 的有效期为
    12 小时。当请求本身走 TLS，或携带 `X-Forwarded-Proto: https`（由 Caddy 发送）
    时，cookie 会被标记为 `Secure`。
 2. **Bearer token。** 在受保护的端点上发送 `Authorization: Bearer <admin token>`。
-   该方式面向自动化场景，无需登录步骤。
+   这是共享引导凭证：**仅在尚无本地账号时有效**，创建第一个账号后自动退役。
+3. **引导环境变量。** `INCUS_FLEET_BOOTSTRAP_ADMIN_USERNAME` 与
+   `INCUS_FLEET_BOOTSTRAP_ADMIN_PASSWORD` 在启动时创建第一个管理员；已有账号后忽略。
+
+### 角色
+
+| 角色 | 读取 | 变更集群资源 | 管理用户 |
+| --- | --- | --- | --- |
+| `admin` | 是 | 是 | 是 |
+| `operator` | 是 | 是 | 否 |
+| `viewer` | 是 | 否（403） | 否 |
+
+变更类端点在服务端校验角色；只读账号即使直接调用 API 也会收到
+`403 {"error":{"code":"forbidden"}}`。
+
+### 用户管理
+
+| 方法 | 路径 | 认证 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/users` | admin | 列出账号 |
+| POST | `/users` | admin（首个账号可用引导 token） | 创建账号 |
+| PATCH | `/users/{id}` | admin | 修改角色、密码或禁用状态 |
+| DELETE | `/users/{id}` | admin | 删除账号（拒绝删除最后一个管理员） |
+| POST | `/auth/password` | 任意已登录账号 | 修改自己的密码 |
+| GET | `/auth/sessions` | 任意已登录账号 | 查看当前会话 |
+
+最后一个启用的管理员既不能被删除也不能被降级：两种操作都返回 `409 conflict`。
 
 `GET /api/v1/healthz`、`GET /api/v1/version`、`POST /auth/login` 和
 `POST /auth/logout` 是公开的。`/clusters`、`/instances`、`/migrations`、`/keys`、
@@ -31,17 +57,22 @@ curl -sS https://fleet.example/api/v1/clusters \
 POST /api/v1/auth/login
 Content-Type: application/json
 
-{"token": "<admin token>"}
+{"username": "admin", "password": "<password>"}
 ```
 
 ```json
 {
   "authenticated": true,
-  "expires_at": "2026-11-12T09:30:00Z"
+  "expires_at": "2026-11-12T09:30:00Z",
+  "username": "admin",
+  "role": "admin"
 }
 ```
 
-token 无效时返回 `401`，错误码为 `invalid_token`。
+凭据错误返回 `401` `invalid_credentials`；账号锁定返回 `429` `account_locked`；
+账号禁用返回 `403` `account_disabled`。
+
+引导路径改为发送 `{"token": "<admin token>"}`；一旦存在本地账号即返回 `401`。
 
 ### 会话
 
@@ -50,7 +81,7 @@ GET /api/v1/auth/session
 ```
 
 ```json
-{"authenticated": true}
+{"authenticated": true, "username": "admin", "role": "admin", "expires_at": "..."}
 ```
 
 ### 登出

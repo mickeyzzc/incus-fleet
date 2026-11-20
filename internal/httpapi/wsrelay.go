@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -154,25 +155,28 @@ func browserToIncus(browser, data, control *websocket.Conn, done chan<- error) {
 		}
 
 		if msgType == websocket.TextMessage {
-			if control == nil {
+			// Console mode speaks JSON control frames. A frame that looks like
+			// JSON but is malformed or unknown is a client bug and is dropped, as
+			// before. Plain text is exec stdin and must reach the process,
+			// otherwise interactive sessions appear dead.
+			trimmed := bytes.TrimSpace(payload)
+			if control != nil && len(trimmed) > 0 && trimmed[0] == '{' {
+				var ctl terminalControl
+				if json.Unmarshal(payload, &ctl) != nil || ctl.Type == "" {
+					continue
+				}
+
+				forwarded, marshalErr := controlFrame(ctl)
+				if marshalErr != nil {
+					continue
+				}
+				if err := control.WriteMessage(websocket.TextMessage, forwarded); err != nil {
+					done <- err
+					return
+				}
+
 				continue
 			}
-
-			var ctl terminalControl
-			if jsonErr := json.Unmarshal(payload, &ctl); jsonErr != nil {
-				continue
-			}
-
-			forwarded, marshalErr := controlFrame(ctl)
-			if marshalErr != nil {
-				continue
-			}
-			if err := control.WriteMessage(websocket.TextMessage, forwarded); err != nil {
-				done <- err
-				return
-			}
-
-			continue
 		}
 
 		if err := data.WriteMessage(websocket.BinaryMessage, payload); err != nil {

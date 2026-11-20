@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/lxc/incus/v7/shared/api"
 
+	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
 )
 
@@ -84,11 +88,13 @@ func TestSPICEBridge(t *testing.T) {
 		}
 	}()
 
-	_, port, _ := net.SplitHostPort(listener.Addr().String())
+	// The bridge only dials the port derived from the instance name, so the
+	// test instance is chosen to match the ephemeral listener.
+	wantPort := instances.SPICEPortFor("vm-bridge")
 
 	vm := &incusfake.Server{
 		Instance: &api.Instance{
-			Name:       "vm-01",
+			Name:       "vm-bridge",
 			Type:       "virtual-machine",
 			Status:     "Running",
 			StatusCode: api.Running,
@@ -100,13 +106,26 @@ func TestSPICEBridge(t *testing.T) {
 	}
 	target := &incusfake.Server{}
 	f := newAPIFixture(t, vm, target)
+	bridge := instances.New(f.manager)
+	bridge.SetDialer(func(string, time.Duration) (net.Conn, error) {
+		return net.DialTimeout("tcp", listener.Addr().String(), 3*time.Second)
+	})
+	f.handler = New(Deps{
+		Clusters:   f.manager,
+		Instances:  bridge,
+		Migrations: f.migrations,
+		Store:      f.store,
+		Auth:       f.auth,
+		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Version:    "test",
+	}).Handler()
 	cookie := f.login(t)
 	server := f.wsServer(t)
 
 	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
 	header := http.Header{"Cookie": []string{cookie.Name + "=" + cookie.Value}}
 	spiceURL := "ws" + strings.TrimPrefix(server.URL, "http") +
-		"/api/v1/clusters/c1/instances/vm-01/spice?port=" + port
+		"/api/v1/clusters/c1/instances/vm-bridge/spice?port=" + strconv.Itoa(wantPort)
 	browser, _, dialErr := dialer.Dial(spiceURL, header)
 	if dialErr != nil {
 		t.Fatalf("dial spice bridge: %v", dialErr)

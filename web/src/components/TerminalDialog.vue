@@ -6,11 +6,15 @@ import { Terminal } from '@xterm/xterm'
 
 import { api } from '@/api'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   modelValue: boolean
   cluster: string
   instance: string
-}>()
+  // instanceType selects the default session. Containers have no real serial
+  // console in Incus (forkconsole fails), so they start in exec mode; VMs start
+  // on the console.
+  instanceType?: string
+}>(), { instanceType: '' })
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
@@ -29,6 +33,7 @@ let socket: WebSocket | null = null
 let execStarted = false
 // Lines submitted while no session is live; replayed once the new shell opens.
 let pendingLines: string[] = []
+
 
 const visible = computed({
   get: () => props.modelValue,
@@ -49,7 +54,8 @@ watch(
 )
 
 async function openSession(): Promise<void> {
-  mode.value = 'console'
+  // Containers must use exec: attaching forkconsole to a container fails.
+  mode.value = props.instanceType === 'container' ? 'exec' : 'console'
   statusMessage.value = ''
   // The dialog body mounts asynchronously; wait for the host element before
   // connecting so early output is not dropped.
@@ -58,7 +64,7 @@ async function openSession(): Promise<void> {
     return
   }
 
-  connect('console')
+  connect(mode.value)
 }
 
 async function mountTerminal(): Promise<boolean> {
@@ -140,8 +146,16 @@ function submitCommand(): void {
     return
   }
 
-  // The previous shell exited (single exec sessions end with the command);
-  // open a fresh one and replay this line once it is connected.
+  // A connection is already opening for this mode: queue instead of replacing
+  // it. Reconnecting here discarded the previous session's output, which made
+  // the standard "switch to exec, type, press Enter" path appear broken.
+  if (socket && socket.readyState === WebSocket.CONNECTING) {
+    pendingLines.push(line)
+    return
+  }
+
+  // The previous shell exited; open a fresh one and replay this line once it
+  // is connected.
   pendingLines.push(line)
   connect('exec')
 }
@@ -151,9 +165,11 @@ function sendLine(line: string): void {
     return
   }
 
-  if (!execStarted) {
-    // Exec sessions run a persistent interactive shell; every submitted line
-    // is forwarded as stdin so state such as exports and cwd is kept.
+  // Only exec sessions need a launch frame; console input goes straight to the
+  // serial device. Keying this on mode as well as the flag prevents a console
+  // session from consuming the flag and leaving the following exec session
+  // without a launch request (which silently swallowed every command).
+  if (mode.value === 'exec' && !execStarted) {
     execStarted = true
     socket.send(
       JSON.stringify({

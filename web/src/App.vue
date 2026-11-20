@@ -9,6 +9,7 @@ import {
   Switch as SwitchIcon,
   SwitchButton,
   Collection,
+  UserFilled,
 } from '@element-plus/icons-vue'
 import en from 'element-plus/es/locale/lang/en'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
@@ -119,6 +120,11 @@ async function logout(): Promise<void> {
             <el-icon><Collection /></el-icon>
             <span>{{ t('nav.assets') }}</span>
           </el-menu-item>
+
+          <el-menu-item v-if="auth.canAdmin" index="/users">
+            <el-icon><UserFilled /></el-icon>
+            <span>{{ t('nav.users') }}</span>
+          </el-menu-item>
         </el-menu>
 
         <div class="sidebar-footer">
@@ -136,6 +142,7 @@ async function logout(): Promise<void> {
             <p>{{ t('app.subtitle') }}</p>
           </div>
           <div class="topbar-actions">
+            <span v-if="auth.username" class="topbar-user">{{ auth.username }}</span>
             <LocaleSwitch />
             <el-button :icon="SwitchButton" plain @click="logout">
               {{ t('app.signOut') }}

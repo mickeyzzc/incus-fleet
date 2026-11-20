@@ -8,6 +8,8 @@ import (
 
 	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
+
+	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 )
 
 const isoVolumeType = "custom"
@@ -166,6 +168,10 @@ func (s *Service) LaunchFromISO(ctx context.Context, clusterName string, req Lau
 	}
 	devices := api.DevicesMap{
 		"root": root,
+		// An ISO custom volume must NOT have a path: Incus replies "Custom ISO
+		// volumes cannot have a path defined". boot.priority makes it the boot
+		// device. The instance also has to live on the member that holds the
+		// volume, otherwise creation fails with "Storage volume not found".
 		"iso0": {
 			"type":          "disk",
 			"pool":          req.StoragePool,
@@ -208,9 +214,17 @@ func (s *Service) LaunchFromISO(ctx context.Context, clusterName string, req Lau
 	// relax secure boot: most distribution installers ship boot loaders the
 	// default VM firmware rejects.
 	config := api.ConfigMap{}
-	config["raw.qemu"] = fmt.Sprintf("%s unix=off,port=%d,disable-ticketing=on,addr=%s",
+	config["raw.qemu"] = fmt.Sprintf("%s unix=off,port=%d,disable-ticketing=on,addr=%s", // loopback only; bridged over the Incus API
 		spiceArgMarker, SPICEPortFor(req.Name), spiceListenAddr)
 	config["security.secureboot"] = "false"
+
+	// A cluster-wide custom ISO volume only exists on the member that holds it,
+	// so the VM must be created there. Creating on another member fails with
+	// "Failed loading custom volume: Storage volume not found".
+	member, err := s.isoVolumeMember(client, req.StoragePool, req.ISOName)
+	if err != nil {
+		return Detail{}, err
+	}
 
 	post := api.InstancesPost{
 		Name: req.Name,
@@ -222,7 +236,26 @@ func (s *Service) LaunchFromISO(ctx context.Context, clusterName string, req Lau
 		Source: api.InstanceSource{Type: "none"},
 		Start:  start,
 	}
+	if member != "" {
+		// The pool volume is stored on one member only. Bind the create call to
+		// that member so the ISO device resolves; the assertion is safe because
+		// clusters.InstanceServer is always satisfied by the Incus client.
+		targeted, ok := any(client).(interface {
+			UseTarget(name string) incus.InstanceServer
+		})
+		if !ok {
+			return Detail{}, fmt.Errorf("%w: cluster client does not support targeting", ErrInvalidRequest)
+		}
+		return s.createISOInstance(ctx, targeted.UseTarget(member), clusterName, req, post)
+	}
 
+	return s.createISOInstance(ctx, client, clusterName, req, post)
+}
+
+// createISOInstance creates the VM on the given client and returns its detail.
+func (s *Service) createISOInstance(ctx context.Context, client instanceCreator,
+	clusterName string, req LaunchISORequest, post api.InstancesPost,
+) (Detail, error) {
 	ctx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
 
@@ -235,4 +268,27 @@ func (s *Service) LaunchFromISO(ctx context.Context, clusterName string, req Lau
 	}
 
 	return s.Get(clusterName, req.Name)
+}
+
+// isoVolumeMember returns the cluster member that stores a custom ISO volume, or
+// an empty string when the member cannot be determined (single-node clusters and
+// older daemons). Pinning the VM to that member is what makes the ISO device
+// resolvable.
+func (s *Service) isoVolumeMember(client clusters.InstanceServer, pool, volume string) (string, error) {
+	vol, _, err := client.GetStoragePoolVolume(pool, "custom", volume)
+	if err != nil {
+		// Surface a clear message instead of Incus's device-validation error.
+		if isNotFound(err) {
+			return "", fmt.Errorf("%w: ISO volume %q not found in pool %q", ErrNotFound, volume, pool)
+		}
+		return "", fmt.Errorf("instances: inspect iso volume %s/%s: %w", pool, volume, err)
+	}
+
+	return vol.Location, nil
+}
+
+// instanceCreator is the single method createISOInstance needs; both the fleet
+// client and a member-bound Incus client satisfy it.
+type instanceCreator interface {
+	CreateInstance(instance api.InstancesPost) (incus.Operation, error)
 }

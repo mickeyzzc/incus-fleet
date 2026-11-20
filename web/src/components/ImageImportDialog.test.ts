@@ -136,3 +136,51 @@ describe('ImageImportDialog', () => {
     expect(wrapper.emitted('imported')).toBeUndefined()
   })
 })
+
+describe('ImageImportDialog file pickers', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('records the picked image file and submits it', async () => {
+    vi.mocked(api.importImage).mockResolvedValue('fp-123')
+
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    // The dialog keeps hidden file inputs; drive them directly.
+    const inputs = wrapper.findAll('input[type="file"]')
+    expect(inputs.length).toBeGreaterThan(0)
+
+    const image = new File(['image-bytes'], 'debian.tar', { type: 'application/x-tar' })
+    Object.defineProperty(inputs[0]!.element, 'files', { value: [image], configurable: true })
+    await inputs[0]!.trigger('change')
+    await flushPromises()
+
+    const submitButton = wrapper.findAll('button').find((b) => b.text().includes('Import'))
+    await submitButton!.trigger('click')
+    await flushPromises()
+
+    expect(api.importImage).toHaveBeenCalledWith(
+      'c1',
+      expect.objectContaining({ file: image }),
+    )
+  })
+
+  it('ignores a picker dismissal with no files', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const inputs = wrapper.findAll('input[type="file"]')
+    Object.defineProperty(inputs[0]!.element, 'files', { value: [], configurable: true })
+    await inputs[0]!.trigger('change')
+    await flushPromises()
+
+    // Without a file the submit path must complain rather than call the API.
+    const submitButton = wrapper.findAll('button').find((b) => b.text().includes('Import'))
+    await submitButton!.trigger('click')
+    await flushPromises()
+
+    expect(api.importImage).not.toHaveBeenCalled()
+  })
+})

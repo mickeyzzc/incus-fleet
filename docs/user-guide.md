@@ -33,10 +33,41 @@ Prerequisites:
 
 ## Sign in and choose a language
 
-1. Open the fleet URL, enter the admin token, and sign in. Sessions last 12 hours; sign in
-   again after they expire.
-2. Use the gear icon in the top-right corner → **Language** to switch between English and
+1. Open the fleet URL, enter your **username and password**, and sign in. Sessions last 12
+   hours; sign in again after they expire. The current account name appears in the top bar.
+2. Create the first administrator in one of two ways:
+   - set `INCUS_FLEET_BOOTSTRAP_ADMIN_USERNAME` and `INCUS_FLEET_BOOTSTRAP_ADMIN_PASSWORD`
+     in `incus-fleet.env` and restart the service; or
+   - sign in with the shared admin token and create one under **Users**.
+   The shared token stops working as soon as any local account exists.
+3. Use the gear icon in the top-right corner → **Language** to switch between English and
    中文. The choice applies immediately and is stored in the browser.
+
+## Users and roles
+
+Only administrators see **Users** in the sidebar.
+
+- **Roles**: Administrator (everything), Operator (mutate instances and nodes, cannot manage
+  users), Viewer (read-only).
+- **Create**: username, password (at least 8 characters), role; optionally mark the account
+  disabled or require a password change at next sign-in.
+- **Edit**: change the role, reset the password, enable or disable. Leaving the password
+  blank keeps the current one.
+- **Delete**: confirmed before it happens. The last administrator cannot be deleted or
+  demoted; the API returns a conflict.
+- **Authorization is server-side**: a viewer is refused (403) even when it calls the API
+  directly and bypasses the UI.
+
+![Users page: account list with roles and status](images/auth/users-redacted.png)
+
+## Online terminal
+
+Open the instance drawer and click **Terminal**. Containers start in **Command** mode (Incus
+has no serial console for containers) and virtual machines start in **Console** mode.
+Submitting a command works with Enter or the **Start** button, and the output is written into
+the terminal above.
+
+![Online terminal running a command and returning the kernel and disk usage](images/auth/terminal-redacted.png)
 
 ## Tour the dashboard
 

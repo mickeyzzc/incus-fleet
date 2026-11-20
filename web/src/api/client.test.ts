@@ -35,19 +35,19 @@ function clientWith(response: Response = mockResponse({})) {
 }
 
 describe('ApiClient', () => {
-  it('logs in and posts the token as JSON', async () => {
+  it('logs in and posts credentials as JSON', async () => {
     const { client, fetchImpl } = clientWith(
       mockResponse({ authenticated: true, expires_at: '2026-11-12T00:00:00Z' }),
     )
 
-    const session = await client.login(' secret ')
+    const session = await client.login(' admin ', ' secret ')
 
     expect(session.authenticated).toBe(true)
     expect(fetchImpl).toHaveBeenCalledWith(
       'https://fleet.local/api/v1/auth/login',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ token: ' secret ' }),
+        body: JSON.stringify({ username: ' admin ', password: ' secret ' }),
         credentials: 'same-origin',
       }),
     )
@@ -820,5 +820,77 @@ describe('ApiClient node network and cluster registration endpoints', () => {
     expect(urls).toContain('https://fleet.local/api/v1/clusters/c1/traffic')
     expect(urls).toContain('https://fleet.local/api/v1/clusters')
     expect(urls).toContain('https://fleet.local/api/v1/clusters/c64')
+  })
+})
+
+describe('user management endpoints', () => {
+  it('lists users', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ users: [{ id: 'u1', username: 'admin' }] }))
+
+    const users = await client.listUsers()
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/users',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(users).toHaveLength(1)
+  })
+
+  it('creates a user', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ id: 'u1', username: 'new' }))
+
+    await client.createUser({ username: 'new', password: 'correct-horse-9', role: 'viewer' })
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/users',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('updates a user', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ id: 'u1', username: 'new' }))
+
+    await client.updateUser('u1', { role: 'operator' })
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/users/u1',
+      expect.objectContaining({ method: 'PATCH' }),
+    )
+  })
+
+  it('deletes a user', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse(undefined, { status: 204 }))
+
+    await client.deleteUser('u1')
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/users/u1',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('changes the signed-in password', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse(undefined, { status: 204 }))
+
+    await client.changePassword('old-password-1', 'new-password-2')
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/auth/password',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('logs in with the bootstrap token', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ authenticated: true }))
+
+    await client.loginWithToken('  secret  ')
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/auth/login',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ token: '  secret  ' }),
+      }),
+    )
   })
 })

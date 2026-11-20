@@ -46,6 +46,14 @@ type apiFixture struct {
 func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 	t.Helper()
 
+	return newAPIFixtureWithAuth(t, source, target, nil)
+}
+
+// newAPIFixtureWithAuth builds a fixture, using the supplied authenticator when
+// non-nil so account and role paths can be exercised.
+func newAPIFixtureWithAuth(t *testing.T, source, target *incusfake.Server, authenticator *auth.Authenticator) *apiFixture {
+	t.Helper()
+
 	certPath := filepath.Join(t.TempDir(), "cluster.crt")
 	if err := os.WriteFile(certPath, []byte("-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -86,7 +94,9 @@ func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 	nodeRunner := newFakeNodeRunner()
 	nodeAccess := nodeaccess.New(manager, nodenet.NewService(nodeRunner), config.NodeAccess{},
 		nodeaccess.WithLocalMember("test-node"))
-	authenticator := auth.New("secret", time.Hour)
+	if authenticator == nil {
+		authenticator = auth.New("secret", time.Hour)
+	}
 	handler := New(Deps{
 		Clusters:   manager,
 		Instances:  instances.New(manager),

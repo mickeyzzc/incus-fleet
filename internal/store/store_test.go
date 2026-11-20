@@ -3,8 +3,13 @@ package store
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -388,4 +393,134 @@ func TestStoreErrorsAfterClose(t *testing.T) {
 	if err := s.Ping(ctx); err == nil {
 		t.Fatal("Ping() expected error")
 	}
+}
+
+// TestNoUnboundPlaceholders guards the PostgreSQL path. pgx needs $n
+// placeholders, and rebind() performs the conversion. Any call that passes a
+// SQL string containing '?' without routing it through rebind breaks postgres
+// at runtime, so fail the build instead.
+//
+// Queries are usually held in package-level or local constants, so this walks
+// the AST, collects every string literal assigned to a name, and then checks
+// each database call. A literal that is handed to rebind() is exempt.
+func TestNoUnboundPlaceholders(t *testing.T) {
+	matches, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+
+	queryMethods := map[string]bool{
+		"ExecContext":     true,
+		"QueryContext":    true,
+		"QueryRowContext": true,
+		"Exec":            true,
+		"Query":           true,
+		"QueryRow":        true,
+	}
+
+	for _, name := range matches {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+
+		// Map every declared name to its literal value, so a call passing a
+		// variable resolves to the SQL text it holds.
+		literals := map[string]string{}
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch n := node.(type) {
+			case *ast.ValueSpec:
+				for i, id := range n.Names {
+					if i < len(n.Values) {
+						if value := literalValue(n.Values[i]); value != "" {
+							literals[id.Name] = value
+						}
+					}
+				}
+			case *ast.AssignStmt:
+				for i, lhs := range n.Lhs {
+					if i >= len(n.Rhs) {
+						continue
+					}
+					id, ok := lhs.(*ast.Ident)
+					if !ok {
+						continue
+					}
+					if value := literalValue(n.Rhs[i]); value != "" {
+						literals[id.Name] = value
+					}
+				}
+			}
+			return true
+		})
+
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || !queryMethods[selector.Sel.Name] {
+				return true
+			}
+			inner, ok := selector.X.(*ast.SelectorExpr)
+			if !ok || inner.Sel.Name != "db" {
+				return true
+			}
+			if len(call.Args) < 2 {
+				return true
+			}
+
+			// A call with no arguments after the query has nothing to bind, so
+			// '?' inside it cannot be a placeholder (it is part of a literal or
+			// a comment in the SQL text).
+			if len(call.Args) == 2 {
+				return true
+			}
+
+			queryArg := call.Args[1]
+
+			// s.rebind(...) is the sanctioned path.
+			if wrapped, ok := queryArg.(*ast.CallExpr); ok {
+				if fn, ok := wrapped.Fun.(*ast.SelectorExpr); ok && fn.Sel.Name == "rebind" {
+					return true
+				}
+			}
+
+			value := literalValue(queryArg)
+			if value == "" {
+				if id, ok := queryArg.(*ast.Ident); ok {
+					value = literals[id.Name]
+				}
+			}
+
+			if strings.Contains(value, "?") {
+				t.Errorf("%s: parameterized query bypasses rebind at line %d",
+					name, fset.Position(call.Pos()).Line)
+			}
+
+			return true
+		})
+	}
+}
+
+// literalValue extracts the contents of a string literal argument, returning
+// an empty string for anything that is not a plain literal.
+func literalValue(expr ast.Expr) string {
+	basic, ok := expr.(*ast.BasicLit)
+	if !ok || basic.Kind != token.STRING {
+		return ""
+	}
+
+	value, err := strconv.Unquote(basic.Value)
+	if err != nil {
+		return ""
+	}
+
+	return value
 }

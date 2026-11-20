@@ -4,6 +4,7 @@ package instances
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -20,11 +21,17 @@ var ErrNotFound = errors.New("instances: not found")
 // Service reads instance inventory from the cluster manager.
 type Service struct {
 	clusters *clusters.Manager
+
+	// dial opens a TCP connection to a SPICE listener. Tests replace it to
+	// point at an ephemeral listener; production uses net.DialTimeout.
+	dial func(addr string, timeout time.Duration) (net.Conn, error)
 }
 
 // New creates an instance inventory service.
 func New(manager *clusters.Manager) *Service {
-	return &Service{clusters: manager}
+	return &Service{clusters: manager, dial: func(addr string, timeout time.Duration) (net.Conn, error) {
+		return net.DialTimeout("tcp", addr, timeout)
+	}}
 }
 
 // Summary is the list representation of an instance.
@@ -280,4 +287,10 @@ func isNotFound(err error) bool {
 	}
 
 	return false
+}
+
+// SetDialer replaces the TCP dialer used for SPICE bridging. It exists so tests
+// can point the bridge at an ephemeral listener; production never calls it.
+func (s *Service) SetDialer(dial func(addr string, timeout time.Duration) (net.Conn, error)) {
+	s.dial = dial
 }

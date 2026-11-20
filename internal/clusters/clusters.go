@@ -36,6 +36,7 @@ type FileEntry = apitypes.FileEntry
 // services. Tests provide a fake implementation of this interface.
 type InstanceServer interface {
 	GetServer() (*api.Server, string, error)
+	GetStoragePoolVolume(pool string, volType string, name string) (*api.StorageVolume, string, error)
 	GetCluster() (*api.Cluster, string, error)
 	GetClusterMembers() ([]api.ClusterMember, error)
 	GetInstancesFull(instanceType api.InstanceType) ([]api.InstanceFull, error)

@@ -3,6 +3,7 @@ package httpapi
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -135,56 +136,61 @@ func (a *API) Handler() http.Handler {
 		mux.Handle("POST /internal/mesh/owner", a.mesh.OwnerHandler())
 		mux.Handle("POST /internal/mesh/admin", a.mesh.AdminHandler())
 		mux.Handle("GET /api/v1/mesh/status", a.requireAuth(http.HandlerFunc(a.meshStatus)))
-		mux.Handle("POST /api/v1/mesh/force-single", a.requireAuth(http.HandlerFunc(a.meshForceSingle)))
-		mux.Handle("POST /api/v1/mesh/join", a.requireAuth(http.HandlerFunc(a.meshJoin)))
-		mux.Handle("POST /api/v1/mesh/promote", a.requireAuth(http.HandlerFunc(a.meshPromote)))
-		mux.Handle("POST /api/v1/mesh/remove", a.requireAuth(http.HandlerFunc(a.meshRemove)))
+		mux.Handle("POST /api/v1/mesh/force-single", a.requireWriter(http.HandlerFunc(a.meshForceSingle)))
+		mux.Handle("POST /api/v1/mesh/join", a.requireWriter(http.HandlerFunc(a.meshJoin)))
+		mux.Handle("POST /api/v1/mesh/promote", a.requireWriter(http.HandlerFunc(a.meshPromote)))
+		mux.Handle("POST /api/v1/mesh/remove", a.requireWriter(http.HandlerFunc(a.meshRemove)))
 	}
 	mux.HandleFunc("POST /api/v1/auth/login", a.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", a.logout)
-
+	mux.Handle("POST /api/v1/auth/password", a.requireAuth(http.HandlerFunc(a.changePassword)))
+	mux.Handle("GET /api/v1/auth/sessions", a.requireAuth(http.HandlerFunc(a.listSessions)))
+	mux.Handle("GET /api/v1/users", a.requireAdmin(http.HandlerFunc(a.listUsers)))
+	mux.Handle("POST /api/v1/users", a.requireAuth(http.HandlerFunc(a.createUser)))
+	mux.Handle("PATCH /api/v1/users/{id}", a.requireAdmin(http.HandlerFunc(a.updateUser)))
+	mux.Handle("DELETE /api/v1/users/{id}", a.requireAdmin(http.HandlerFunc(a.deleteUser)))
 	mux.Handle("GET /api/v1/auth/session", a.requireAuth(http.HandlerFunc(a.session)))
 	mux.Handle("GET /api/v1/clusters", a.requireAuth(http.HandlerFunc(a.listClusters)))
 	mux.Handle("GET /api/v1/clusters/{cluster}", a.requireAuth(http.HandlerFunc(a.getCluster)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/reconnect", a.requireAuth(http.HandlerFunc(a.reconnectCluster)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/reconnect", a.requireWriter(http.HandlerFunc(a.reconnectCluster)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances", a.requireAuth(http.HandlerFunc(a.listClusterInstances)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}", a.requireAuth(http.HandlerFunc(a.getInstance)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/instances", a.requireAuth(http.HandlerFunc(a.createInstance)))
-	mux.Handle("PATCH /api/v1/clusters/{cluster}/instances/{instance}", a.requireAuth(http.HandlerFunc(a.updateInstance)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/state", a.requireAuth(http.HandlerFunc(a.instanceAction)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances", a.requireWriter(http.HandlerFunc(a.createInstance)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/instances/{instance}", a.requireWriter(http.HandlerFunc(a.updateInstance)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/state", a.requireWriter(http.HandlerFunc(a.instanceAction)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/metrics", a.requireAuth(http.HandlerFunc(a.instanceMetrics)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}", a.requireAuth(http.HandlerFunc(a.deleteInstance)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}", a.requireWriter(http.HandlerFunc(a.deleteInstance)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/images", a.requireAuth(http.HandlerFunc(a.listImages)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/images/import", a.requireAuth(http.HandlerFunc(a.importImage)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/images/{fingerprint}/copy", a.requireAuth(http.HandlerFunc(a.copyImage)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/images/{fingerprint}", a.requireAuth(http.HandlerFunc(a.deleteImage)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/images/import", a.requireWriter(http.HandlerFunc(a.importImage)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/images/{fingerprint}/copy", a.requireWriter(http.HandlerFunc(a.copyImage)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/images/{fingerprint}", a.requireWriter(http.HandlerFunc(a.deleteImage)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/resources", a.requireAuth(http.HandlerFunc(a.getResources)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/traffic", a.requireAuth(http.HandlerFunc(a.clusterTraffic)))
-	mux.Handle("POST /api/v1/clusters", a.requireAuth(http.HandlerFunc(a.registerCluster)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}", a.requireAuth(http.HandlerFunc(a.unregisterCluster)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/members", a.requireAuth(http.HandlerFunc(a.addClusterMember)))
+	mux.Handle("POST /api/v1/clusters", a.requireWriter(http.HandlerFunc(a.registerCluster)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}", a.requireWriter(http.HandlerFunc(a.unregisterCluster)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/members", a.requireWriter(http.HandlerFunc(a.addClusterMember)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/members/{member}/node", a.requireAuth(http.HandlerFunc(a.nodeSnapshot)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/networks/{name}/state", a.requireAuth(http.HandlerFunc(a.nodeNICState)))
-	mux.Handle("PATCH /api/v1/clusters/{cluster}/members/{member}/node/networks/{name}", a.requireAuth(http.HandlerFunc(a.nodeApplyAddress)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/networks/{name}/wifi", a.requireAuth(http.HandlerFunc(a.nodeWifiConnect)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/networks/{name}/state", a.requireWriter(http.HandlerFunc(a.nodeNICState)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/members/{member}/node/networks/{name}", a.requireWriter(http.HandlerFunc(a.nodeApplyAddress)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/networks/{name}/wifi", a.requireWriter(http.HandlerFunc(a.nodeWifiConnect)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/members/{member}/node/routes", a.requireAuth(http.HandlerFunc(a.nodeRoutes)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/routes", a.requireAuth(http.HandlerFunc(a.nodeAddRoute)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/members/{member}/node/routes/{destination}", a.requireAuth(http.HandlerFunc(a.nodeDeleteRoute)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/routes", a.requireWriter(http.HandlerFunc(a.nodeAddRoute)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/members/{member}/node/routes/{destination}", a.requireWriter(http.HandlerFunc(a.nodeDeleteRoute)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/members/{member}/node/firewall", a.requireAuth(http.HandlerFunc(a.nodeFirewall)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/firewall", a.requireAuth(http.HandlerFunc(a.nodeAddFirewallRule)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/members/{member}/node/firewall/{handle}", a.requireAuth(http.HandlerFunc(a.nodeDeleteFirewallRule)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/members/{member}/node/firewall", a.requireWriter(http.HandlerFunc(a.nodeAddFirewallRule)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/members/{member}/node/firewall/{handle}", a.requireWriter(http.HandlerFunc(a.nodeDeleteFirewallRule)))
 	mux.Handle("GET /api/v1/audit", a.requireAuth(http.HandlerFunc(a.listHostAudit)))
 	mux.Handle("GET /api/v1/audit/export", a.requireAuth(http.HandlerFunc(a.exportHostAudit)))
 	mux.Handle("GET /api/v1/tasks", a.requireAuth(http.HandlerFunc(a.listHostTasks)))
-	mux.Handle("POST /api/v1/tasks", a.requireAuth(http.HandlerFunc(a.enqueueHostTask)))
+	mux.Handle("POST /api/v1/tasks", a.requireWriter(http.HandlerFunc(a.enqueueHostTask)))
 	mux.Handle("GET /api/v1/tasks/{id}", a.requireAuth(http.HandlerFunc(a.getHostTask)))
 	mux.Handle("GET /api/v1/agents", a.requireAuth(http.HandlerFunc(a.listAgents)))
-	mux.Handle("POST /api/v1/agents/enrollment-tokens", a.requireAuth(http.HandlerFunc(a.createAgentEnrollmentToken)))
+	mux.Handle("POST /api/v1/agents/enrollment-tokens", a.requireWriter(http.HandlerFunc(a.createAgentEnrollmentToken)))
 	mux.Handle("GET /api/v1/agents/{id}/snapshot", a.requireAuth(http.HandlerFunc(a.agentSnapshot)))
-	mux.Handle("POST /api/v1/agents/{id}/network", a.requireAuth(http.HandlerFunc(a.agentNetwork)))
-	mux.Handle("POST /api/v1/agents/{id}/bootstrap", a.requireAuth(http.HandlerFunc(a.agentBootstrap)))
-	mux.Handle("POST /api/v1/agents/{id}/certificate", a.requireAuth(http.HandlerFunc(a.rotateAgentCertificate)))
-	mux.Handle("POST /api/v1/agents/{id}/revoke", a.requireAuth(http.HandlerFunc(a.revokeAgent)))
+	mux.Handle("POST /api/v1/agents/{id}/network", a.requireWriter(http.HandlerFunc(a.agentNetwork)))
+	mux.Handle("POST /api/v1/agents/{id}/bootstrap", a.requireWriter(http.HandlerFunc(a.agentBootstrap)))
+	mux.Handle("POST /api/v1/agents/{id}/certificate", a.requireWriter(http.HandlerFunc(a.rotateAgentCertificate)))
+	mux.Handle("POST /api/v1/agents/{id}/revoke", a.requireWriter(http.HandlerFunc(a.revokeAgent)))
 	mux.Handle("GET /api/v1/metrics/query", a.requireAuth(http.HandlerFunc(a.queryMetrics)))
 	mux.Handle("GET /api/v1/metrics/snapshot", a.requireAuth(http.HandlerFunc(a.snapshotMetrics)))
 	mux.Handle("GET /api/v1/metrics/export", a.requireAuth(http.HandlerFunc(a.exportMetrics)))
@@ -192,55 +198,55 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("GET /api/v1/sd/agents", a.requireSDToken(http.HandlerFunc(a.sdAgents)))
 	mux.Handle("GET /api/v1/agents/{id}/metrics/prometheus", a.requireSDToken(http.HandlerFunc(a.agentPrometheus)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.listSnapshots)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireAuth(http.HandlerFunc(a.createSnapshot)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore", a.requireAuth(http.HandlerFunc(a.restoreSnapshot)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}", a.requireAuth(http.HandlerFunc(a.deleteSnapshot)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/devices", a.requireAuth(http.HandlerFunc(a.attachDevice)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/devices/{device}", a.requireAuth(http.HandlerFunc(a.detachDevice)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots", a.requireWriter(http.HandlerFunc(a.createSnapshot)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore", a.requireWriter(http.HandlerFunc(a.restoreSnapshot)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}", a.requireWriter(http.HandlerFunc(a.deleteSnapshot)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/devices", a.requireWriter(http.HandlerFunc(a.attachDevice)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/devices/{device}", a.requireWriter(http.HandlerFunc(a.detachDevice)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/console", a.requireAuth(http.HandlerFunc(a.instanceTerminal)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/vga", a.requireAuth(http.HandlerFunc(a.instanceVga)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/spice", a.requireAuth(http.HandlerFunc(a.instanceSPICE)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/spice/prepare", a.requireAuth(http.HandlerFunc(a.prepareSPICE)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/spice/prepare", a.requireWriter(http.HandlerFunc(a.prepareSPICE)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/exec", a.requireAuth(http.HandlerFunc(a.instanceExec)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/files", a.requireAuth(http.HandlerFunc(a.instanceFiles)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/files", a.requireAuth(http.HandlerFunc(a.uploadInstanceFile)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/files", a.requireAuth(http.HandlerFunc(a.deleteInstanceFile)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/files", a.requireWriter(http.HandlerFunc(a.uploadInstanceFile)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/files", a.requireWriter(http.HandlerFunc(a.deleteInstanceFile)))
 	mux.Handle("GET /api/v1/keys", a.requireAuth(http.HandlerFunc(a.listKeys)))
-	mux.Handle("POST /api/v1/keys", a.requireAuth(http.HandlerFunc(a.createKey)))
-	mux.Handle("PATCH /api/v1/keys/{id}", a.requireAuth(http.HandlerFunc(a.updateKey)))
-	mux.Handle("DELETE /api/v1/keys/{id}", a.requireAuth(http.HandlerFunc(a.deleteKey)))
+	mux.Handle("POST /api/v1/keys", a.requireWriter(http.HandlerFunc(a.createKey)))
+	mux.Handle("PATCH /api/v1/keys/{id}", a.requireWriter(http.HandlerFunc(a.updateKey)))
+	mux.Handle("DELETE /api/v1/keys/{id}", a.requireWriter(http.HandlerFunc(a.deleteKey)))
 	mux.Handle("GET /api/v1/scripts", a.requireAuth(http.HandlerFunc(a.listScripts)))
-	mux.Handle("POST /api/v1/scripts", a.requireAuth(http.HandlerFunc(a.createScript)))
-	mux.Handle("PATCH /api/v1/scripts/{id}", a.requireAuth(http.HandlerFunc(a.updateScript)))
-	mux.Handle("DELETE /api/v1/scripts/{id}", a.requireAuth(http.HandlerFunc(a.deleteScript)))
-	mux.Handle("POST /api/v1/batch/keys", a.requireAuth(http.HandlerFunc(a.batchKeys)))
-	mux.Handle("POST /api/v1/batch/scripts", a.requireAuth(http.HandlerFunc(a.batchScripts)))
-	mux.Handle("POST /api/v1/batch/power", a.requireAuth(http.HandlerFunc(a.batchPower)))
+	mux.Handle("POST /api/v1/scripts", a.requireWriter(http.HandlerFunc(a.createScript)))
+	mux.Handle("PATCH /api/v1/scripts/{id}", a.requireWriter(http.HandlerFunc(a.updateScript)))
+	mux.Handle("DELETE /api/v1/scripts/{id}", a.requireWriter(http.HandlerFunc(a.deleteScript)))
+	mux.Handle("POST /api/v1/batch/keys", a.requireWriter(http.HandlerFunc(a.batchKeys)))
+	mux.Handle("POST /api/v1/batch/scripts", a.requireWriter(http.HandlerFunc(a.batchScripts)))
+	mux.Handle("POST /api/v1/batch/power", a.requireWriter(http.HandlerFunc(a.batchPower)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/iso", a.requireAuth(http.HandlerFunc(a.listISOs)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/iso", a.requireAuth(http.HandlerFunc(a.importISO)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/iso/{pool}/{name}", a.requireAuth(http.HandlerFunc(a.deleteISO)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/iso/{pool}/{name}/launch", a.requireAuth(http.HandlerFunc(a.launchFromISO)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/ops", a.requireAuth(http.HandlerFunc(a.runInstanceOps)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/rebuild", a.requireAuth(http.HandlerFunc(a.rebuildInstance)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/images/{fingerprint}/refresh", a.requireAuth(http.HandlerFunc(a.refreshImage)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/clone", a.requireAuth(http.HandlerFunc(a.cloneInstance)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/storage-pools", a.requireAuth(http.HandlerFunc(a.createStoragePool)))
-	mux.Handle("PATCH /api/v1/clusters/{cluster}/storage-pools/{pool}", a.requireAuth(http.HandlerFunc(a.updateStoragePool)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/storage-pools/{pool}", a.requireAuth(http.HandlerFunc(a.deleteStoragePool)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/iso", a.requireWriter(http.HandlerFunc(a.importISO)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/iso/{pool}/{name}", a.requireWriter(http.HandlerFunc(a.deleteISO)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/iso/{pool}/{name}/launch", a.requireWriter(http.HandlerFunc(a.launchFromISO)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/ops", a.requireWriter(http.HandlerFunc(a.runInstanceOps)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/rebuild", a.requireWriter(http.HandlerFunc(a.rebuildInstance)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/images/{fingerprint}/refresh", a.requireWriter(http.HandlerFunc(a.refreshImage)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/clone", a.requireWriter(http.HandlerFunc(a.cloneInstance)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/storage-pools", a.requireWriter(http.HandlerFunc(a.createStoragePool)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/storage-pools/{pool}", a.requireWriter(http.HandlerFunc(a.updateStoragePool)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/storage-pools/{pool}", a.requireWriter(http.HandlerFunc(a.deleteStoragePool)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/storage-pools/{pool}/volumes", a.requireAuth(http.HandlerFunc(a.listVolumes)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/storage-pools/{pool}/volumes", a.requireAuth(http.HandlerFunc(a.createVolume)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/storage-pools/{pool}/volumes/{volume}", a.requireAuth(http.HandlerFunc(a.deleteVolume)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/networks", a.requireAuth(http.HandlerFunc(a.createNetwork)))
-	mux.Handle("PATCH /api/v1/clusters/{cluster}/networks/{network}", a.requireAuth(http.HandlerFunc(a.updateNetwork)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/networks/{network}", a.requireAuth(http.HandlerFunc(a.deleteNetwork)))
-	mux.Handle("PATCH /api/v1/clusters/{cluster}/members/{member}", a.requireAuth(http.HandlerFunc(a.updateMember)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/storage-pools/{pool}/volumes", a.requireWriter(http.HandlerFunc(a.createVolume)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/storage-pools/{pool}/volumes/{volume}", a.requireWriter(http.HandlerFunc(a.deleteVolume)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/networks", a.requireWriter(http.HandlerFunc(a.createNetwork)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/networks/{network}", a.requireWriter(http.HandlerFunc(a.updateNetwork)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/networks/{network}", a.requireWriter(http.HandlerFunc(a.deleteNetwork)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/members/{member}", a.requireWriter(http.HandlerFunc(a.updateMember)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/profiles", a.requireAuth(http.HandlerFunc(a.listProfiles)))
-	mux.Handle("POST /api/v1/clusters/{cluster}/profiles", a.requireAuth(http.HandlerFunc(a.createProfile)))
-	mux.Handle("PATCH /api/v1/clusters/{cluster}/profiles/{profile}", a.requireAuth(http.HandlerFunc(a.updateProfile)))
-	mux.Handle("DELETE /api/v1/clusters/{cluster}/profiles/{profile}", a.requireAuth(http.HandlerFunc(a.deleteProfile)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/profiles", a.requireWriter(http.HandlerFunc(a.createProfile)))
+	mux.Handle("PATCH /api/v1/clusters/{cluster}/profiles/{profile}", a.requireWriter(http.HandlerFunc(a.updateProfile)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/profiles/{profile}", a.requireWriter(http.HandlerFunc(a.deleteProfile)))
 	mux.Handle("GET /api/v1/instances", a.requireAuth(http.HandlerFunc(a.listInstances)))
 	mux.Handle("GET /api/v1/migrations", a.requireAuth(http.HandlerFunc(a.listMigrations)))
-	mux.Handle("POST /api/v1/migrations", a.requireAuth(http.HandlerFunc(a.submitMigration)))
+	mux.Handle("POST /api/v1/migrations", a.requireWriter(http.HandlerFunc(a.submitMigration)))
 	mux.Handle("GET /api/v1/migrations/{id}", a.requireAuth(http.HandlerFunc(a.getMigration)))
 
 	mux.Handle("/", a.staticHandler())
@@ -250,28 +256,66 @@ func (a *API) Handler() http.Handler {
 
 func (a *API) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !a.authenticated(r) {
+		session, ok := a.authenticate(r)
+		if !ok {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxSessionKey{}, session)))
 	})
 }
 
-func (a *API) authenticated(r *http.Request) bool {
+// requireWriter rejects read-only roles on mutating endpoints.
+func (a *API) requireWriter(next http.Handler) http.Handler {
+	return a.requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, ok := sessionFromContext(r.Context())
+		if !ok || !session.Role.CanWrite() {
+			writeError(w, http.StatusForbidden, "forbidden", "this account is read-only")
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	}))
+}
+
+// requireAdmin restricts an endpoint to administrators.
+func (a *API) requireAdmin(next http.Handler) http.Handler {
+	return a.requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, ok := sessionFromContext(r.Context())
+		if !ok || !session.Role.CanAdmin() {
+			writeError(w, http.StatusForbidden, "forbidden", "administrator role required")
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	}))
+}
+
+// authenticate resolves the caller identity. It accepts the bootstrap bearer
+// token (only while no local account exists) and the session cookie.
+func (a *API) authenticate(r *http.Request) (auth.Session, bool) {
 	if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-		if a.auth.ValidateToken(strings.TrimSpace(token)) {
-			return true
+		if a.auth.ValidateToken(strings.TrimSpace(token)) && a.auth.BootstrapAllowed(r.Context()) {
+			return auth.Session{UserID: "bootstrap", Username: "bootstrap-admin", Role: auth.RoleAdmin}, true
 		}
 	}
 
 	cookie, err := r.Cookie(sessionCookie)
 	if err != nil {
-		return false
+		return auth.Session{}, false
 	}
 
-	return a.auth.ValidateSession(cookie.Value)
+	return a.auth.Session(r.Context(), cookie.Value)
+}
+
+// ctxSessionKey carries the authenticated session for authorization checks.
+type ctxSessionKey struct{}
+
+// sessionFromContext returns the session attached by requireAuth.
+func sessionFromContext(ctx context.Context) (auth.Session, bool) {
+	session, ok := ctx.Value(ctxSessionKey{}).(auth.Session)
+	return session, ok
 }
 
 func (a *API) health(w http.ResponseWriter, _ *http.Request) {
@@ -298,6 +342,10 @@ func requestIsSecure(r *http.Request) bool {
 
 func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		// Token keeps the bootstrap path working until the first local account
+		// is created.
 		Token string `json:"token"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
@@ -305,32 +353,59 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID, expires, err := a.auth.Login(req.Token)
+	var (
+		session auth.Session
+		err     error
+	)
+	switch {
+	case strings.TrimSpace(req.Username) != "" || req.Password != "":
+		session, err = a.auth.Login(r.Context(), req.Username, req.Password)
+	default:
+		session, err = a.auth.LoginWithToken(r.Context(), req.Token)
+	}
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid_token", "invalid admin token")
+		a.writeLoginError(w, err)
 		return
 	}
 
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure is set for TLS or X-Forwarded-Proto: https
 		Name:     sessionCookie,
-		Value:    sessionID,
+		Value:    session.ID,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   requestIsSecure(r),
 		SameSite: http.SameSiteLaxMode,
-		Expires:  expires,
-		MaxAge:   int(time.Until(expires).Seconds()),
+		Expires:  session.ExpiresAt,
+		MaxAge:   int(time.Until(session.ExpiresAt).Seconds()),
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
-		"expires_at":    expires,
+		"expires_at":    session.ExpiresAt,
+		"username":      session.Username,
+		"role":          session.Role,
 	})
+}
+
+// writeLoginError maps authentication failures to client errors without
+// revealing whether a username exists.
+func (a *API) writeLoginError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, auth.ErrLocked):
+		writeError(w, http.StatusTooManyRequests, "account_locked", "too many failed attempts; try again later")
+	case errors.Is(err, auth.ErrUserDisabled):
+		writeError(w, http.StatusForbidden, "account_disabled", "account is disabled")
+	case errors.Is(err, auth.ErrInvalidCredentials), errors.Is(err, auth.ErrInvalidToken):
+		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
+	default:
+		a.logger.Error("login failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "login failed")
+	}
 }
 
 func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(sessionCookie); err == nil {
-		a.auth.Logout(cookie.Value)
+		a.auth.Logout(r.Context(), cookie.Value)
 	}
 
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure is set for TLS or X-Forwarded-Proto: https
@@ -346,8 +421,19 @@ func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *API) session(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
+func (a *API) session(w http.ResponseWriter, r *http.Request) {
+	session, ok := sessionFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"authenticated": true,
+		"username":      session.Username,
+		"role":          session.Role,
+		"expires_at":    session.ExpiresAt,
+	})
 }
 
 func (a *API) listClusters(w http.ResponseWriter, _ *http.Request) {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Key } from '@element-plus/icons-vue'
+import { Lock, User } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 import LocaleSwitch from '@/components/LocaleSwitch.vue'
@@ -12,7 +12,7 @@ const route = useRoute()
 const auth = useAuthStore()
 const { t } = useI18n()
 
-const form = reactive({ token: '' })
+const form = reactive({ username: '', password: '' })
 
 const redirect = computed(() => {
   const value = route.query.redirect
@@ -20,16 +20,17 @@ const redirect = computed(() => {
 })
 
 async function submit(): Promise<void> {
-  if (!form.token.trim()) {
+  if (!form.username.trim() || !form.password) {
     return
   }
 
-  const ok = await auth.login(form.token)
+  const ok = await auth.login(form.username, form.password)
   if (!ok) {
     return
   }
 
-  form.token = ''
+  form.username = ''
+  form.password = ''
   await router.push(redirect.value)
 }
 </script>
@@ -60,15 +61,25 @@ async function submit(): Promise<void> {
       />
 
       <el-form label-position="top" @submit.prevent="submit">
-        <el-form-item :label="t('login.token')">
+        <el-form-item :label="t('login.username')">
           <el-input
-            v-model="form.token"
+            v-model="form.username"
+            size="large"
+            :placeholder="t('login.usernamePlaceholder')"
+            autocomplete="username"
+            :prefix-icon="User"
+          />
+        </el-form-item>
+
+        <el-form-item :label="t('login.password')">
+          <el-input
+            v-model="form.password"
             type="password"
             show-password
             size="large"
-            :placeholder="t('login.tokenPlaceholder')"
+            :placeholder="t('login.passwordPlaceholder')"
             autocomplete="current-password"
-            :prefix-icon="Key"
+            :prefix-icon="Lock"
             @keyup.enter="submit"
           />
         </el-form-item>
@@ -78,7 +89,7 @@ async function submit(): Promise<void> {
           size="large"
           native-type="submit"
           :loading="auth.loading"
-          :disabled="!form.token.trim()"
+          :disabled="!form.username.trim() || !form.password"
           style="width: 100%"
         >
           {{ t('login.submit') }}

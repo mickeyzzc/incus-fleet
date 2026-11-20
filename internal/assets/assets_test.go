@@ -277,3 +277,31 @@ func TestServiceLoadErrorsSurface(t *testing.T) {
 		t.Fatalf("missing script error = %v", err)
 	}
 }
+
+func TestUpdateScriptRequiresBody(t *testing.T) {
+	ctx := context.Background()
+	svc, st := newFixture(t, map[string]*incusfake.Server{"c1": {}})
+
+	script := &Script{Name: "s", Body: "echo hi"}
+	if err := svc.CreateScript(ctx, script); err != nil {
+		t.Fatalf("CreateScript() = %v", err)
+	}
+
+	script.Body = "   "
+	if err := svc.UpdateScript(ctx, script); !errors.Is(err, instances.ErrInvalidRequest) {
+		t.Fatalf("UpdateScript(empty body) = %v, want ErrInvalidRequest", err)
+	}
+
+	script.Body = "echo updated"
+	if err := svc.UpdateScript(ctx, script); err != nil {
+		t.Fatalf("UpdateScript() = %v", err)
+	}
+
+	got, err := st.GetScript(ctx, script.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Body != "echo updated" {
+		t.Fatalf("body = %q", got.Body)
+	}
+}
