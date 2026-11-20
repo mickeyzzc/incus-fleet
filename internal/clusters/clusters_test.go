@@ -111,6 +111,12 @@ func TestSummaryAndList(t *testing.T) {
 		},
 		PoolResources: &api.ResourcesStoragePool{Space: api.ResourcesStoragePoolSpace{Used: 50, Total: 100}},
 		NetworkNames:  []string{"incusbr0", "eth0"},
+		// eth0 is an unmanaged host NIC: it must not leak into the cluster
+		// summary, which only carries managed (cluster-level) networks.
+		Networks: []api.Network{
+			{Name: "incusbr0", Type: "bridge", Managed: true},
+			{Name: "eth0", Type: "physical", Managed: false},
+		},
 		ServerResources: &api.Resources{
 			CPU:    api.ResourcesCPU{Architecture: "x86_64", Total: 8},
 			Memory: api.ResourcesMemory{Used: 4_000_000_000, Total: 16_000_000_000},
@@ -152,8 +158,8 @@ func TestSummaryAndList(t *testing.T) {
 	if len(s.Members) != 1 || s.Members[0].Name != "node-a" || !s.Members[0].Database {
 		t.Fatalf("Members = %#v", s.Members)
 	}
-	if len(s.Networks) != 2 || s.Networks[0] != "eth0" {
-		t.Fatalf("Networks = %#v", s.Networks)
+	if len(s.Networks) != 1 || s.Networks[0] != "incusbr0" {
+		t.Fatalf("Networks = %#v, want only the managed bridge", s.Networks)
 	}
 	if s.CPU.Total != 8 || s.CPU.Architecture != "x86_64" {
 		t.Fatalf("CPU = %#v", s.CPU)

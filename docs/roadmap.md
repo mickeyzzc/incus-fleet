@@ -60,6 +60,10 @@ a shared "Fleet" view.**
   (see section 5).
 - **Fleet users, roles, sessions, audit**: administration from section 1.
 
+**Delivered so far:** the cluster summary now lists only *managed* networks, so host
+NICs no longer appear at cluster level; physical NICs, addresses, routes, firewall and
+Wi-Fi all live on the node page.
+
 ### Cluster scope (single cluster)
 
 - Cluster overview: members, health, counts, resource capacity.

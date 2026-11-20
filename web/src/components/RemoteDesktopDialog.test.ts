@@ -37,8 +37,8 @@ describe('RemoteDesktopDialog', () => {
       applied: true,
       restart_required: false,
     })
-    vi.mocked(api.spiceURL).mockReturnValue(
-      'ws://fleet.local/api/v1/clusters/c1/instances/vm-01/spice?port=5931',
+    vi.mocked(api.vgaURL).mockReturnValue(
+      'ws://fleet.local/api/v1/clusters/c1/instances/vm-01/vga',
     )
   })
 
@@ -48,10 +48,12 @@ describe('RemoteDesktopDialog', () => {
     await waitReal(250)
     await flushPromises()
 
-    expect(api.prepareSPICE).toHaveBeenCalledWith('c1', 'vm-01')
+    // The desktop uses Incus's own VGA channel: bridging a raw TCP port only
+    // works when the daemon shares the member, and the listener is loopback-only.
+    expect(api.vgaURL).toHaveBeenCalledWith('c1', 'vm-01')
     expect(SpiceMainConn).toHaveBeenCalledWith(
       expect.objectContaining({
-        uri: 'ws://fleet.local/api/v1/clusters/c1/instances/vm-01/spice?port=5931',
+        uri: 'ws://fleet.local/api/v1/clusters/c1/instances/vm-01/vga',
         screen_id: 'remote-desktop-host',
       }),
     )

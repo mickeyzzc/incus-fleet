@@ -715,9 +715,18 @@ func (c *Connection) Summary() Summary {
 		}
 	}
 
-	if networks, err := client.GetNetworkNames(); err == nil {
-		sort.Strings(networks)
-		summary.Networks = networks
+	// Only managed networks are cluster-level resources. GetNetworkNames also
+	// returns unmanaged host NICs, which are node-local detail and belong on the
+	// node page rather than in the cluster summary.
+	if networks, err := client.GetNetworks(); err == nil {
+		managed := make([]string, 0, len(networks))
+		for _, network := range networks {
+			if network.Managed {
+				managed = append(managed, network.Name)
+			}
+		}
+		sort.Strings(managed)
+		summary.Networks = managed
 	}
 
 	if resources, err := client.GetServerResources(); err == nil {
