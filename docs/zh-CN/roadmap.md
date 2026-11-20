@@ -108,7 +108,23 @@
 - 前端后续：轮询退避/在途保护、迁移取消/重试、二次确认、表单校验、i18n key 对齐、
   可访问性、响应式表格、相对时间、分页边界、全局错误处理、终端重连、加载/空状态。
 
-## 4. Rust agent：主机监控、node-exporter 兼容、eBPF
+## 4. Rust agent：主机监控、node-exporter 兼容、eBPF —— **部分交付**
+
+已交付：agent 已部署到两个集群，遥测链路端到端可用。`GET /api/v1/agents` 显示两个成员
+在线；center 同时在原生 `fleet_*` 之外接受 node-exporter 兼容的 `node_*` 指标，
+现有 Prometheus 面板无需修改即可使用。节点页现在显示实时 CPU、负载、内存与 agent
+运行时间，不再显示 "telemetry is not enabled"。
+
+已交付内容：
+
+- Agent 注册（CA + 一次性 token）、两台主机的 systemd 单元。
+- `node_*` 兼容：`node_cpu_seconds_total`、`node_memory_MemTotal_bytes`、
+  `node_memory_MemAvailable_bytes`、`node_memory_MemUsed_bytes`、`node_load1`、
+  `node_boot_time_seconds`、`node_network_{receive,transmit}_bytes_total`、
+  `node_netstat_Tcp_RetransSegs`、`node_vmstat_oom_kill`。
+- 复用既有 WebSocket 遥测路径摄取，center 的名称白名单扩展为接受 `node_`。
+
+仍在规划：
 
 agent 已采集基础 `fleet_*` 指标（CPU 比率、内存、负载、uptime、网络字节、TCP 重传、
 OOM、采集耗时），并有 eBPF 采集器（sockops、tcp 重传、oom、块 I/O 延迟，可回退

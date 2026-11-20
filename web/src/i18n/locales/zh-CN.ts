@@ -16,6 +16,7 @@ export default {
     assets: '资产库',
     node: '节点网络',
     users: '用户管理',
+    fleetVolumes: '存储总览',
   },
   titles: {
     signIn: '登录',
@@ -26,6 +27,7 @@ export default {
     assets: '资产库',
     node: '节点网络',
     users: '用户管理',
+    fleetVolumes: '存储总览',
   },
   common: {
     refresh: '刷新',
@@ -342,6 +344,18 @@ export default {
     invalidCredentials: '用户名或密码错误。',
     accountLocked: '失败次数过多，请稍后再试。',
     accountDisabled: '该账号已被禁用。',
+  },
+  fleetVolumes: {
+    title: '存储总览',
+    subtitle: '跨所有集群的自定义存储卷，附所属集群与存储池。',
+    searchPlaceholder: '搜索卷名、集群或存储池',
+    summary: '{count} 个卷 · 已分配 {size}',
+    pool: '存储池',
+    contentType: '类型',
+    size: '容量',
+    usedBy: '使用中',
+    location: '所在成员',
+    empty: '没有找到存储卷',
   },
   users: {
     title: '用户管理',

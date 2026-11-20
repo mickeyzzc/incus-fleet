@@ -145,7 +145,25 @@ without internal details.
   responsive tables, relative timestamps, pagination edge cases, global error
   handling, terminal reconnect, loading/empty states.
 
-## 4. Rust agent: host monitoring, node-exporter compatibility, eBPF
+## 4. Rust agent: host monitoring, node-exporter compatibility, eBPF — **PARTIALLY DELIVERED**
+
+Shipped: the agent is deployed on both clusters and the telemetry path works end
+to end. `GET /api/v1/agents` reports both members online, and the center accepts a
+node-exporter compatible `node_*` view alongside the native `fleet_*` series, so
+existing Prometheus dashboards work unchanged. The node page now shows live CPU,
+load, memory, and agent uptime instead of "telemetry is not enabled".
+
+Delivered:
+
+- Agent enrollment (CA + one-time token), systemd units on both hosts.
+- `node_*` compatibility: `node_cpu_seconds_total`, `node_memory_MemTotal_bytes`,
+  `node_memory_MemAvailable_bytes`, `node_memory_MemUsed_bytes`, `node_load1`,
+  `node_boot_time_seconds`, `node_network_{receive,transmit}_bytes_total`,
+  `node_netstat_Tcp_RetransSegs`, `node_vmstat_oom_kill`.
+- Telemetry ingestion through the existing WebSocket path, with the center's name
+  allowlist extended to accept `node_`.
+
+Still open:
 
 The agent already collects a basic `fleet_*` metric set (CPU ratio, memory,
 load, uptime, network bytes, TCP retransmits, OOM kills, collect duration) and
@@ -154,11 +172,9 @@ falls back to procfs/cgroup, plus a token-protected `/metrics` endpoint.
 
 Planned work:
 
-- **node-exporter compatibility layer**: expose the common host metrics under
-  standard `node_*` names and labels (filesystem, CPU, memory, network, disk,
-  systemd, time) alongside the existing `fleet_*` series, so existing Prometheus
-  dashboards and alert rules work without modification. Provide a
-  compatibility flag and document the mapping.
+- **Per-CPU and filesystem series**: the compatibility view currently reports a
+  single aggregated CPU and no filesystem counters.
+- **Compatibility flag**: the `node_*` view is always on; add a switch to disable it.
 - **Metrics completeness**: per-CPU, filesystem/ MountPoint usage, disk IOPS/
   latency, TCP connection states, process counts, entropy, time sync — the
   standard node-exporter baseline.

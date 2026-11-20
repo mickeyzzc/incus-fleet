@@ -426,6 +426,58 @@ agent:
     helper_binary: /home/incus/bin/incus-fleet-helper
 ```
 
+The center runs the agent as `incus-fleet`, so the CA key and server key must be
+readable by that account:
+
+```bash
+sudo chown incus-fleet:incus-fleet /etc/incus-fleet/agent-ca.key /etc/incus-fleet/agent-server.key
+```
+
+On each node install the agent and helper, then enroll with a one-time token:
+
+```bash
+sudo install -m 755 incus-fleet-agent /usr/local/bin/incus-fleet-agent
+sudo install -m 755 incus-fleet-helper /usr/libexec/incus-fleet-helper
+echo "$ENROLLMENT_TOKEN" | sudo tee /tmp/enroll.token >/dev/null
+sudo chmod 600 /tmp/enroll.token
+sudo incus-fleet-agent enroll --center https://<center>:8444 \
+  --ca /etc/incus-fleet/agent-ca.crt --token-file /tmp/enroll.token \
+  --cluster <cluster> --member <member>
+```
+
+Then run it under systemd:
+
+```ini
+[Unit]
+Description=Incus Fleet host agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/incus-fleet-agent run \
+  --state-dir /var/lib/incus-fleet-agent --helper /usr/libexec/incus-fleet-helper
+Restart=always
+RestartSec=5s
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Cross-compiling from macOS: `cargo zigbuild --target x86_64-unknown-linux-gnu`
+needs the `x86_64-unknown-linux-gnu` rustup target; plain `cargo build --target`
+fails without a Linux C toolchain.
+
+The agent reports both a native `fleet_*` metric set and a node-exporter compatible
+`node_*` view, so existing Prometheus dashboards keep working. Verify with:
+
+```bash
+curl -s https://<center>/api/v1/agents -H "Authorization: Bearer $TOKEN"
+curl -s "https://<center>/api/v1/metrics/snapshot" -H "Authorization: Bearer $TOKEN" \
+  | grep -o '"node_[a-z_0-9]*"' | sort -u
+```
+
 ```bash
 cargo build --manifest-path agent/Cargo.toml --release
 go build -o bin/incus-fleet-helper ./cmd/incus-fleet-helper

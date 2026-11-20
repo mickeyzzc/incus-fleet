@@ -294,3 +294,56 @@ describe('InstancesView dialogs', () => {
     expect(wrapper.find('.el-dialog').exists()).toBe(true)
   })
 })
+
+describe('InstancesView helper actions', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockFleet()
+    vi.mocked(api.listKeys).mockResolvedValue([])
+    vi.mocked(api.listScripts).mockResolvedValue([])
+  })
+
+  it('opens the batch dialog only when rows are selected', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openBatch: (mode: 'keys' | 'script') => void
+      batchOpen: boolean
+    }
+
+    // No selection: the dialog must stay closed.
+    vm.openBatch('keys')
+    await flushPromises()
+    expect(vm.batchOpen).toBe(false)
+  })
+
+  it('opens the batch dialog for selected rows', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      handleSelectionChange: (rows: Array<{ cluster: string; name: string }>) => void
+      openBatch: (mode: 'keys' | 'script') => void
+      batchOpen: boolean
+    }
+
+    vm.handleSelectionChange([{ cluster: 'c1', name: 'web' }])
+    vm.openBatch('script')
+    await flushPromises()
+
+    expect(vm.batchOpen).toBe(true)
+  })
+
+  it('resets to the first page when filters change', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { page: number; search: string }
+    vm.page = 3
+    vm.search = 'web'
+    await flushPromises()
+
+    expect(vm.page).toBe(1)
+  })
+})

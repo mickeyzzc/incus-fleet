@@ -56,6 +56,12 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'titles.assets' },
   },
   {
+    path: '/volumes',
+    name: 'fleet-volumes',
+    component: () => import('@/views/FleetVolumesView.vue'),
+    meta: { titleKey: 'titles.fleetVolumes' },
+  },
+  {
     path: '/users',
     name: 'users',
     component: () => import('@/views/UsersView.vue'),

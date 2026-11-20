@@ -16,6 +16,7 @@ export default {
     assets: 'Assets',
     node: 'Node network',
     users: 'Users',
+    fleetVolumes: 'Fleet storage',
   },
   titles: {
     signIn: 'Sign in',
@@ -26,6 +27,7 @@ export default {
     assets: 'Assets',
     node: 'Node network',
     users: 'Users',
+    fleetVolumes: 'Fleet storage',
   },
   common: {
     refresh: 'Refresh',
@@ -345,6 +347,18 @@ export default {
     invalidCredentials: 'Invalid username or password.',
     accountLocked: 'Too many failed attempts. Try again later.',
     accountDisabled: 'This account is disabled.',
+  },
+  fleetVolumes: {
+    title: 'Fleet storage',
+    subtitle: 'Every custom volume across all clusters, with the cluster and pool it lives in.',
+    searchPlaceholder: 'Search name, cluster, or pool',
+    summary: '{count} volumes · {size} provisioned',
+    pool: 'Pool',
+    contentType: 'Content',
+    size: 'Size',
+    usedBy: 'In use',
+    location: 'Member',
+    empty: 'No volumes found',
   },
   users: {
     title: 'Users',

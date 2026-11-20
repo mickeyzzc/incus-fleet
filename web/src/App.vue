@@ -10,6 +10,7 @@ import {
   SwitchButton,
   Collection,
   UserFilled,
+  Coin,
 } from '@element-plus/icons-vue'
 import en from 'element-plus/es/locale/lang/en'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
@@ -109,6 +110,11 @@ async function logout(): Promise<void> {
           <el-menu-item index="/instances">
             <el-icon><Box /></el-icon>
             <span>{{ t('nav.instances') }}</span>
+          </el-menu-item>
+
+          <el-menu-item index="/volumes">
+            <el-icon><Coin /></el-icon>
+            <span>{{ t('nav.fleetVolumes') }}</span>
           </el-menu-item>
 
           <el-menu-item index="/migrations">

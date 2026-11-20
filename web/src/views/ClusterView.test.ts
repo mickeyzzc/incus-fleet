@@ -515,3 +515,25 @@ describe('ClusterView', () => {
     expect(dialog.props('fingerprint')).toBe('053059ea4e28')
   })
 })
+describe('ClusterView navigation and helpers', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('routes to the node detail page for a member', async () => {
+    const { wrapper, router } = await mountCluster()
+    const vm = wrapper.vm as unknown as { openNodeDetail: (member: { name: string }) => void }
+    vm.openNodeDetail({ name: 'node-a' })
+    await flushPromises()
+    // The route change is the observable effect of the click handler.
+    expect(router.currentRoute.value.name).toBe('node-detail')
+    expect(router.currentRoute.value.params.member).toBe('node-a')
+  })
+
+  it('labels member statuses through the translation table', async () => {
+    const { wrapper } = await mountCluster()
+    const vm = wrapper.vm as unknown as { memberStatusLabel: (s: string) => string }
+    expect(vm.memberStatusLabel('Online')).toBeTruthy()
+    expect(vm.memberStatusLabel('UnknownState')).toBe('UnknownState')
+  })
+})

@@ -274,7 +274,14 @@ func cloneLabels(labels map[string]string) map[string]string {
 }
 
 func validName(name string) bool {
-	if !strings.HasPrefix(name, "fleet_") || len(name) > 200 {
+	// Agents emit a node-exporter compatible `node_*` view alongside the
+	// native `fleet_*` series so existing Prometheus dashboards keep working.
+	// Anything else is rejected: the prefix whitelist is what stops an agent
+	// from writing into unrelated metric namespaces.
+	if !strings.HasPrefix(name, "fleet_") && !strings.HasPrefix(name, "node_") {
+		return false
+	}
+	if len(name) > 200 {
 		return false
 	}
 	for i, r := range name {

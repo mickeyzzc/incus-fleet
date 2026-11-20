@@ -314,3 +314,44 @@ describe('TerminalDialog default session', () => {
     wrapper.unmount()
   })
 })
+
+describe('TerminalDialog resize', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    document.body.innerHTML = ''
+    MockWebSocket.instances = []
+    vi.mocked(api.terminalURL).mockImplementation(
+      (_cluster, instance, kind) => `ws://fleet.local/api/v1/clusters/c1/instances/${instance}/${kind}`,
+    )
+    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    document.body.innerHTML = ''
+  })
+
+  it('sends a resize frame carrying the terminal geometry', async () => {
+    const wrapper = mount(TerminalDialog, {
+      attachTo: document.body,
+      props: { modelValue: true, cluster: 'c1', instance: 'web' },
+      global: { plugins: [ElementPlus] },
+    })
+    await settle()
+
+    const socket = MockWebSocket.instances[0]!
+    socket.onopen?.()
+    await settle()
+
+    const vm = wrapper.vm as unknown as { onResize: () => void }
+    vm.onResize()
+    await settle()
+
+    const resize = socket.sent
+      .map((item) => (typeof item === 'string' ? item : new TextDecoder().decode(item)))
+      .find((item) => item.includes('"type":"resize"'))
+    expect(resize, `expected a resize frame in ${JSON.stringify(socket.sent)}`).toBeTruthy()
+
+    wrapper.unmount()
+  })
+})

@@ -6,6 +6,7 @@ mod helper;
 mod histogram;
 mod identity;
 mod metrics;
+mod node_metrics;
 mod metrics_server;
 mod proto;
 mod renew;

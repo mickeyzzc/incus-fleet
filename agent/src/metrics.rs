@@ -7,6 +7,7 @@ use tracing::warn;
 
 use crate::cgroup;
 use crate::ebpf;
+use crate::node_metrics::NodeMetrics;
 use crate::histogram::Histogram;
 use crate::proto::v1::{MetricType, Sample, Series, TelemetryBatch};
 
@@ -57,6 +58,9 @@ impl Collector {
         let now = now_ms();
         let mut series = Vec::new();
 
+        let mut cpu_usage: Option<f64> = None;
+        let mut memory_pair: Option<(u64, u64)> = None;
+
         if let Some((idle, total)) = read_cpu() {
             let usage = match self.previous_cpu {
                 Some((prev_idle, prev_total)) if total > prev_total && idle >= prev_idle => {
@@ -67,6 +71,7 @@ impl Collector {
                 _ => 0.0,
             };
             self.previous_cpu = Some((idle, total));
+            cpu_usage = Some(usage);
             series.push(gauge(
                 "fleet_host_cpu_usage_ratio",
                 HashMap::new(),
@@ -76,6 +81,7 @@ impl Collector {
         }
 
         if let Some((total, available)) = read_memory() {
+            memory_pair = Some((total, available));
             series.push(gauge(
                 "fleet_host_memory_bytes",
                 labels(&[("state", "total")]),
@@ -166,6 +172,21 @@ impl Collector {
                 tx as f64,
             ));
         }
+
+        // node-exporter compatible view, derived from the readings above so no
+        // host counter is probed twice.
+        let node_view = NodeMetrics {
+            now_ms: now,
+            cpu_usage_ratio: cpu_usage,
+            memory_total: memory_pair.map(|(total, _)| total),
+            memory_available: memory_pair.map(|(_, available)| available),
+            load1: Some(read_load()),
+            uptime_seconds: self.started.elapsed().as_secs_f64(),
+            network: read_network(),
+            tcp_retransmits: proc_tcp_retransmits(),
+            oom_kills: proc_oom_kills(),
+        };
+        series.extend(node_view.series());
 
         self.collect_histogram
             .observe(started.elapsed().as_secs_f64());

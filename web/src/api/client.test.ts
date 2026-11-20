@@ -894,3 +894,58 @@ describe('user management endpoints', () => {
     )
   })
 })
+
+describe('fleet volume aggregation', () => {
+  function routedClient(handler: (url: string) => Response) {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => handler(String(input)))
+
+    return new ApiClient({ baseURL: 'https://fleet.local/', fetchImpl })
+  }
+
+  it('tags every volume with its cluster and pool', async () => {
+    const client = routedClient((url) => {
+      if (url.endsWith('/clusters')) {
+        return mockResponse({ clusters: [{ name: 'c1' }, { name: 'c2' }] })
+      }
+      if (url.includes('/resources')) {
+        return mockResponse({ storage_pools: [{ name: 'default' }], networks: [] })
+      }
+      if (url.includes('/volumes')) {
+        return mockResponse({ volumes: [{ name: 'vol-1', type: 'custom', config: {}, used_by: [] }] })
+      }
+      return mockResponse({})
+    })
+
+    const volumes = await client.listAllVolumes()
+
+    expect(volumes).toHaveLength(2)
+    expect(volumes[0]).toMatchObject({ name: 'vol-1', cluster: 'c1', pool: 'default' })
+    expect(volumes[1]).toMatchObject({ name: 'vol-1', cluster: 'c2', pool: 'default' })
+  })
+
+  it('skips a cluster whose volumes cannot be read', async () => {
+    const client = routedClient((url) => {
+      if (url.endsWith('/clusters')) {
+        return mockResponse({ clusters: [{ name: 'c1' }, { name: 'c2' }] })
+      }
+      if (url.includes('/clusters/c2/resources')) {
+        return mockResponse({ storage_pools: [{ name: 'default' }], networks: [] })
+      }
+      if (url.includes('/clusters/c2/') && url.includes('/volumes')) {
+        return mockResponse({ error: { code: 'cluster_unavailable', message: 'down' } }, { status: 503 })
+      }
+      if (url.includes('/resources')) {
+        return mockResponse({ storage_pools: [{ name: 'default' }], networks: [] })
+      }
+      if (url.includes('/volumes')) {
+        return mockResponse({ volumes: [{ name: 'vol-1', type: 'custom', config: {}, used_by: [] }] })
+      }
+      return mockResponse({})
+    })
+
+    const volumes = await client.listAllVolumes()
+
+    expect(volumes).toHaveLength(1)
+    expect(volumes[0]?.cluster).toBe('c1')
+  })
+})

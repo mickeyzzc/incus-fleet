@@ -57,6 +57,7 @@ import type {
   SnapshotRequest,
   StoragePoolRequest,
   StorageVolume,
+  FleetVolume,
   UpdateInstanceRequest,
   VersionResponse,
   VolumeRequest,
@@ -416,6 +417,42 @@ export class ApiClient {
       'DELETE',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/snapshots/${encodeURIComponent(snapshot)}`,
     )
+  }
+
+  /**
+   * Lists every custom volume across all clusters, tagged with its cluster and
+   * pool. Pools that fail to answer are skipped so one unreachable cluster does
+   * not blank the whole fleet view.
+   */
+  async listAllVolumes(): Promise<FleetVolume[]> {
+    const clusters = await this.listClusters()
+    const perCluster = await Promise.all(
+      clusters.map(async (cluster) => {
+        try {
+          const resources = await this.getResources(cluster.name)
+          const pools = resources.storage_pools ?? []
+          const perPool = await Promise.all(
+            pools.map(async (pool) => {
+              try {
+                const volumes = await this.listVolumes(cluster.name, pool.name)
+                return volumes.map((volume) => ({
+                  ...volume,
+                  cluster: cluster.name,
+                  pool: pool.name,
+                }))
+              } catch {
+                return []
+              }
+            }),
+          )
+          return perPool.flat()
+        } catch {
+          return []
+        }
+      }),
+    )
+
+    return perCluster.flat()
   }
 
   async listVolumes(cluster: string, pool: string): Promise<StorageVolume[]> {

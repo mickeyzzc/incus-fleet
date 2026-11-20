@@ -457,6 +457,12 @@ export interface StorageVolume {
   location?: string
 }
 
+/** One custom volume with the cluster and pool it lives in. */
+export interface FleetVolume extends StorageVolume {
+  cluster: string
+  pool: string
+}
+
 /** Request used to create a custom storage volume. */
 export interface VolumeRequest {
   name: string
