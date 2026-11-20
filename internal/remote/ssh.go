@@ -37,11 +37,21 @@ type Options struct {
 	InsecureIgnoreHostKey bool
 	// Timeout bounds dialing and authentication.
 	Timeout time.Duration
+	// RawConn, when set, is used for the SSH handshake instead of dialing
+	// Address directly. This carries jump-host connections: the caller opens
+	// a TCP channel through an established SSH session and hands it over.
+	RawConn net.Conn
 }
 
 // Dialer opens SSH connections. Tests supply a fake dialer.
 type Dialer interface {
 	Dial(ctx context.Context, opts Options) (Client, error)
+}
+
+// Jumper is implemented by SSH clients that can open raw TCP channels through
+// the established session, giving jump-host (ProxyJump) semantics.
+type Jumper interface {
+	DialTCP(ctx context.Context, address string) (net.Conn, error)
 }
 
 // Client runs commands over one SSH connection.
@@ -87,10 +97,17 @@ func (SSHDialer) Dial(ctx context.Context, opts Options) (Client, error) {
 
 	address := withDefaultPort(opts.Address)
 
-	dialer := net.Dialer{Timeout: timeout}
-	conn, err := dialer.DialContext(ctx, "tcp", address)
-	if err != nil {
-		return nil, fmt.Errorf("remote: dial %s: %w", address, err)
+	var conn net.Conn
+	if opts.RawConn != nil {
+		// Jump-host path: the caller already established the transport.
+		conn = opts.RawConn
+	} else {
+		dialer := net.Dialer{Timeout: timeout}
+		established, err := dialer.DialContext(ctx, "tcp", address)
+		if err != nil {
+			return nil, fmt.Errorf("remote: dial %s: %w", address, err)
+		}
+		conn = established
 	}
 
 	clientConn, chans, reqs, err := ssh.NewClientConn(conn, address, config)
@@ -208,6 +225,24 @@ func (c *sshClient) RunStdin(ctx context.Context, command string, stdin string) 
 // Close implements Client.
 func (c *sshClient) Close() error {
 	return c.client.Close()
+}
+
+// DialTCP implements Jumper: it opens a raw TCP channel through the
+// established SSH session to a target only reachable from this host.
+func (c *sshClient) DialTCP(ctx context.Context, address string) (net.Conn, error) {
+	conn, err := c.client.Dial("tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("remote: jump dial %s: %w", address, err)
+	}
+
+	// ssh.Client.Dial has no context-aware form, so watch the context
+	// separately; the caller's context bounds this watcher's lifetime.
+	go func() {
+		<-ctx.Done()
+		_ = conn.Close()
+	}()
+
+	return conn, nil
 }
 
 // closeOnDone closes the session when the context is cancelled. The returned

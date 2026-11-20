@@ -84,6 +84,10 @@
 - 终端对话框现在显示服务端的 WebSocket 关闭原因(缺少 incus agent、实例未运行、控制台被占用),
   并提示虚拟机串口控制台的注意事项。
 
+- 为无 agent 的虚拟机提供一键安装官方 incus-agent:fleet 通过 SSH(经成员主机跳板)进入客户机,
+  挂载 Incus 自带的 `config` 9p 共享盘,执行官方 `install.sh`,并验证 agent 开始上报状态。客户机
+  凭据仅存于请求中,不落库。目前仅支持 Linux/systemd 客户机。
+
 ### 修复
 
 - 实例网卡编辑不再失败或静默无效:旧的 `nictype`/`parent` 网卡切换到托管网络时会自动删除

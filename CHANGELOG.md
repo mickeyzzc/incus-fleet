@@ -102,6 +102,12 @@ All notable changes to this project are documented here. The format follows
 - Terminal dialogs now surface the server's websocket close reason (missing incus agent,
   stopped instance, busy console) and hint VM serial-console expectations.
 
+- One-click install of the official incus-agent into agent-less virtual machines: the fleet
+  reaches the guest over SSH (jumping through the member host), mounts the `config` 9p share
+  Incus already provides, runs the official `install.sh`, and verifies the agent starts
+  reporting state. Guest credentials stay in the request and are never stored. Linux/systemd
+  guests only.
+
 ### Fixed
 
 - Instance NIC edits no longer fail or silently do nothing: switching a legacy

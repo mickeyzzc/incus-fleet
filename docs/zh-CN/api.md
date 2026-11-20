@@ -156,6 +156,7 @@ POST /api/v1/auth/logout
 | POST | `/clusters/{cluster}/instances/{instance}/clone` | 是 | 在所属集群内克隆实例 |
 | POST | `/clusters/{cluster}/instances/{instance}/rebuild` | 是 | 用另一个镜像重建根磁盘 |
 | POST | `/clusters/{cluster}/instances/{instance}/ops` | 是 | 运行脚本、设置密码或注入密钥 |
+| POST | `/clusters/{cluster}/instances/{instance}/agent/install` | 是 | 通过 SSH 在虚拟机内安装官方 incus-agent（客户机凭据仅在请求体内，不落库） |
 | GET | `/clusters/{cluster}/instances/{instance}/vga` | 是 | 图形控制台（WebSocket） |
 | POST | `/clusters/{cluster}/instances/{instance}/desktop/prepare` | 是 | 启用 QMP 图形控制台（安装监视器 socket） |
 | GET | `/clusters/{cluster}/instances/{instance}/desktop/screenshot` | 是 | 当前帧缓冲（PNG） |

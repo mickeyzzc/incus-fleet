@@ -161,6 +161,7 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | POST | `/clusters/{cluster}/instances/{instance}/clone` | yes | Clone an instance within its cluster |
 | POST | `/clusters/{cluster}/instances/{instance}/rebuild` | yes | Rebuild the root disk from another image |
 | POST | `/clusters/{cluster}/instances/{instance}/ops` | yes | Run a script, set a password, or inject a key |
+| POST | `/clusters/{cluster}/instances/{instance}/agent/install` | yes | Install the official incus-agent into a VM over SSH (guest credentials in the body, never stored) |
 | GET | `/clusters/{cluster}/instances/{instance}/vga` | yes | Graphical console (WebSocket) |
 | POST | `/clusters/{cluster}/instances/{instance}/desktop/prepare` | yes | Arm the QMP graphical console (installs the monitor socket) |
 | GET | `/clusters/{cluster}/instances/{instance}/desktop/screenshot` | yes | Current framebuffer as PNG |

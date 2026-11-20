@@ -506,6 +506,22 @@ export interface DeviceRequest {
   boot?: string
 }
 
+/** One stage of the in-guest incus-agent install. */
+export interface GuestAgentStep {
+  name: string
+  status: 'ok' | 'failed' | 'warn'
+  detail?: string
+}
+
+/** Request to install the official incus-agent into a VM over SSH. */
+export interface GuestAgentInstallRequest {
+  address?: string
+  ssh_port?: number
+  ssh_user: string
+  ssh_password?: string
+  sudo_password?: string
+}
+
 /** One file or directory inside an instance. */
 export interface FileEntry {
   name: string

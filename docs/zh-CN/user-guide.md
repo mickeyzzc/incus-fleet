@@ -67,6 +67,24 @@ VNC/SPICE 能力:fleet 通过 `raw.qemu.conf` 为虚拟机追加第二个 QEMU �
 显示虚拟机电源状态,并提供 **开机**、**重启**、**关机** 按钮,停机的虚拟机可以直接在控制台
 里启动。容器没有显示设备,不提供该按钮。
 
+## 安装 incus agent
+
+从任意 ISO 安装的系统(例如 fnOS)不自带 Incus 的客户机内 agent,因此这类虚拟机的命令行终端、
+文件管理与实例指标都不可用。抽屉检测到"没有 agent 的虚拟机"时会显示 **安装 Agent** 按钮:
+填入客户机的 SSH 凭据,Fleet 会通过 SSH 在客户机内执行 Incus 官方的 `install.sh`(agent 本体由
+Incus 自动挂进每台虚拟机的只读 `config` 共享盘提供)。凭据仅本次会话使用,不会保存;非 root
+用户支持 sudo 提权。
+
+如需手动操作,可在客户机内执行:
+
+```
+mount -t 9p config /mnt
+/mnt/install.sh
+```
+
+安装器仅支持带 systemd 与 9p 内核支持的客户机(Debian、Ubuntu 及其衍生系统均可)。Windows
+虚拟机需要 virtio-win 的安装流程,暂未覆盖。
+
 ## 在线终端
 
 在实例详情抽屉中点击「终端」。容器默认进入「命令行」模式(Incus 容器没有串口控制台),

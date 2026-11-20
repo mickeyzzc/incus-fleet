@@ -41,6 +41,54 @@ describe('InstanceDetailDrawer', () => {
     expect(wrapper.text()).toContain('snap0')
   })
 
+  it('offers the agent installer only for agent-less virtual machines', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(
+      instanceDetail({ type: 'virtual-machine', os: '', os_version: '', hostname: '' }),
+    )
+    const wrapper = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'vm1' },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Install agent')
+
+    // A VM that already reports guest info has the agent; no installer.
+    vi.mocked(api.getInstance).mockResolvedValue(
+      instanceDetail({ type: 'virtual-machine', os: 'Debian GNU/Linux', hostname: 'vm1' }),
+    )
+    const withAgent = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'vm1' },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    expect(withAgent.text()).not.toContain('Install agent')
+
+    // A running VM whose state carries interfaces is agent-backed even when
+    // os_info stays empty (minimal images never fill it).
+    vi.mocked(api.getInstance).mockResolvedValue(
+      instanceDetail({
+        type: 'virtual-machine',
+        os: '',
+        os_version: '',
+        hostname: '',
+        state: {
+          status: 'Running',
+          status_code: 103,
+          network: { eth0: { addresses: [{ address: '10.0.0.5', family: 'inet', scope: 'global' }] } },
+        },
+      }),
+    )
+    const withNetwork = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'vm1' },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    expect(withNetwork.text()).not.toContain('Install agent')
+  })
+
   it('opens the remote desktop and maintenance dialogs', async () => {
     vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
     const wrapper = mount(InstanceDetailDrawer, {

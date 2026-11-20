@@ -84,6 +84,8 @@ type Server struct {
 	UpdatePoolErr     error
 	DeletePoolErr     error
 	Networks          []api.Network
+	NetworkLeases     []api.NetworkLease
+	NetworkLeasesErr  error
 	NetworksErr       error
 	Network           *api.Network
 	NetworkErr        error
@@ -1130,6 +1132,16 @@ func (s *Server) GetNetworks() ([]api.Network, error) {
 	}
 
 	return []api.Network{{Name: "incusbr0", Type: "bridge", Managed: true, Config: api.ConfigMap{"ipv4.address": "10.0.0.1/24", "ipv6.address": "none"}}}, nil
+}
+
+// GetNetworkLeases implements clusters.InstanceServer.
+func (s *Server) GetNetworkLeases(network string) ([]api.NetworkLease, error) {
+	s.record("GetNetworkLeases:" + network)
+	if s.NetworkLeasesErr != nil {
+		return nil, s.NetworkLeasesErr
+	}
+
+	return s.NetworkLeases, nil
 }
 
 // GetStoragePoolResources implements clusters.InstanceServer.

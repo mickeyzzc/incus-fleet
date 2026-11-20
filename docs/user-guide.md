@@ -76,6 +76,26 @@ second. The toolbar also shows the guest power state with **Start**, **Restart**
 buttons, so a stopped VM can be booted without leaving the console. Containers have no display
 device and do not offer this button.
 
+## Installing the incus agent
+
+Systems installed from an arbitrary ISO (for example fnOS) do not carry Incus's in-guest agent,
+which is why the exec terminal, file manager, and instance metrics stay unavailable on such VMs.
+When the drawer detects a virtual machine without the agent, it shows an **Install agent**
+button: enter the guest's SSH credentials and Fleet runs Incus's official `install.sh` inside the
+guest (the agent ships on a read-only `config` share Incus mounts into every VM). The
+credentials are used for that one session and never stored; sudo escalation is supported for
+non-root users.
+
+Manual fallback inside the guest, if you prefer:
+
+```
+mount -t 9p config /mnt
+/mnt/install.sh
+```
+
+The installer only supports systemd guests with 9p support in the kernel (Debian, Ubuntu, and
+derivatives qualify). Windows VMs need the virtio-win agent flow and are not covered yet.
+
 ## Online terminal
 
 Open the instance drawer and click **Terminal**. Containers start in **Command** mode (Incus

@@ -27,6 +27,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/metricsquery"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
 	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
+	"github.com/mickeyzzc/incus-fleet/internal/guestagent"
 	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
@@ -49,6 +50,7 @@ type Deps struct {
 	Store        *store.SQLStore
 	NodeNet      *nodeaccess.Service
 	NodeJoin     *nodejoin.Service
+	GuestAgent   *guestagent.Service
 	Agent        AgentDispatcher
 	AgentInstall *agentinstall.Handler
 	Mesh         *mesh.Mesh
@@ -79,6 +81,7 @@ type API struct {
 	store        *store.SQLStore
 	nodenet      *nodeaccess.Service
 	nodejoin     *nodejoin.Service
+	guestAgent   *guestagent.Service
 	agent        AgentDispatcher
 	agentInstall *agentinstall.Handler
 	mesh         *mesh.Mesh
@@ -109,6 +112,7 @@ func New(deps Deps) *API {
 		store:        deps.Store,
 		nodenet:      deps.NodeNet,
 		nodejoin:     deps.NodeJoin,
+		guestAgent:   deps.GuestAgent,
 		agent:        deps.Agent,
 		agentInstall: deps.AgentInstall,
 		mesh:         deps.Mesh,
@@ -241,6 +245,7 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/iso/{pool}/{name}", a.requireWriter(http.HandlerFunc(a.deleteISO)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/iso/{pool}/{name}/launch", a.requireWriter(http.HandlerFunc(a.launchFromISO)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/ops", a.requireWriter(http.HandlerFunc(a.runInstanceOps)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/agent/install", a.requireWriter(http.HandlerFunc(a.installGuestAgent)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/rebuild", a.requireWriter(http.HandlerFunc(a.rebuildInstance)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/images/{fingerprint}/refresh", a.requireWriter(http.HandlerFunc(a.refreshImage)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/clone", a.requireWriter(http.HandlerFunc(a.cloneInstance)))
@@ -988,12 +993,14 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, migrations.ErrInvalidRequest),
 		errors.Is(err, instances.ErrInvalidRequest),
 		errors.Is(err, nodejoin.ErrInvalidRequest),
+		errors.Is(err, guestagent.ErrInvalidRequest),
 		errors.Is(err, nodenet.ErrInvalidRequest):
 		status, code = http.StatusBadRequest, "invalid_request"
 	case errors.Is(err, migrations.ErrConflict),
 		errors.Is(err, nodejoin.ErrConflict):
 		status, code = http.StatusConflict, "conflict"
 	case errors.Is(err, migrations.ErrNotFound),
+		errors.Is(err, guestagent.ErrNotFound),
 		errors.Is(err, instances.ErrNotFound),
 		errors.Is(err, store.ErrNotFound),
 		errors.Is(err, clusters.ErrUnknownCluster),

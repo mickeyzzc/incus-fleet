@@ -25,6 +25,8 @@ import type {
   CloneRequest,
   CreateInstanceRequest,
   DeviceRequest,
+  GuestAgentInstallRequest,
+  GuestAgentStep,
   FileEntry,
   HealthResponse,
   ImportImageRequest,
@@ -547,6 +549,19 @@ export class ApiClient {
     return this.request<InstanceDetail>(
       'PATCH',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/devices/${encodeURIComponent(device)}`,
+      request,
+    )
+  }
+
+  /** Installs the official incus-agent into a virtual machine over SSH. */
+  async installGuestAgent(
+    cluster: string,
+    instance: string,
+    request: GuestAgentInstallRequest,
+  ): Promise<{ steps: GuestAgentStep[] }> {
+    return this.request<{ steps: GuestAgentStep[] }>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/agent/install`,
       request,
     )
   }

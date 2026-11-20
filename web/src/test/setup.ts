@@ -91,6 +91,7 @@ vi.mock('@/api', async (importOriginal) => {
       attachDevice: vi.fn(),
       detachDevice: vi.fn(),
       updateDevice: vi.fn(),
+      installGuestAgent: vi.fn(),
       listInstanceFiles: vi.fn(),
       importImage: vi.fn(),
       copyImage: vi.fn(),

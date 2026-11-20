@@ -77,6 +77,7 @@ type InstanceServer interface {
 	GetNetworkNames() ([]string, error)
 	GetNetworks() ([]api.Network, error)
 	GetNetwork(name string) (*api.Network, string, error)
+	GetNetworkLeases(network string) ([]api.NetworkLease, error)
 	CreateNetwork(network api.NetworksPost) error
 	UpdateNetwork(name string, network api.NetworkPut, etag string) error
 	DeleteNetwork(name string) error

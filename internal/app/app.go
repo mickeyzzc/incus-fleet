@@ -23,6 +23,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
+	"github.com/mickeyzzc/incus-fleet/internal/guestagent"
 	"github.com/mickeyzzc/incus-fleet/internal/httpapi"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/mesh"
@@ -155,6 +156,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	}
 	nodeAccess := nodeaccess.New(manager, localNodeNet, cfg.NodeAccess, nodeOptions...)
 	nodeJoin := nodejoin.New(manager, cfg.NodeAccess, logger)
+	guestAgent := guestagent.New(manager, cfg.NodeAccess, logger)
 	var authenticator *auth.Authenticator
 	// Local accounts are always backed by the database so a restart does not
 	// lose them. Sessions live in the database whenever more than one instance
@@ -374,6 +376,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		Store:        st,
 		NodeNet:      nodeAccess,
 		NodeJoin:     nodeJoin,
+		GuestAgent:   guestAgent,
 		Agent:        agentGW,
 		AgentInstall: agentInstall,
 		Mesh:         centerMesh,
