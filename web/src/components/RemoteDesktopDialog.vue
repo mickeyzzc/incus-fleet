@@ -1,10 +1,19 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import { api } from '@/api'
 import { errorMessage } from '@/utils/errors'
+
+// Screenshot polling interval. QEMU's screendump round trip is well under a
+// second, so this keeps interactive latency acceptable without flooding the
+// host with SSH sessions.
+const POLL_INTERVAL_MS = 800
+// Drag-motion throttle: one absolute move per tick while a button is held.
+const MOVE_THROTTLE_MS = 150
+// Keys that only modify other keys; sending them alone is wasted round trips.
+const BARE_MODIFIERS = new Set(['Control', 'Shift', 'Alt', 'Meta', 'Hyper', 'Super'])
 
 const props = defineProps<{
   modelValue: boolean
@@ -18,10 +27,16 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const connecting = ref(false)
-const connected = ref(false)
+const preparing = ref(false)
+const live = ref(false)
 const status = ref('')
-let spice: { stop: (msg?: unknown) => void } | null = null
+const frameInfo = ref('')
+
+const canvas = ref<HTMLCanvasElement | null>(null)
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+let pollBusy = false
+let generation = 0
+let dragTimer: ReturnType<typeof setTimeout> | null = null
 
 const visible = computed({
   get: () => props.modelValue,
@@ -32,90 +47,279 @@ watch(
   () => props.modelValue,
   (open) => {
     if (open) {
-      status.value = ''
-      connected.value = false
-      connect()
-    } else {
-      disconnect()
+      void openConsole()
+      return
     }
+
+    stopConsole()
   },
   { immediate: true },
 )
 
-async function connect(): Promise<void> {
-  connecting.value = true
+async function openConsole(): Promise<void> {
+  generation += 1
+  const session = generation
+  preparing.value = true
+  live.value = false
+  status.value = ''
+
   try {
-    // The dialog body mounts asynchronously; wait for the host element so
-    // the SPICE client can attach its canvas before opening the websocket.
-    await waitForHost()
-
-    // Use Incus's own VGA console channel: the daemon talks to QEMU locally and
-    // relays the SPICE protocol over the Incus API websocket. Bridging a raw
-    // TCP port would only work when the fleet daemon runs on the same member as
-    // the VM, and the SPICE listener is now bound to loopback for safety.
-    status.value = t('desktop.preparing')
-
-    const { SpiceMainConn } = await import('spice-client')
-    spice = new SpiceMainConn({
-      uri: api.vgaURL(props.cluster, props.instance),
-      screen_id: 'remote-desktop-host',
-      onsuccess: () => {
-        connected.value = true
-        status.value = ''
-      },
-      onerror: (err: unknown) => {
-        status.value = describeDesktopError(err)
-        connected.value = false
-      },
-    })
+    await api.prepareDesktop(props.cluster, props.instance)
   } catch (err) {
-    status.value = describeDesktopError(err)
-  } finally {
-    connecting.value = false
-  }
-}
-
-/**
- * Turns the SPICE client's protocol errors into something actionable.
- *
- * The bundled client speaks SPICE protocol 2.2 while current QEMU servers
- * negotiate a newer dialect, and neither the Incus QEMU build nor Debian's own
- * ships the VNC display backend. That is a platform limitation, so the message
- * points at the working alternative instead of echoing "protocol mismatch".
- */
-function describeDesktopError(err: unknown): string {
-  const raw = errorMessage(err)
-  if (/protocol mismatch|unexpected close|connection refused|websocket/i.test(raw)) {
-    return t('desktop.incompatible')
+    if (session !== generation) {
+      return
+    }
+    preparing.value = false
+    status.value = errorMessage(err)
+    reportError()
+    return
   }
 
-  return raw
+  if (session !== generation) {
+    return
+  }
+  preparing.value = false
+  await waitForHost(session)
+  if (session !== generation) {
+    return
+  }
+
+  focusConsole()
+  schedulePoll(session, 0)
 }
 
 /** Polls for the dialog-mounted host element (up to ~4s). */
-async function waitForHost(): Promise<void> {
+async function waitForHost(session: number): Promise<void> {
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    if (document.getElementById('remote-desktop-host')) {
+    if (session !== generation) {
+      return
+    }
+    if (canvas.value) {
       return
     }
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
-  throw new Error('desktop host element not ready')
+  status.value = 'desktop host element not ready'
 }
 
-function disconnect(): void {
-  try {
-    spice?.stop()
-  } catch {
-    // the session may already be gone
+function schedulePoll(session: number, delay: number): void {
+  if (pollTimer) {
+    clearTimeout(pollTimer)
   }
-  spice = null
-  connected.value = false
+  pollTimer = setTimeout(() => void pollFrame(session), delay)
+}
+
+async function pollFrame(session: number): Promise<void> {
+  if (session !== generation || pollBusy) {
+    return
+  }
+
+  pollBusy = true
+  try {
+    const blob = await api.desktopScreenshot(props.cluster, props.instance)
+    if (session === generation) {
+      await drawFrame(blob)
+      live.value = true
+      status.value = ''
+    }
+  } catch (err) {
+    // Transient errors (guest restarting, member busy) keep the loop alive.
+    if (session === generation) {
+      status.value = errorMessage(err)
+    }
+  } finally {
+    pollBusy = false
+  }
+
+  schedulePoll(session, POLL_INTERVAL_MS)
+}
+
+async function drawFrame(blob: Blob): Promise<void> {
+  const host = canvas.value
+  if (!host) {
+    return
+  }
+
+  const context = host.getContext('2d')
+  if (!context || typeof createImageBitmap !== 'function') {
+    // jsdom and very old browsers have no decoding path; the status bar still
+    // reflects a fresh frame even when nothing can be painted.
+    frameInfo.value = describeFrame(host.width, host.height)
+    return
+  }
+
+  const bitmap = await createImageBitmap(blob)
+  try {
+    host.width = bitmap.width
+    host.height = bitmap.height
+    context.drawImage(bitmap, 0, 0)
+    frameInfo.value = describeFrame(bitmap.width, bitmap.height)
+  } finally {
+    bitmap.close()
+  }
+}
+
+function describeFrame(width: number, height: number): string {
+  return `${width}×${height}`
+}
+
+async function refreshFrame(): Promise<void> {
+  await pollFrame(generation)
+}
+
+/** Maps one keyboard event onto the API's key event, or null to skip it. */
+function keyEventOf(event: KeyboardEvent): { key: string; modifiers: string[] } | null {
+  if (BARE_MODIFIERS.has(event.key)) {
+    return null
+  }
+
+  const modifiers: string[] = []
+  if (event.ctrlKey) modifiers.push('Control')
+  if (event.altKey) modifiers.push('Alt')
+  if (event.shiftKey) modifiers.push('Shift')
+  if (event.metaKey) modifiers.push('Meta')
+
+  return { key: event.key, modifiers }
+}
+
+async function onKeydown(event: KeyboardEvent): Promise<void> {
+  const mapped = keyEventOf(event)
+  if (!mapped) {
+    // Bare modifier presses stay in the browser; they carry no guest action.
+    return
+  }
+
+  // The console owns the keyboard while focused: stop the browser from
+  // navigating (Tab), searching (F3) or triggering reserved shortcuts.
+  event.preventDefault()
+
+  try {
+    await api.sendDesktopInput(props.cluster, props.instance, {
+      type: 'key',
+      key: mapped.key,
+      modifiers: mapped.modifiers,
+    })
+    status.value = ''
+  } catch (err) {
+    status.value = errorMessage(err)
+  }
+}
+
+/** Turns a pointer event on the canvas into 0..1 coordinates. */
+function pointerOf(event: MouseEvent): { x: number; y: number } {
+  const host = canvas.value
+  if (!host) {
+    return { x: 0, y: 0 }
+  }
+
+  const rect = host.getBoundingClientRect()
+  const x = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0
+  const y = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0
+
+  return {
+    x: Math.min(1, Math.max(0, x)),
+    y: Math.min(1, Math.max(0, y)),
+  }
+}
+
+async function sendPointer(event: {
+  x: number
+  y: number
+  button?: string
+  down?: boolean
+  move?: boolean
+}): Promise<void> {
+  try {
+    await api.sendDesktopInput(props.cluster, props.instance, { type: 'pointer', ...event })
+    status.value = ''
+  } catch (err) {
+    status.value = errorMessage(err)
+  }
+}
+
+async function onMousedown(event: MouseEvent): Promise<void> {
+  const point = pointerOf(event)
+  const button = BUTTON_NAMES.get(event.button) ?? 'left'
+  await sendPointer({ ...point, button, down: true })
+}
+
+async function onMouseup(event: MouseEvent): Promise<void> {
+  const point = pointerOf(event)
+  const button = BUTTON_NAMES.get(event.button) ?? 'left'
+  await sendPointer({ ...point, button, down: false })
+}
+
+// DOM button indices map onto the API's button names.
+const BUTTON_NAMES = new Map([
+  [0, 'left'],
+  [1, 'middle'],
+  [2, 'right'],
+])
+
+async function onContextmenu(event: MouseEvent): Promise<void> {
+  // Right-click belongs to the guest; the browser menu would sit over the
+  // console and swallow the matching mouseup.
+  event.preventDefault()
+}
+
+function onMousemove(event: MouseEvent): void {
+  // Hovering floods the host with SSH sessions, so only dragging (button held)
+  // sends moves, throttled to one per tick.
+  if (event.buttons === 0 || dragTimer) {
+    return
+  }
+
+  const point = pointerOf(event)
+  dragTimer = setTimeout(() => {
+    dragTimer = null
+    void sendPointer({ ...point, move: true })
+  }, MOVE_THROTTLE_MS)
+}
+
+async function onWheel(event: WheelEvent): Promise<void> {
+  event.preventDefault()
+  const button = event.deltaY > 0 ? 'wheel-down' : 'wheel-up'
+  await sendPointer({ ...pointerOf(event), button, down: true })
+}
+
+function focusConsole(): void {
+  canvas.value?.focus()
+}
+
+async function sendCtrlAltDel(): Promise<void> {
+  try {
+    await api.sendDesktopInput(props.cluster, props.instance, {
+      type: 'key',
+      key: 'Delete',
+      modifiers: ['Control', 'Alt'],
+    })
+    status.value = ''
+  } catch (err) {
+    status.value = errorMessage(err)
+  }
 }
 
 function reportError(): void {
   ElMessage.error(t('desktop.failed', { error: status.value }))
 }
+
+function stopConsole(): void {
+  generation += 1
+  if (pollTimer) {
+    clearTimeout(pollTimer)
+    pollTimer = null
+  }
+  if (dragTimer) {
+    clearTimeout(dragTimer)
+    dragTimer = null
+  }
+  pollBusy = false
+  live.value = false
+  frameInfo.value = ''
+  status.value = ''
+}
+
+onBeforeUnmount(stopConsole)
 </script>
 
 <template>
@@ -124,35 +328,75 @@ function reportError(): void {
     :title="`${t('desktop.title')} · ${instance}`"
     width="960px"
     destroy-on-close
-    @close="disconnect"
+    @close="stopConsole"
   >
-    <p v-if="connecting" class="desktop-status">{{ t('desktop.connecting') }}</p>
-    <p v-else-if="status" class="desktop-status desktop-error" @click="reportError">
-      {{ t('desktop.failed', { error: status }) }}
-    </p>
-    <p v-else-if="connected" class="desktop-status">{{ t('desktop.connected') }}</p>
-    <p v-else class="desktop-status">{{ t('desktop.waiting') }}</p>
+    <div class="desktop-toolbar">
+      <el-tag :type="live ? 'success' : 'info'" size="small" effect="light">
+        {{ preparing ? t('desktop.preparing') : live ? t('desktop.connected') : t('desktop.waiting') }}
+      </el-tag>
+      <span v-if="frameInfo" class="desktop-frame">{{ frameInfo }}</span>
+      <span v-if="status" class="desktop-error">{{ status }}</span>
+      <div class="desktop-actions">
+        <el-button size="small" @click="refreshFrame">{{ t('common.refresh') }}</el-button>
+        <el-button size="small" @click="sendCtrlAltDel">{{ t('desktop.ctrlAltDel') }}</el-button>
+      </div>
+    </div>
 
-    <div id="remote-desktop-host" class="desktop-host" />
+    <canvas
+      id="remote-desktop-host"
+      ref="canvas"
+      class="desktop-host"
+      tabindex="0"
+      @keydown="onKeydown"
+      @mousedown="onMousedown"
+      @mouseup="onMouseup"
+      @mousemove="onMousemove"
+      @wheel="onWheel"
+      @contextmenu="onContextmenu"
+    />
+    <p class="desktop-hint">{{ t('desktop.hint') }}</p>
   </el-dialog>
 </template>
 
 <style scoped>
-.desktop-status {
+.desktop-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 10px;
+}
+
+.desktop-frame {
   color: var(--fleet-ink-soft);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .desktop-error {
   color: var(--el-color-danger);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
 }
 
 .desktop-host {
-  height: 540px;
+  display: block;
+  width: 100%;
   border: 1px solid var(--fleet-line, #dcdfe6);
   border-radius: 8px;
   background: #000;
-  overflow: hidden;
+  outline: none;
+}
+
+.desktop-hint {
+  margin: 8px 0 0;
+  color: var(--fleet-ink-soft);
+  font-size: 12px;
 }
 </style>

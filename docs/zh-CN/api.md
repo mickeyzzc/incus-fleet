@@ -156,8 +156,11 @@ POST /api/v1/auth/logout
 | POST | `/clusters/{cluster}/instances/{instance}/rebuild` | 是 | 用另一个镜像重建根磁盘 |
 | POST | `/clusters/{cluster}/instances/{instance}/ops` | 是 | 运行脚本、设置密码或注入密钥 |
 | GET | `/clusters/{cluster}/instances/{instance}/vga` | 是 | 图形控制台（WebSocket） |
-| GET | `/clusters/{cluster}/instances/{instance}/spice?port=` | 是 | SPICE 通道桥接（WebSocket） |
-| POST | `/clusters/{cluster}/instances/{instance}/spice/prepare` | 是 | 配置虚拟机的 SPICE 监听器 |
+| POST | `/clusters/{cluster}/instances/{instance}/desktop/prepare` | 是 | 启用 QMP 图形控制台（安装监视器 socket） |
+| GET | `/clusters/{cluster}/instances/{instance}/desktop/screenshot` | 是 | 当前帧缓冲（PNG） |
+| POST | `/clusters/{cluster}/instances/{instance}/desktop/input` | 是 | 注入一个键盘或指针事件 |
+| GET | `/clusters/{cluster}/instances/{instance}/spice?port=` | 是 | SPICE 通道桥接（WebSocket，旧版） |
+| POST | `/clusters/{cluster}/instances/{instance}/spice/prepare` | 是 | 配置虚拟机的 SPICE 监听器（旧版） |
 | GET | `/keys` | 是 | 列出共享 SSH 公钥 |
 | POST | `/keys` | 是 | 存储公钥 |
 | PATCH | `/keys/{id}` | 是 | 更新已存储的公钥 |
@@ -735,22 +738,37 @@ bearer）。exec 的第一帧是 JSON：
 执行；密码交给 `chpasswd`；密钥追加到 `~/.ssh/authorized_keys`。载荷写入 stdin，
 绝不会出现在进程参数中。
 
-### 图形控制台
+### 图形控制台（desktop）
 
-`POST .../instances/{instance}/spice/prepare`，请求体为 `{"port": 0, "apply": true}`，
-用于配置虚拟机的 QEMU SPICE TCP 监听器。端口为 0 时会根据实例名在 5910-5989
-范围内派生一个稳定端口。响应为：
+desktop 端点驱动 fleet 为虚拟机追加的第二个 QEMU 监视器。写操作先调
+`POST .../desktop/prepare`：写入 `raw.qemu.conf`（QMP control 模式的 unix socket
+监视器）与对应的 AppArmor 规则，配置变化时运行中的虚拟机会重启一次。重复调用是
+幂等的，响应会说明发生了什么：
 
 ```json
-{"port": 5931, "applied": true, "restart_required": false}
+{"ready": true, "restarted": false}
 ```
 
-`apply: true` 会重启正在运行的虚拟机，使 QEMU 参数生效；因此第一个会话可能需要
-一次重启。`GET .../spice?port=5931` 会升级为 WebSocket，并把一个 SPICE 通道桥接
-到虚拟机的 TCP 监听器。`GET .../vga` 会升级为 Incus 图形控制台 WebSocket。
+读操作轮询 `GET .../desktop/screenshot`，返回当前帧缓冲的 `image/png`。QEMU 7.1+
+直接输出 PNG；更旧的版本回退为 PPM 并在成员主机上内联转换，跨 SSH 的只有压缩后
+的画面。
 
-SPICE 监听器使用 `disable-ticketing=on`，并绑定在集群成员的所有网络接口上。请
-用防火墙限制 5910-5989 端口范围；不要将其暴露到不可信网络。
+输入经 `POST .../desktop/input` 注入（成功返回 204）：
+
+```json
+{"type": "key", "key": "ArrowDown"}
+{"type": "key", "key": "F1", "modifiers": ["Control", "Alt"], "repeat": 2}
+{"type": "pointer", "x": 0.5, "y": 0.25, "button": "left", "down": true}
+{"type": "pointer", "x": 0.5, "y": 0.25, "move": true}
+```
+
+`key` 使用浏览器 `KeyboardEvent.key` 取值加可选修饰键（`Control`、`Alt`、`Shift`、
+`Meta`）；按键会被翻译为 QMP qcode 事件,符号键自动带 shift 和弦。`pointer` 接受
+归一化到 0..1 的坐标（映射到仿真平板的 0..0x7fff 轴），可选 `button`（`left`、
+`middle`、`right`、`wheel-up`、`wheel-down` 等）与 `move: true` 表示无按键的拖动。
+
+上面的旧版 SPICE 端点保留给偏好原生 SPICE 客户端的场景；内置 Web UI 现在使用
+desktop 端点，不涉及任何额外 TCP 监听。
 
 ## 共享资产
 

@@ -10,6 +10,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Local accounts with roles (`admin`/`operator`/`viewer`), bcrypt passwords, server-side
+  sessions shared across centers, lockout, and the shared admin token retiring once the first
+  account exists.
+- A graphical console for virtual machines that works without VNC or SPICE support in the
+  host's QEMU: the fleet attaches a second QEMU monitor through `raw.qemu.conf` (QMP control
+  mode) and serves `desktop/prepare`, `desktop/screenshot` (PNG framebuffer polling), and
+  `desktop/input` (keyboard with modifier chords, absolute pointer, wheel). The browser canvas
+  refreshes automatically; the first preparation restarts a running VM once and later calls
+  are idempotent.
+- node-exporter-compatible host metrics from the Rust agent (`node_cpu_seconds_total`,
+  `node_memory_*`, `node_load1`, network and OOM counters) alongside the instance metrics.
+- Guest DHCP lease renewal after a cross-cluster move, so a moved VM picks up an address from
+  the target cluster's bridge instead of holding its source lease for up to an hour.
+
 - `rqlite` as a third database driver, so several fleet instances can share one replicated
   SQLite store without running PostgreSQL. Includes a wrapper driver that converts rqlite's
   JSON-decoded floats back to int64 timestamps, a single-statement task claim that stays atomic
@@ -83,6 +97,8 @@ All notable changes to this project are documented here. The format follows
 
 - Cluster TLS certificate fields accept inline PEM bodies as well as file paths.
 - `.gitignore` excludes `*.crt` certificate files.
+- Large uploads no longer die at the 60-second handler deadline; image and ISO imports get an
+  extended read/write window and the response-writer unwrapping they need.
 
 ## 0.1.0 - 2026-11-14
 

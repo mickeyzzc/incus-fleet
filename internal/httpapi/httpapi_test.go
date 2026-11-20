@@ -54,6 +54,15 @@ func newAPIFixture(t *testing.T, source, target *incusfake.Server) *apiFixture {
 func newAPIFixtureWithAuth(t *testing.T, source, target *incusfake.Server, authenticator *auth.Authenticator) *apiFixture {
 	t.Helper()
 
+	return newAPIFixtureWithDeps(t, source, target, authenticator, func(_ *Deps) {})
+}
+
+// newAPIFixtureWithDeps builds the standard fixture and lets a test tweak the
+// handler dependencies (e.g. inject a fake desktop host-command runner)
+// before the API is constructed.
+func newAPIFixtureWithDeps(t *testing.T, source, target *incusfake.Server, authenticator *auth.Authenticator, mutate func(*Deps)) *apiFixture {
+	t.Helper()
+
 	certPath := filepath.Join(t.TempDir(), "cluster.crt")
 	if err := os.WriteFile(certPath, []byte("-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -97,7 +106,7 @@ func newAPIFixtureWithAuth(t *testing.T, source, target *incusfake.Server, authe
 	if authenticator == nil {
 		authenticator = auth.New("secret", time.Hour)
 	}
-	handler := New(Deps{
+	deps := Deps{
 		Clusters:   manager,
 		Instances:  instances.New(manager),
 		Assets:     assets.New(st, instances.New(manager)),
@@ -108,7 +117,11 @@ func newAPIFixtureWithAuth(t *testing.T, source, target *incusfake.Server, authe
 		StaticFS:   staticFS,
 		Logger:     logger,
 		Version:    "test",
-	}).Handler()
+	}
+	if mutate != nil {
+		mutate(&deps)
+	}
+	handler := New(deps).Handler()
 
 	t.Cleanup(func() {
 		migrationService.Wait()

@@ -60,26 +60,19 @@ Only administrators see **Users** in the sidebar.
 
 ![Users page: account list with roles and status](images/auth/users-redacted.png)
 
-## Remote desktop: current limitation
+## Remote desktop
 
-The **Remote desktop** button targets the VM's graphical console, but it does not work on
-current Incus builds and you will see `Unexpected protocol mismatch.`
+The **Remote desktop** button opens a live graphical console for running virtual machines
+directly in the browser. It works without any VNC or SPICE support in the host's QEMU: the
+fleet attaches a second QEMU monitor (`raw.qemu.conf`, QMP control mode) to the VM, polls
+framebuffer screenshots through it, and injects keyboard and pointer events. The first
+preparation restarts a running VM once; after that opening the console is immediate and
+idempotent.
 
-Why: the browser client (`spice-client`) speaks SPICE protocol 2.2, while current QEMU
-servers negotiate a newer dialect. Two remedies were evaluated and both are blocked by the
-platform itself:
-
-- **WebVNC** (QEMU `-vnc` + noVNC). The QEMU shipped by Incus, and Debian 13's own
-  `qemu-system-x86`, are both built without the VNC display backend:
-  `qemu-system-x86_64: -vnc: invalid option`, and `-display help` lists only
-  `none`, `gtk`, `sdl`, `egl-headless`, `curses`, `spice-app`, `dbus`.
-- **Incus VGA channel**. Relaying the Incus `vga` websocket does not help; the endpoint does
-  not answer a standard SPICE RedLink handshake.
-
-To get a working graphical console you need a platform change outside this repository: a
-QEMU built with `--enable-vnc`, a standalone VNC server bound to the VM display, or a
-maintained modern SPICE client. Use the **online terminal** in the meantime; it runs real
-commands and is fully verified.
+In the console window: click into the picture to give it keyboard focus (arrow keys, Enter,
+Ctrl+Alt+Del all reach the guest), click or drag inside it to move the pointer and press
+buttons, and scroll to send wheel events. The picture refreshes automatically about once a
+second. Containers have no display device and do not offer this button.
 
 ## Online terminal
 
@@ -224,26 +217,19 @@ From the instance list or the detail drawer you can:
 - **Delete instance**: asks for confirmation and can delete the instance's storage volumes at
   the same time.
 
-## Remote desktop: current limitation
+## Remote desktop
 
-The **Remote desktop** button targets the VM's graphical console, but it does not work on
-current Incus builds and you will see `Unexpected protocol mismatch.`
+The **Remote desktop** button opens a live graphical console for running virtual machines
+directly in the browser. It works without any VNC or SPICE support in the host's QEMU: the
+fleet attaches a second QEMU monitor (`raw.qemu.conf`, QMP control mode) to the VM, polls
+framebuffer screenshots through it, and injects keyboard and pointer events. The first
+preparation restarts a running VM once; after that opening the console is immediate and
+idempotent.
 
-Why: the browser client (`spice-client`) speaks SPICE protocol 2.2, while current QEMU
-servers negotiate a newer dialect. Two remedies were evaluated and both are blocked by the
-platform itself:
-
-- **WebVNC** (QEMU `-vnc` + noVNC). The QEMU shipped by Incus, and Debian 13's own
-  `qemu-system-x86`, are both built without the VNC display backend:
-  `qemu-system-x86_64: -vnc: invalid option`, and `-display help` lists only
-  `none`, `gtk`, `sdl`, `egl-headless`, `curses`, `spice-app`, `dbus`.
-- **Incus VGA channel**. Relaying the Incus `vga` websocket does not help; the endpoint does
-  not answer a standard SPICE RedLink handshake.
-
-To get a working graphical console you need a platform change outside this repository: a
-QEMU built with `--enable-vnc`, a standalone VNC server bound to the VM display, or a
-maintained modern SPICE client. Use the **online terminal** in the meantime; it runs real
-commands and is fully verified.
+In the console window: click into the picture to give it keyboard focus (arrow keys, Enter,
+Ctrl+Alt+Del all reach the guest), click or drag inside it to move the pointer and press
+buttons, and scroll to send wheel events. The picture refreshes automatically about once a
+second. Containers have no display device and do not offer this button.
 
 ## Online terminals and remote desktop
 
@@ -255,15 +241,17 @@ Fleet provides three browser sessions, available from the detail drawer or the l
   working directory survive across commands. If the command exits and the session closes, the
   next input reopens the session automatically and runs the pending command.
 - **Serial console (Console)**: useful for boot problems and kernel output.
-- **Remote desktop (VMs)**: running VMs can open a graphical console. Fleet configures a QEMU
-  SPICE channel for the VM (a `-spice` TCP listener in `raw.qemu`, with a port allocated per
-  instance name). The browser connects to the SPICE server channel by channel through a
-  websocket-TCP bridge and shows the installer or desktop live. The first configuration
-  restarts a running VM once; later sessions connect immediately. Containers have no display
+- **Remote desktop (VMs)**: running VMs can open a graphical console. Fleet appends a second
+  QEMU monitor to the VM through `raw.qemu.conf` (QMP control mode, unix socket under /tmp)
+  and relaxes the instance's AppArmor profile for that socket and the screenshot scratch
+  file. The browser polls PNG framebuffer dumps from that monitor and sends keyboard and
+  absolute-pointer events back. The first configuration restarts a running VM once; later
+  sessions are read-only preparations and connect immediately. Containers have no display
   device and do not offer remote desktop.
 
-  Security note: the SPICE TCP listener has no ticket authentication and listens on all
-  interfaces of the cluster member. Restrict access to the port range with a firewall.
+  Security note: the monitor socket lives in the member's /tmp and is reachable only by
+  processes allowed by the instance's AppArmor profile; the fleet drives it over SSH with
+  sudo, so no extra listening TCP port is involved.
 
 Sessions close with the page and leave no daemon process on the host.
 
@@ -529,11 +517,10 @@ and `ssh_write_fallback` settings control which backend is allowed; see
 - **A physical NIC is missing?** The NIC must be unmanaged on the host (not part of an Incus
   managed bridge).
 - **Remote desktop will not open or says it is being configured?** Remote desktop only works
-  for VMs. The first open configures the SPICE listener and restarts the VM; wait for it to
-  boot and open the session again.
-- **Which ports must be allowed for remote desktop?** Each VM uses one TCP port, allocated
-  automatically in the 5910-5989 range by instance name. Restrict the source subnet with a
-  firewall.
+  for VMs. The first open configures the QEMU monitor and restarts the VM; wait for it to
+  boot and open the session again. Later opens are immediate.
+- **Which ports must be allowed for remote desktop?** None beyond the fleet API itself. The
+  console drives a unix-socket QEMU monitor on the member over SSH; no extra TCP listener.
 - **Maintenance actions report an agent error?** VMs need a running Incus agent to execute
   commands. VMs created from official cloud images become ready a few seconds after boot.
 - **Rebuild says the instance must be stopped?** An image upgrade rewrites the root disk, and

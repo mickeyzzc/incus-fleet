@@ -161,8 +161,11 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | POST | `/clusters/{cluster}/instances/{instance}/rebuild` | yes | Rebuild the root disk from another image |
 | POST | `/clusters/{cluster}/instances/{instance}/ops` | yes | Run a script, set a password, or inject a key |
 | GET | `/clusters/{cluster}/instances/{instance}/vga` | yes | Graphical console (WebSocket) |
-| GET | `/clusters/{cluster}/instances/{instance}/spice?port=` | yes | SPICE channel bridge (WebSocket) |
-| POST | `/clusters/{cluster}/instances/{instance}/spice/prepare` | yes | Configure the VM SPICE listener |
+| POST | `/clusters/{cluster}/instances/{instance}/desktop/prepare` | yes | Arm the QMP graphical console (installs the monitor socket) |
+| GET | `/clusters/{cluster}/instances/{instance}/desktop/screenshot` | yes | Current framebuffer as PNG |
+| POST | `/clusters/{cluster}/instances/{instance}/desktop/input` | yes | Inject one keyboard or pointer event |
+| GET | `/clusters/{cluster}/instances/{instance}/spice?port=` | yes | SPICE channel bridge (WebSocket, legacy) |
+| POST | `/clusters/{cluster}/instances/{instance}/spice/prepare` | yes | Configure the VM SPICE listener (legacy) |
 | GET | `/keys` | yes | List shared SSH public keys |
 | POST | `/keys` | yes | Store a public key |
 | PATCH | `/keys/{id}` | yes | Update a stored public key |
@@ -959,23 +962,38 @@ The response is `{"exit_code": 0, "stdout": "...", "stderr": "..."}`. Scripts ru
 `sh -s`; passwords go to `chpasswd`; keys are appended to `~/.ssh/authorized_keys`. Payloads
 are written to stdin and never appear in process arguments.
 
-### Graphical console
+### Graphical console (desktop)
 
-`POST .../instances/{instance}/spice/prepare` with `{"port": 0, "apply": true}` configures the
-VM's QEMU SPICE TCP listener. A zero port derives a stable port from the instance name in the
-range 5910-5989. The response is:
+The desktop endpoints drive a second QEMU monitor that the fleet attaches to the VM. Writers
+call `POST .../desktop/prepare` first: it writes `raw.qemu.conf` (a QMP control-mode monitor
+on a unix socket) and the matching AppArmor rules, restarting a running VM once when the
+configuration changes. Repeated calls are idempotent — the response tells what happened:
 
 ```json
-{"port": 5931, "applied": true, "restart_required": false}
+{"ready": true, "restarted": false}
 ```
 
-`apply: true` restarts a running VM so the QEMU arguments take effect; the first session may
-therefore require a restart. `GET .../spice?port=5931` upgrades to a WebSocket and bridges one
-SPICE channel to the VM's TCP listener. `GET .../vga` upgrades to the Incus graphical console
-WebSocket.
+Readers then poll `GET .../desktop/screenshot`, which returns the current framebuffer as
+`image/png`. QEMU 7.1+ dumps PNG directly; older builds fall back to PPM which the member
+converts inline, so only the compressed frame crosses SSH.
 
-The SPICE listener uses `disable-ticketing=on` and binds on all interfaces of the cluster
-member. Restrict the 5910-5989 range with a firewall; do not expose it to untrusted networks.
+Input goes through `POST .../desktop/input` (204 on success):
+
+```json
+{"type": "key", "key": "ArrowDown"}
+{"type": "key", "key": "F1", "modifiers": ["Control", "Alt"], "repeat": 2}
+{"type": "pointer", "x": 0.5, "y": 0.25, "button": "left", "down": true}
+{"type": "pointer", "x": 0.5, "y": 0.25, "move": true}
+```
+
+`key` uses browser `KeyboardEvent.key` values plus optional modifiers (`Control`, `Alt`,
+`Shift`, `Meta`); a press is translated to QMP qcode events with the shift chord for symbols.
+`pointer` takes coordinates normalised to 0..1 (mapped onto the emulated tablet's 0..0x7fff
+axis), optional `button` (`left`, `middle`, `right`, `wheel-up`, `wheel-down`, ...) and
+`move: true` for drag motion without a button.
+
+The legacy SPICE endpoints above remain for setups that prefer a native SPICE client; the
+bundled web UI now uses the desktop endpoints, which involve no extra TCP listener.
 
 ## Shared assets
 

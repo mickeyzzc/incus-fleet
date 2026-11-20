@@ -547,3 +547,82 @@ func TestResolveAutoFallsBackToSSH(t *testing.T) {
 		t.Fatalf("backend = %q", backend)
 	}
 }
+
+func TestHostRunnerRunsWholeCommandThroughSudo(t *testing.T) {
+	client := &fakeClient{outputs: map[string]string{}}
+	dialer := &fakeDialer{client: client}
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), testAccess(),
+		WithLocalMember("n1"), WithDialer(dialer))
+	ctx := context.Background()
+
+	runner, closeRunner, err := service.HostRunner(ctx, "c1", "n2")
+	if err != nil {
+		t.Fatalf("HostRunner() error = %v", err)
+	}
+
+	out, err := runner.Run(ctx, "incus list n2 --format csv -c s")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	closeRunner()
+
+	// The whole script is passed as one quoted argument to a root shell, so
+	// heredocs and pipes inside it survive the SSH hop.
+	if len(client.calls) != 1 {
+		t.Fatalf("client calls = %v", client.calls)
+	}
+	if !strings.HasPrefix(client.calls[0], "sudo -n sh -c '") {
+		t.Fatalf("wrapped command = %q", client.calls[0])
+	}
+	if out != "" {
+		t.Fatalf("out = %q", out)
+	}
+	_ = out
+}
+
+func TestHostRunnerGuards(t *testing.T) {
+	ctx := context.Background()
+
+	// Missing SSH identity.
+	access := testAccess()
+	access.SSHUser = ""
+	access.SSHKey = ""
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), access, WithLocalMember("n1"), WithDialer(&fakeDialer{}))
+	if _, _, err := service.HostRunner(ctx, "c1", "n2"); !errors.Is(err, nodenet.ErrUnavailable) {
+		t.Fatalf("missing identity error = %v, want ErrUnavailable", err)
+	}
+
+	// Missing dialer (constructed directly: New installs a default dialer).
+	noDial := &Service{lookup: testLookup(), access: testAccess(), localMember: "n1"}
+	if _, _, err := noDial.HostRunner(ctx, "c1", "n2"); !errors.Is(err, nodenet.ErrUnavailable) {
+		t.Fatalf("missing dialer error = %v, want ErrUnavailable", err)
+	}
+
+	// Unknown member.
+	ok := New(testLookup(), nodenet.NewService(&fakeRunner{}), testAccess(), WithLocalMember("n1"), WithDialer(&fakeDialer{}))
+	if _, _, err := ok.HostRunner(ctx, "c1", "ghost"); err == nil {
+		t.Fatal("unknown member expected an error")
+	}
+}
+
+func TestHostRunnerWrapsCommandFailure(t *testing.T) {
+	client := &fakeClient{outputs: map[string]string{}, failOn: "screendump"}
+	dialer := &fakeDialer{client: client}
+	service := New(testLookup(), nodenet.NewService(&fakeRunner{}), testAccess(),
+		WithLocalMember("n1"), WithDialer(dialer))
+	ctx := context.Background()
+
+	runner, closeRunner, err := service.HostRunner(ctx, "c1", "n2")
+	if err != nil {
+		t.Fatalf("HostRunner() error = %v", err)
+	}
+	defer closeRunner()
+
+	_, err = runner.Run(ctx, "python3 - <<'PY'\nscreendump\nPY")
+	if !errors.Is(err, nodenet.ErrUnavailable) {
+		t.Fatalf("Run() error = %v, want ErrUnavailable", err)
+	}
+	if !client.closed {
+		t.Fatal("a failed command must reset the SSH connection for the next call")
+	}
+}

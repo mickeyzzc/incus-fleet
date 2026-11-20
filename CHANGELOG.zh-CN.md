@@ -10,6 +10,17 @@
 
 ### 新增
 
+- 本地账号体系：`admin`/`operator`/`viewer` 角色、bcrypt 密码、跨中心共享的服务端会话、
+  失败锁定；共享管理 token 在首个本地账号创建后自动失效。
+- 虚拟机图形控制台：不依赖宿主 QEMU 的 VNC/SPICE 能力，fleet 通过 `raw.qemu.conf` 追加第二个
+  QEMU 监视器（QMP control 模式），提供 `desktop/prepare`、`desktop/screenshot`（PNG 帧缓冲轮询）
+  与 `desktop/input`（带修饰键的和弦键盘、绝对指针、滚轮）。浏览器画布自动刷新；首次准备会让
+  运行中的虚拟机重启一次，之后调用幂等。
+- Rust agent 兼容 node-exporter 的主机指标（`node_cpu_seconds_total`、`node_memory_*`、
+  `node_load1`、网络与 OOM 计数），与实例指标并存。
+- 跨集群迁移后自动在客户机内续租 DHCP，移动后的虚拟机立即从目标集群网桥获取地址，
+  而不是继续沿用源集群租约最长一小时。
+
 - 新增 `rqlite` 作为第三种数据库驱动，让多个 fleet 实例共享一份复制的 SQLite，无需运行 PostgreSQL。包含把 rqlite 的 JSON 浮点数还原为 int64 时间戳的包装驱动、不依赖事务的原子任务抢占，以及驱动为共享型时自动启用数据库会话。
 - migrations 表新增 `owner` 列，实例重启时只把自己中断的任务标记为失败。
 - 从 UI 添加集群成员：SSH 准备、可选安装 Incus、加入集群、sudo 白名单和 fleet SSH 公钥授权。
@@ -70,6 +81,8 @@
 
 - 集群 TLS 证书字段同时接受内联 PEM 正文和文件路径。
 - `.gitignore` 排除 `*.crt` 证书文件。
+- 大文件上传不再死于 60 秒处理器超时；镜像与 ISO 导入获得更长的读写窗口及所需的
+  响应写入器解包。
 
 ## 0.1.0 - 2026-11-14
 

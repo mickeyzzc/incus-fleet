@@ -758,3 +758,31 @@ func TestMeshEnvSecret(t *testing.T) {
 		t.Fatalf("mesh secret = %q", cfg.Mesh.Secret)
 	}
 }
+
+func TestValidateRejectsBadLogLevelDriverAndNodeMode(t *testing.T) {
+	base := Config{
+		Server: Server{Listen: "0.0.0.0:8080", AuthToken: "secret", LogLevel: "info"},
+		Database: Database{
+			Driver: "sqlite",
+			DSN:    "/tmp/fleet.db",
+		},
+	}
+
+	bad := base
+	bad.Server.LogLevel = "verbose"
+	if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "log_level") {
+		t.Fatalf("Validate() error = %v, want log_level rejection", err)
+	}
+
+	bad = base
+	bad.Database.Driver = "mysql"
+	if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "database.driver") {
+		t.Fatalf("Validate() error = %v, want driver rejection", err)
+	}
+
+	bad = base
+	bad.NodeAccess.Mode = "carrier-pigeon"
+	if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "node_access.mode") {
+		t.Fatalf("Validate() error = %v, want node_access.mode rejection", err)
+	}
+}

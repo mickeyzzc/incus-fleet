@@ -20,6 +20,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
+	"github.com/mickeyzzc/incus-fleet/internal/console"
 	"github.com/mickeyzzc/incus-fleet/internal/hostops"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/mesh"
@@ -60,7 +61,14 @@ type Deps struct {
 	StaticFS     fs.FS
 	Logger       *slog.Logger
 	Version      string
+	// DesktopRunner overrides the host-command backend of the graphical
+	// console. Production leaves it nil, which uses the nodeaccess SSH path.
+	DesktopRunner DesktopRunnerFunc
 }
+
+// DesktopRunnerFunc resolves the host-command runner for one guest's console.
+// The returned close function releases the runner's resources.
+type DesktopRunnerFunc func(ctx context.Context, cluster, member string) (console.HostCommand, func(), error)
 
 // API is the complete HTTP handler for incus-fleet.
 type API struct {
@@ -83,6 +91,7 @@ type API struct {
 	logger       *slog.Logger
 	version      string
 	static       fs.FS
+	desktopRun   DesktopRunnerFunc
 }
 
 // New builds the HTTP handler.
@@ -111,6 +120,7 @@ func New(deps Deps) *API {
 		auth:         deps.Auth,
 		logger:       logger,
 		version:      deps.Version,
+		desktopRun:   deps.DesktopRunner,
 	}
 
 	if deps.StaticFS != nil {
@@ -205,6 +215,9 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/instances/{instance}/devices/{device}", a.requireWriter(http.HandlerFunc(a.detachDevice)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/console", a.requireAuth(http.HandlerFunc(a.instanceTerminal)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/vga", a.requireAuth(http.HandlerFunc(a.instanceVga)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/desktop/prepare", a.requireWriter(http.HandlerFunc(a.desktopPrepare)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/desktop/screenshot", a.requireAuth(http.HandlerFunc(a.desktopScreenshot)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/desktop/input", a.requireWriter(http.HandlerFunc(a.desktopInput)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/spice", a.requireAuth(http.HandlerFunc(a.instanceSPICE)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/spice/prepare", a.requireWriter(http.HandlerFunc(a.prepareSPICE)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/instances/{instance}/exec", a.requireAuth(http.HandlerFunc(a.instanceExec)))

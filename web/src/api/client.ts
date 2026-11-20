@@ -46,6 +46,8 @@ import type {
   OpsRequest,
   OpsResult,
   SPICEPrepare,
+  DesktopPrepare,
+  DesktopInputEvent,
   Profile,
   ProfileRequest,
   Keystone,
@@ -380,6 +382,45 @@ export class ApiClient {
   vgaURL(cluster: string, instance: string): string {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
     return `${proto}://${window.location.host}/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/vga`
+  }
+
+  /** Arms the QMP graphical console for one VM (installs the monitor socket). */
+  async prepareDesktop(cluster: string, instance: string): Promise<DesktopPrepare> {
+    return this.request<DesktopPrepare>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/desktop/prepare`,
+    )
+  }
+
+  /** Fetches the current framebuffer of a VM as a PNG blob. */
+  async desktopScreenshot(cluster: string, instance: string): Promise<Blob> {
+    const headers: Record<string, string> = { Accept: 'image/png' }
+    if (this.bearerToken) {
+      headers.Authorization = `Bearer ${this.bearerToken}`
+    }
+
+    const response = await this.fetchImpl(
+      `${this.baseURL}/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/desktop/screenshot`,
+      { headers, credentials: 'same-origin' },
+    )
+    if (!response.ok) {
+      if (response.status === 401) {
+        this.onUnauthorized?.()
+      }
+
+      throw await this.toError(response)
+    }
+
+    return await response.blob()
+  }
+
+  /** Injects one keyboard or pointer event into a VM's graphical console. */
+  async sendDesktopInput(cluster: string, instance: string, event: DesktopInputEvent): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/desktop/input`,
+      event,
+    )
   }
 
   async deleteImage(cluster: string, fingerprint: string): Promise<void> {

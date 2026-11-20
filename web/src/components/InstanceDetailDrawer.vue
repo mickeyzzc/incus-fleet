@@ -113,7 +113,13 @@ function onDevicesChanged(updated: InstanceDetail): void {
             </el-button>
           </div>
           <div class="access-row">
-            <el-button size="small" type="primary" plain @click="desktopOpen = true">
+            <el-button
+              v-if="detail.type === 'virtual-machine'"
+              size="small"
+              type="primary"
+              plain
+              @click="desktopOpen = true"
+            >
               {{ t('desktop.open') }}
             </el-button>
             <el-button size="small" type="warning" plain @click="opsOpen = true">

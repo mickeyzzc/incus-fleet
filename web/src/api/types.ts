@@ -370,6 +370,25 @@ export interface SPICEPrepare {
   restart_required: boolean
 }
 
+/** Result of arming the QMP graphical console for one VM. */
+export interface DesktopPrepare {
+  ready: boolean
+  restarted: boolean
+}
+
+/** One keyboard or absolute-pointer event for the graphical console. */
+export interface DesktopInputEvent {
+  type: 'key' | 'pointer'
+  key?: string
+  modifiers?: string[]
+  repeat?: number
+  x?: number
+  y?: number
+  button?: string
+  down?: boolean
+  move?: boolean
+}
+
 export interface CloneRequest {
   target: string
   start?: boolean

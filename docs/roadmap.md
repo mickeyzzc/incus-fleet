@@ -8,7 +8,8 @@ here. Detailed internal audit notes are kept out of the repository.
 
 The current release already covers: image import/distribution, ISO installers,
 instance create/snapshot/clone/rebuild, cross-cluster migration, online
-terminals and SPICE desktops, script/password/key maintenance actions, shared
+terminals and a QMP-based graphical desktop console, script/password/key
+maintenance actions, shared
 asset library, batch operations, and cluster/instance/host-resource monitoring.
 The work below extends that foundation.
 
@@ -110,7 +111,9 @@ without internal details.
 - Apply placeholder rebinding to every parameterized query so PostgreSQL
   deployments work for cluster registration and asset CRUD.
 - Restrict the SPICE listener and bridge: no unauthenticated all-interface
-  listener, and do not allow the bridge to dial arbitrary ports.
+  listener, and do not allow the bridge to dial arbitrary ports. (The web UI
+  now drives the graphical console through a unix-socket QMP monitor instead;
+  SPICE remains only for native-client setups.)
 - Fix agent revocation so heartbeats cannot revert a revoked agent to online.
 - Fence host-task lease write-back by owner; reclaim `running` tasks after a
   worker crash; make lease-renewal loss a hard abort.

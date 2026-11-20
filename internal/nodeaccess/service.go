@@ -417,3 +417,75 @@ func (r *sshRunner) command(name string, args []string) string {
 
 	return prefix + runner + " " + strings.Join(quotedArgs, " ")
 }
+
+// HostRunner returns a command runner bound to one cluster member's host.
+//
+// It reuses the SSH identity configured for node access and escalates through
+// sudo -n when that user is not root. The fleet daemon itself usually has no
+// sudo rights, while the configured SSH identity does.
+//
+// Callers must invoke the returned close function when finished.
+func (s *Service) HostRunner(_ context.Context, clusterName, memberName string) (CommandRunner, func(), error) {
+	member, err := s.findMember(clusterName, memberName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if strings.TrimSpace(s.access.SSHUser) == "" || strings.TrimSpace(s.access.SSHKey) == "" {
+		return nil, nil, fmt.Errorf("%w: remote node access is not configured (node_access.ssh_user and node_access.ssh_key)", nodenet.ErrUnavailable)
+	}
+	if s.dialer == nil {
+		return nil, nil, fmt.Errorf("%w: host command execution is not configured", nodenet.ErrUnavailable)
+	}
+
+	host, err := remote.HostFromURL(member.URL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %v", nodenet.ErrUnavailable, err)
+	}
+
+	runner := &sshRunner{
+		dialer: s.dialer,
+		opts: remote.Options{
+			Address:               remote.JoinHostPort(host, s.access.SSHPort),
+			User:                  s.access.SSHUser,
+			KeyPath:               s.access.SSHKey,
+			KnownHostsPath:        s.access.SSHKnownHosts,
+			InsecureIgnoreHostKey: s.access.SSHInsecureIgnoreHostKey,
+		},
+		sudo: s.access.SSHUser != "root",
+	}
+
+	return &runnerCommand{r: runner}, runner.Close, nil
+}
+
+// CommandRunner executes one shell command on a cluster member's host.
+type CommandRunner interface {
+	Run(ctx context.Context, command string) (string, error)
+}
+
+// runnerCommand runs a whole shell command through the SSH runner, rather than
+// a program plus arguments.
+type runnerCommand struct {
+	r *sshRunner
+}
+
+// Run implements CommandRunner.
+func (c *runnerCommand) Run(ctx context.Context, command string) (string, error) {
+	client, err := c.r.connection(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	full := command
+	if c.r.sudo {
+		full = "sudo -n sh -c " + remote.ShellQuote(command)
+	}
+
+	out, err := client.Run(ctx, full)
+	if err != nil {
+		c.r.reset(client)
+		return out, fmt.Errorf("%w: %v", nodenet.ErrUnavailable, err)
+	}
+
+	return out, nil
+}
