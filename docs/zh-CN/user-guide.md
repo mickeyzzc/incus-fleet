@@ -165,6 +165,39 @@ fleet 支持上传 ISO 安装镜像(如 Debian/Ubuntu/CentOS 官方安装盘),�
    像操作物理机一样完成安装。
 5. 安装完成后建议关机、在设备面板卸载 ISO 设备(或直接删除重装),再开机进入新系统。
 
+### 无人值守安装
+
+上面的交互式路径需要在远程桌面里敲键盘。**无人值守安装**全程零按键:fleet 把应答文件
+放进安装介质、强制引导默认安装项,并在装完后自动清理介质。
+
+1. 在 **从 ISO 创建虚拟机** 对话框里照常填写虚拟机名称,然后打开 **无人值守安装** 开关。
+2. 选择 **安装器类型**(fleet 会按 ISO 名自动预选):
+   - **Debian / d-i preseed** —— Debian 及使用 debian-installer 的衍生版;
+   - **Ubuntu autoinstall(Subiquity)** —— Ubuntu Server 20.04+ 镜像;
+   - **RHEL / Fedora kickstart** —— RHEL、Rocky、Alma、CentOS Stream、Fedora;
+   - **通用 cloud-init(NoCloud 种子)** —— 支持 cloud-init 的自定义 ISO。
+3. 填写模板字段(用户账户、密码、时区;主机名默认取虚拟机名),或勾选
+   **使用自定义应答文件** 粘贴完整的 preseed.cfg / ks.cfg / user-data。
+   **预览应答文件** 会渲染出实际下发的内容。
+4. 点击 **开始无人值守安装**。接下来会发生:
+   - Debian/RHEL 类型会**重制** ISO:应答文件写入 ISO 根目录,GRUB 配置注入无人值守
+     内核参数与 10 秒自动引导。原 ISO 不动,派生出 `<iso>-<profile>-auto` 卷。
+   - Ubuntu/通用类型不修改安装盘,在旁边挂一张生成的 NoCloud 种子盘
+     (`cidata-<vm>`)。
+5. 通过 **远程桌面** 观察进度——安装从引导到结束零输入。完成后虚拟机自动关机,fleet
+   自动卸载安装介质并删除派生卷(含应答文件副本),之后直接开机进入新系统即可。
+
+注意事项:
+
+- fleet 服务器需要安装 **xorriso**(`apt install xorriso`),用于重制安装盘和生成
+  种子介质。重制工作目录 `unattended.work_dir`(默认为服务运行目录下的
+  `data/unattended`)需要数 GB 空闲空间。
+- 重制发生在 ISO 所在的集群成员上,虚拟机也会创建在同一成员上。
+- Debian/RHEL 重制类型的应答文件存放在派生 ISO 内——含凭据的介质请按安全惯例对待。
+  安装完成后会自动删除;若 6 小时看护窗口过期,请在存储面板手动卸载并删除派生卷。
+- 通用 NoCloud(自定义 ISO)没有确定的"安装完成"信号;介质会一直挂着,直到手动卸载
+  或看护窗口过期。
+
 ISO 镜像保存在存储池中,可随时在列表中删除。
 
 ## 创建实例
