@@ -287,6 +287,50 @@ export interface LaunchISORequest {
   start?: boolean
 }
 
+/** Installer families supported by the unattended install pipeline. */
+export type UnattendedProfile = 'debian-preseed' | 'ubuntu-autoinstall' | 'kickstart' | 'nocloud'
+
+export interface UnattendedAnswerSpec {
+  hostname?: string
+  username?: string
+  password?: string
+  timezone?: string
+  disk?: string
+  locale?: string
+  keyboard?: string
+}
+
+export interface UnattendedLaunchRequest {
+  name: string
+  profile: UnattendedProfile
+  /** Overrides the built-in template with operator-provided content. */
+  answer_file?: string
+  spec?: UnattendedAnswerSpec
+  network?: string
+  root_disk?: string
+  start?: boolean
+}
+
+export interface UnattendedMedia {
+  device: string
+  volume: string
+  pool: string
+  seed: boolean
+}
+
+export interface UnattendedLaunchResult {
+  name: string
+  media: UnattendedMedia[]
+  profile: UnattendedProfile
+  answer_file_name: string
+}
+
+export interface UnattendedAnswerPreview {
+  content: string
+  file_name: string
+  profile: UnattendedProfile
+}
+
 export interface OpsRequest {
   action: 'run-script' | 'set-password' | 'inject-key'
   script?: string

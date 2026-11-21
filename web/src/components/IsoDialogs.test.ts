@@ -194,3 +194,89 @@ describe('CloneInstanceDialog', () => {
     expect(ElMessage.error).toHaveBeenCalledWith('Enter a target name first.')
   })
 })
+
+describe('IsoLaunchDialog unattended', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.mocked(api.launchFromISO).mockResolvedValue({
+      name: 'installer-01',
+      cluster: 'c1',
+      type: 'virtual-machine',
+      status: 'Running',
+    } as never)
+    vi.mocked(api.launchUnattended).mockResolvedValue({
+      instance: { name: 'web-01', cluster: 'c1', type: 'virtual-machine', status: 'Running' } as never,
+      launch: {
+        name: 'web-01',
+        media: [{ device: 'iso0', volume: 'debian-auto', pool: 'default', seed: false }],
+        profile: 'debian-preseed',
+        answer_file_name: 'preseed.cfg',
+      },
+    } as never)
+    vi.mocked(api.previewUnattendedAnswer).mockResolvedValue({
+      content: 'd-i debian-installer/locale string en_US',
+      file_name: 'preseed.cfg',
+      profile: 'debian-preseed',
+    })
+  })
+
+  function mountUnattended() {
+    return mount(IsoLaunchDialog, {
+      props: { modelValue: true, cluster: 'c1', isoName: 'debian-13.7.0-amd64-DVD-1', isoPool: 'default', networks: ['incusbr0'] },
+      global: { plugins: [ElementPlus] },
+    })
+  }
+
+  it('guesses the debian profile and launches unattended', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    await wrapper.find('input[placeholder="fleet"]').setValue('ops')
+    await wrapper.find('input[type=password]').setValue('s3cret')
+
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.launchUnattended).toHaveBeenCalledTimes(1)
+    const request = vi.mocked(api.launchUnattended).mock.calls[0]?.[3]
+    expect(request?.profile).toBe('debian-preseed')
+    expect(request?.spec?.hostname).toBe('web-01')
+    expect(wrapper.emitted('launched')?.[0]).toEqual(['web-01'])
+    expect(api.launchFromISO).not.toHaveBeenCalled()
+  })
+
+  it('requires a user account for the template path', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.launchUnattended).not.toHaveBeenCalled()
+    expect(ElMessage.error).toHaveBeenCalledWith('Enter the user account name first.')
+  })
+
+  it('previews the rendered answer file', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    const previewButton = wrapper.findAll('button').find((b) => b.text().includes('Preview'))
+    await previewButton?.trigger('click')
+    await flushPromises()
+
+    expect(api.previewUnattendedAnswer).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('preseed.cfg')
+    expect(wrapper.text()).toContain('d-i debian-installer/locale')
+  })
+})

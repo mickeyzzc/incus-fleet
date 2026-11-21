@@ -48,6 +48,9 @@ import type {
   OpsRequest,
   OpsResult,
   SPICEPrepare,
+  UnattendedAnswerPreview,
+  UnattendedLaunchRequest,
+  UnattendedLaunchResult,
   DesktopPrepare,
   DesktopInputEvent,
   Profile,
@@ -291,6 +294,32 @@ export class ApiClient {
     return this.request<InstanceSummary>(
       'POST',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/iso/${encodeURIComponent(pool)}/${encodeURIComponent(name)}/launch`,
+      request,
+    )
+  }
+
+  async previewUnattendedAnswer(
+    cluster: string,
+    pool: string,
+    name: string,
+    request: UnattendedLaunchRequest,
+  ): Promise<UnattendedAnswerPreview> {
+    return this.request<UnattendedAnswerPreview>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/iso/${encodeURIComponent(pool)}/${encodeURIComponent(name)}/launch-unattended/preview`,
+      request,
+    )
+  }
+
+  async launchUnattended(
+    cluster: string,
+    pool: string,
+    name: string,
+    request: UnattendedLaunchRequest,
+  ): Promise<{ instance: InstanceSummary; launch: UnattendedLaunchResult }> {
+    return this.request<{ instance: InstanceSummary; launch: UnattendedLaunchResult }>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/iso/${encodeURIComponent(pool)}/${encodeURIComponent(name)}/launch-unattended`,
       request,
     )
   }

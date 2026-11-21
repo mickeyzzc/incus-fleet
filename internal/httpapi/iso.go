@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
+	"github.com/mickeyzzc/incus-fleet/internal/unattended"
 )
 
 // listISOs lists installer ISO volumes stored on the cluster.
@@ -71,4 +73,70 @@ func (a *API) launchFromISO(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, detail)
+}
+
+// previewUnattendedAnswer renders the answer file for a profile and spec
+// without creating anything. Operator-provided answer content is echoed back
+// unchanged so the UI can display exactly what would be shipped.
+func (a *API) previewUnattendedAnswer(w http.ResponseWriter, r *http.Request) {
+	var req instances.UnattendedRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	profile := unattended.Profile(strings.TrimSpace(req.Profile))
+	if err := unattended.Validate(profile); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	content := strings.TrimSpace(req.AnswerFile)
+	if content == "" {
+		rendered, err := unattended.RenderAnswerFile(profile, req.Spec)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		content = rendered
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"content":   content,
+		"file_name": unattended.AnswerFileName(profile),
+		"profile":   string(profile),
+	})
+}
+
+// launchUnattended creates a VM that installs itself from the ISO without
+// keyboard input. The installer media is remastered (preseed/kickstart) or
+// accompanied by a NoCloud seed (autoinstall/nocloud); installation media is
+// detached automatically once the installer finishes.
+func (a *API) launchUnattended(w http.ResponseWriter, r *http.Request) {
+	// Exporting, remastering and re-importing a multi-GB ISO takes
+	// minutes; keep the response deadline out of the way.
+	extendUploadDeadline(w)
+
+	var req instances.UnattendedRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	detail, launch, err := a.instances.LaunchUnattended(
+		r.Context(),
+		r.PathValue("cluster"),
+		r.PathValue("pool"),
+		r.PathValue("name"),
+		req,
+	)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"instance": detail,
+		"launch":   launch,
+	})
 }

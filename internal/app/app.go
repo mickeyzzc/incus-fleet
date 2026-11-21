@@ -128,7 +128,11 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		return nil, err
 	}
 
-	instancesService := instances.New(manager)
+	instancesService := instances.New(manager,
+		instances.WithUnattendedWorkDir(cfg.Unattended.WorkDir),
+		instances.WithXorriso(cfg.Unattended.XorrisoPath),
+		instances.WithLogger(logger),
+	)
 	// The instance ops service runs commands inside a guest; the migration
 	// service uses it to renew the DHCP lease after a cross-cluster move.
 	networkFixer := migrations.NewNetworkFixer(
