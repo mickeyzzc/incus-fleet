@@ -2,6 +2,7 @@ package instances
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -275,12 +276,8 @@ func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member,
 
 	// Debian-family installers read their preseed from the initramfs root
 	// (S30initrd-preseed) long before the medium is mounted, so the answer
-	// file is appended to the initrd as a compressed cpio segment. The file
-	// also stays at the ISO root for operator visibility.
-	segment, segErr := appendInitrdSeed(unattended.InitrdSeedName(profile), answer)
-	if segErr != nil {
-		return "", fmt.Errorf("%w: build initrd seed: %w", ErrUnattended, segErr)
-	}
+	// file is baked into the initrd (full repack; the file also stays at
+	// the ISO root for operator visibility).
 	for _, initrdPath := range unattended.InitrdPaths(profile) {
 		idx := strings.Index(initrdPath, "initrd")
 		initrdLocal := filepath.Join(dir, fmt.Sprintf("initrd-%d.gz", idx))
@@ -288,24 +285,20 @@ func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member,
 			return "", fmt.Errorf("%w: installer initrd %s not found in %s", ErrUnattended, initrdPath, isoName)
 		}
 
-		patchedInitrd := filepath.Join(dir, fmt.Sprintf("initrd-patched-%d.gz", idx))
-		initrdFile, err := os.Open(initrdLocal) //nolint:gosec // path inside the controlled work dir
+		original, err := os.ReadFile(initrdLocal) //nolint:gosec // path inside the controlled work dir
 		if err != nil {
-			return "", fmt.Errorf("%w: open extracted initrd: %w", ErrUnattended, err)
+			return "", fmt.Errorf("%w: read extracted initrd: %w", ErrUnattended, err)
 		}
-		out, err := os.Create(patchedInitrd) //nolint:gosec // path inside the controlled work dir
+		patchedInitrd, err := repackInitrd(original, unattended.InitrdSeedName(profile), []byte(answer))
 		if err != nil {
-			initrdFile.Close() //nolint:errcheck // read-only handle
-			return "", fmt.Errorf("%w: create patched initrd: %w", ErrUnattended, err)
+			return "", err
 		}
-		_, copyErr := io.Copy(out, initrdFile)
-		_, segErr2 := out.Write(segment)
-		closeErr := out.Close()
-		initrdFile.Close() //nolint:errcheck // read-only handle
-		if copyErr != nil || segErr2 != nil || closeErr != nil {
-			return "", fmt.Errorf("%w: append initrd seed segment", ErrUnattended)
+
+		patchedPath := filepath.Join(dir, fmt.Sprintf("initrd-patched-%d.gz", idx))
+		if err := os.WriteFile(patchedPath, patchedInitrd, 0o600); err != nil {
+			return "", fmt.Errorf("%w: write patched initrd: %w", ErrUnattended, err)
 		}
-		patched[initrdPath] = patchedInitrd
+		patched[initrdPath] = patchedPath
 	}
 
 	outPath := filepath.Join(dir, "out.iso")
@@ -335,16 +328,22 @@ func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member,
 	}
 
 	// The patched initrd must still carry the embedded preseed after the
-	// rebuild: the answer file rides in an uncompressed cpio tail appended
-	// to the (gzip'd) initrd, so its content is directly greppable in the
-	// patched image bytes.
+	// rebuild: gunzip the single-member image and look for the answer file.
 	for _, initrdPath := range unattended.InitrdPaths(profile) {
 		verifyPath := filepath.Join(dir, "verify-initrd.gz")
 		content, err := s.iso.Extract(ctx, outPath, initrdPath, verifyPath)
 		if err != nil {
 			return "", fmt.Errorf("%w: verify %s: %w", ErrUnattended, initrdPath, err)
 		}
-		if !bytes.Contains([]byte(content), []byte(answer[:min(64, len(answer))])) {
+		gz, err := gzip.NewReader(strings.NewReader(content))
+		if err != nil {
+			return "", fmt.Errorf("%w: rebuilt %s is not readable gzip: %w", ErrUnattended, initrdPath, err)
+		}
+		plain, err := io.ReadAll(gz)
+		if err != nil {
+			return "", fmt.Errorf("%w: rebuilt %s failed to decompress: %w", ErrUnattended, initrdPath, err)
+		}
+		if !bytes.Contains(plain, []byte(answer[:min(64, len(answer))])) {
 			return "", fmt.Errorf("%w: rebuilt %s does not carry the embedded preseed", ErrUnattended, initrdPath)
 		}
 	}

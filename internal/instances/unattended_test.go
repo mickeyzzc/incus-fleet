@@ -60,8 +60,15 @@ func (t *stubISOTool) Extract(_ context.Context, isoPath, isoFilePath, destPath 
 		}
 
 		var buf bytes.Buffer
+		var cpio bytes.Buffer
+		if err := writeCpioEntry(&cpio, "readme.txt", []byte("source initrd")); err != nil {
+			return "", err
+		}
+		if err := writeCpioTrailer(&cpio); err != nil {
+			return "", err
+		}
 		gz := gzip.NewWriter(&buf)
-		_, _ = gz.Write([]byte("fake-initrd-bytes"))
+		_, _ = gz.Write(cpio.Bytes())
 		_ = gz.Close()
 		if err := os.WriteFile(destPath, buf.Bytes(), 0o600); err != nil {
 			return "", err

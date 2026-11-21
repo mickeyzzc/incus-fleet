@@ -2,12 +2,15 @@ package instances
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/mickeyzzc/incus-fleet/internal/unattended"
@@ -149,21 +152,112 @@ func derivedISOName(isoName string, profile unattended.Profile) string {
 // volumeNameRE constrains the names of derived installation media volumes.
 var volumeNameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 
-// appendInitrdSeed builds an uncompressed cpio segment carrying the answer
-// file at the initramfs root and returns it; the caller concatenates it
-// with the installer's (gzip'd) initrd. The kernel's initramfs unpacker
-// detects the archive format per segment, and an uncompressed cpio tail is
-// the most robustly supported concatenation form.
-func appendInitrdSeed(answerName, content string) ([]byte, error) {
-	var cpioBuf bytes.Buffer
-	if err := writeCpioEntry(&cpioBuf, answerName, []byte(content)); err != nil {
+// repackInitrd adds the answer file at the initramfs root of a gzip'd cpio
+// initrd. It fully decompresses the original archive, re-emits every entry
+// plus the seed file, and re-compresses: a single-member gzip cpio is the
+// most kernel-compatible shape (appended segments - compressed or not -
+// were not unpacked by the d-i guest kernel in practice).
+func repackInitrd(initrd []byte, answerName string, answer []byte) ([]byte, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(initrd))
+	if err != nil {
+		return nil, fmt.Errorf("%w: initrd is not gzip: %w", ErrUnattended, err)
+	}
+	plain, err := io.ReadAll(gz)
+	if err != nil {
+		return nil, fmt.Errorf("%w: initrd decompress failed: %w", ErrUnattended, err)
+	}
+
+	var out bytes.Buffer
+	if err := writeCpioEntries(&out, plain); err != nil {
 		return nil, err
 	}
-	if err := writeCpioTrailer(&cpioBuf); err != nil {
+	if err := writeCpioEntry(&out, answerName, answer); err != nil {
+		return nil, err
+	}
+	if err := writeCpioTrailer(&out); err != nil {
 		return nil, err
 	}
 
-	return cpioBuf.Bytes(), nil
+	var compressed bytes.Buffer
+	gzOut := gzip.NewWriter(&compressed)
+	if _, err := gzOut.Write(out.Bytes()); err != nil {
+		return nil, err
+	}
+	if err := gzOut.Close(); err != nil {
+		return nil, err
+	}
+
+	return compressed.Bytes(), nil
+}
+
+// cpioHeaderLen is the size of a newc header: 6-byte magic + 13 fields.
+const cpioHeaderLen = 110
+
+// cpioMagic is the newc magic.
+const cpioMagic = "070701"
+
+// parseHexField reads one 8-hex-digit field from a newc header block.
+func parseHexField(header []byte, index int) (int64, error) {
+	field := string(header[index*8 : (index+1)*8])
+	value, err := strconv.ParseInt(field, 16, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%w: malformed cpio field %d (%q): %w", ErrUnattended, index, field, err)
+	}
+
+	return value, nil
+}
+
+// writeCpioEntries re-emits every entry of a single newc archive stream
+// into out.
+func writeCpioEntries(out *bytes.Buffer, plain []byte) error {
+	pos := 0
+	for {
+		if pos+cpioHeaderLen > len(plain) {
+			return fmt.Errorf("%w: initrd cpio truncated (header at %d)", ErrUnattended, pos)
+		}
+
+		header := plain[pos : pos+cpioHeaderLen]
+		if string(header[:6]) != cpioMagic {
+			return fmt.Errorf("%w: initrd cpio entry at %d has magic %q", ErrUnattended, pos, header[:6])
+		}
+
+		fileSize, err := parseHexField(header[6:], 6) // c_filesize is field 6
+		if err != nil {
+			return err
+		}
+		nameSize, err := parseHexField(header[6:], 11) // c_namesize is field 11
+		if err != nil {
+			return err
+		}
+
+		nameStart := pos + cpioHeaderLen
+		nameEnd := nameStart + int(nameSize) // includes the trailing NUL
+		if nameEnd > len(plain) {
+			return fmt.Errorf("%w: initrd cpio name truncated", ErrUnattended)
+		}
+
+		name := string(plain[nameStart : nameEnd-1])
+		if name == "TRAILER!!!" {
+			return nil
+		}
+
+		dataStart := align4(nameEnd)
+		dataEnd := dataStart + int(fileSize)
+		if dataEnd > len(plain) {
+			return fmt.Errorf("%w: initrd cpio data truncated for %s", ErrUnattended, name)
+		}
+
+		if err := writeCpioEntry(out, name, plain[dataStart:dataEnd]); err != nil {
+			return err
+		}
+
+		pos = align4(dataEnd)
+	}
+}
+
+// align4 rounds n up to the next multiple of 4.
+func align4(n int) int {
+	return n + (4-n%4)%4
 }
 
 // writeCpioEntry writes one file in the cpio "newc" format: a 6-byte magic
