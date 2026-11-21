@@ -183,7 +183,7 @@ fn parse_oom_event(data: &[u8]) -> Option<(u32, u64)> {
 pub fn available(object: Option<&Path>) -> bool {
     #[cfg(target_os = "linux")]
     {
-        return object.is_some_and(Path::exists) && Path::new("/sys/kernel/btf/vmlinux").exists();
+        object.is_some_and(Path::exists) && Path::new("/sys/kernel/btf/vmlinux").exists()
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -207,8 +207,8 @@ mod platform {
     use aya::{Ebpf, Pod};
 
     use super::{
-        BLOCK_BUCKETS, BlockHistogram, InstanceSnapshot, Snapshot, instance_from_cgroup_content,
-        instance_name, parse_oom_event,
+        BLOCK_BUCKETS, InstanceSnapshot, Snapshot, instance_from_cgroup_content, instance_name,
+        parse_oom_event,
     };
 
     #[repr(C)]
@@ -343,20 +343,14 @@ mod platform {
 
         pub fn observed_cgroup_ids(&self) -> Vec<u64> {
             let mut ids = Vec::new();
-            for entry in self.cgroup_retransmits.iter() {
-                if let Ok((id, _)) = entry {
-                    ids.push(id);
-                }
+            for entry in self.cgroup_retransmits.iter().flatten() {
+                ids.push(entry.0);
             }
-            for entry in self.cgroup_oom_kills.iter() {
-                if let Ok((id, _)) = entry {
-                    ids.push(id);
-                }
+            for entry in self.cgroup_oom_kills.iter().flatten() {
+                ids.push(entry.0);
             }
-            for entry in self.block_latency.iter() {
-                if let Ok((key, _)) = entry {
-                    ids.push(key.cgroup_id);
-                }
+            for entry in self.block_latency.iter().flatten() {
+                ids.push(entry.0.cgroup_id);
             }
             ids.sort_unstable();
             ids.dedup();
@@ -563,10 +557,9 @@ mod platform {
                     // The BPF map already attributed this event to an instance.
                     continue;
                 }
-                if let Some((name, kind)) = instance_from_proc(pid) {
-                    if let Ok(mut counts) = extra.lock() {
-                        *counts.entry((name, kind.to_string())).or_insert(0) += 1;
-                    }
+                if let (Some((name, kind)), Ok(mut counts)) = (instance_from_proc(pid), extra.lock())
+                {
+                    *counts.entry((name, kind.to_string())).or_insert(0) += 1;
                 }
             }
             std::thread::sleep(Duration::from_millis(500));
@@ -691,7 +684,7 @@ mod platform {
         tracing::warn!(
             "BPF_F_ALLOW_MULTI sockops attach failed; skipping sockops instead of replacing another program"
         );
-        return Ok(None);
+        Ok(None)
     }
 
     fn attach_tracepoint(
