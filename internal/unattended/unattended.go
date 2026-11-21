@@ -140,7 +140,7 @@ type SeedFile struct {
 func BootArgs(p Profile) string {
 	switch p {
 	case ProfileDebianPreseed:
-		return "auto=true priority=critical"
+		return "auto=true priority=critical file=/preseed.cfg"
 	case ProfileKickstart:
 		return "inst.ks=cdrom:/ks.cfg"
 	default:

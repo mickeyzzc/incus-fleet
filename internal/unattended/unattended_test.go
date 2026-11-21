@@ -188,8 +188,8 @@ func TestPatchBootConfigDebian(t *testing.T) {
 	// configuration ends up with three occurrences; `changed` above is the
 	// count of lines this patch actually modified.
 	count := strings.Count(patched, BootArgs(ProfileDebianPreseed))
-	if count != 3 {
-		t.Fatalf("args count = %d, want 3 (2 patched + 1 pre-existing)", count)
+	if count != 2 {
+		t.Fatalf("args count = %d, want 2", count)
 	}
 
 	// The menu boots itself: default entry and timeout are forced.
