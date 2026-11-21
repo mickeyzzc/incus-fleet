@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -133,6 +134,14 @@ func (s *Service) LaunchUnattended(ctx context.Context, clusterName, pool, isoNa
 		return Detail{}, UnattendedLaunch{}, fmt.Errorf("%w: storage pool %q does not exist on %s", ErrInvalidRequest, pool, clusterName)
 	}
 
+	// In clustered Incus, custom ISO volumes live on one member. Derive the
+	// volume there and create the VM on the same member so device
+	// validation can actually load the media.
+	mediaMember, err := s.isoVolumeMember(client, pool, isoName)
+	if err != nil {
+		return Detail{}, UnattendedLaunch{}, err
+	}
+
 	media := []UnattendedMedia{}
 	cleanup := func() {
 		s.cleanupUnattendedMedia(client, pool, media)
@@ -140,7 +149,7 @@ func (s *Service) LaunchUnattended(ctx context.Context, clusterName, pool, isoNa
 
 	installerISO := isoName
 	if unattended.NeedsRemaster(profile) {
-		derived, err := s.remasterInstallerISO(ctx, clusterName, pool, isoName, profile, answer, workDir)
+		derived, err := s.remasterInstallerISO(ctx, clusterName, mediaMember, pool, isoName, profile, answer, workDir)
 		if err != nil {
 			return Detail{}, UnattendedLaunch{}, err
 		}
@@ -155,7 +164,7 @@ func (s *Service) LaunchUnattended(ctx context.Context, clusterName, pool, isoNa
 		return Detail{}, UnattendedLaunch{}, err
 	}
 	if len(seedFiles) > 0 {
-		volumeName, err := s.buildAndImportSeedISO(ctx, clusterName, pool, req.Name, seedFiles, workDir)
+		volumeName, err := s.buildAndImportSeedISO(ctx, clusterName, mediaMember, pool, req.Name, seedFiles, workDir)
 		if err != nil {
 			cleanup()
 			return Detail{}, UnattendedLaunch{}, err
@@ -164,7 +173,7 @@ func (s *Service) LaunchUnattended(ctx context.Context, clusterName, pool, isoNa
 		media = append(media, UnattendedMedia{Device: "iso1", Volume: volumeName, Pool: pool, Seed: true})
 	}
 
-	detail, err := s.launchUnattendedVM(ctx, clusterName, pool, installerISO, seedISO, req)
+	detail, err := s.launchUnattendedVM(ctx, clusterName, mediaMember, pool, installerISO, seedISO, req)
 	if err != nil {
 		cleanup()
 		return Detail{}, UnattendedLaunch{}, err
@@ -203,8 +212,9 @@ func (s *Service) renderUnattendedAnswer(profile unattended.Profile, req Unatten
 
 // remasterInstallerISO exports the source ISO, patches its boot
 // configuration, adds the answer file, rebuilds the image and imports it as
-// a new custom volume. It returns the derived volume name.
-func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, pool, isoName string, profile unattended.Profile, answer, workDir string) (string, error) {
+// a new custom volume pinned to the source ISO's member. It returns the
+// derived volume name.
+func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member, pool, isoName string, profile unattended.Profile, answer, workDir string) (string, error) {
 	if err := s.iso.Available(); err != nil {
 		return "", fmt.Errorf("%w: %w", ErrUnattended, err)
 	}
@@ -286,16 +296,51 @@ func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, pool, i
 	}
 	defer outFile.Close() //nolint:errcheck // read-only handle
 
-	if _, err := s.ImportISO(ctx, clusterName, pool, volumeName+".iso", outFile); err != nil {
+	if _, err := s.importISOToMember(ctx, clusterName, member, pool, volumeName+".iso", outFile); err != nil {
 		return "", fmt.Errorf("%w: import remastered iso: %w", ErrUnattended, err)
 	}
 
 	return volumeName, nil
 }
 
+// importISOToMember imports an ISO volume pinned to one cluster member so
+// the media and the VM that boots it share a host.
+func (s *Service) importISOToMember(ctx context.Context, clusterName, member, pool, filename string, reader io.Reader) (string, error) {
+	if member == "" {
+		return s.ImportISO(ctx, clusterName, pool, filename, reader)
+	}
+
+	client, err := s.client(clusterName)
+	if err != nil {
+		return "", err
+	}
+
+	targeted, ok := any(client).(interface {
+		UseTarget(name string) incus.InstanceServer
+	})
+	if !ok {
+		return "", fmt.Errorf("%w: cluster client does not support targeting", ErrInvalidRequest)
+	}
+
+	name := strings.TrimSuffix(filename, ".iso")
+	op, err := targeted.UseTarget(member).CreateStoragePoolVolumeFromISO(pool, incus.StorageVolumeBackupArgs{
+		Name:       name,
+		BackupFile: reader,
+	})
+	if err != nil {
+		return "", fmt.Errorf("instances: import iso %s:%s: %w", clusterName, filename, err)
+	}
+	if err := waitOperation(ctx, op, "import iso "+name); err != nil {
+		return "", err
+	}
+
+	return name, nil
+}
+
 // buildAndImportSeedISO renders the NoCloud seed ISO with the profile's seed
-// files and imports it into the pool. It returns the seed volume name.
-func (s *Service) buildAndImportSeedISO(ctx context.Context, clusterName, pool, vmName string, files []unattended.SeedFile, workDir string) (string, error) {
+// files and imports it into the pool, pinned to the installer member. It
+// returns the seed volume name.
+func (s *Service) buildAndImportSeedISO(ctx context.Context, clusterName, member, pool, vmName string, files []unattended.SeedFile, workDir string) (string, error) {
 	if err := s.iso.Available(); err != nil {
 		return "", fmt.Errorf("%w: %w", ErrUnattended, err)
 	}
@@ -318,7 +363,7 @@ func (s *Service) buildAndImportSeedISO(ctx context.Context, clusterName, pool, 
 	}
 	defer file.Close() //nolint:errcheck // read-only handle
 
-	if _, err := s.ImportISO(ctx, clusterName, pool, volumeName+".iso", file); err != nil {
+	if _, err := s.importISOToMember(ctx, clusterName, member, pool, volumeName+".iso", file); err != nil {
 		return "", fmt.Errorf("%w: import seed iso: %w", ErrUnattended, err)
 	}
 
@@ -369,15 +414,27 @@ func (s *Service) exportISOVolume(ctx context.Context, client clusters.InstanceS
 	return nil
 }
 
-// launchUnattendedVM creates the VM. The installer ISO (remastered when the
-// profile requires it) boots first; the NoCloud seed, when present, is
-// attached as a second read-only media. -no-reboot makes the installer's
-// final reboot power the VM off instead of looping back into the installer,
-// which is the deterministic signal for the media watcher.
-func (s *Service) launchUnattendedVM(ctx context.Context, clusterName, pool, installerISO, seedISO string, req UnattendedRequest) (Detail, error) {
+// launchUnattendedVM creates the VM on the same member as its installation
+// media. The installer ISO (remastered when the profile requires it) boots
+// first; the NoCloud seed, when present, is attached as a second read-only
+// media. -no-reboot makes the installer's final reboot power the VM off
+// instead of looping back into the installer, which is the deterministic
+// signal for the media watcher.
+func (s *Service) launchUnattendedVM(ctx context.Context, clusterName, member, pool, installerISO, seedISO string, req UnattendedRequest) (Detail, error) {
 	client, err := s.client(clusterName)
 	if err != nil {
 		return Detail{}, err
+	}
+
+	var creator instanceCreator = client
+	if member != "" {
+		targeted, ok := any(client).(interface {
+			UseTarget(name string) incus.InstanceServer
+		})
+		if !ok {
+			return Detail{}, fmt.Errorf("%w: cluster client does not support targeting", ErrInvalidRequest)
+		}
+		creator = targeted.UseTarget(member)
 	}
 
 	root := map[string]string{"type": "disk", "path": "/", "pool": pool}
@@ -451,7 +508,7 @@ func (s *Service) launchUnattendedVM(ctx context.Context, clusterName, pool, ins
 	createCtx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
 
-	op, err := client.CreateInstance(post)
+	op, err := creator.CreateInstance(post)
 	if err != nil {
 		return Detail{}, fmt.Errorf("instances: create %s:%s: %w", clusterName, req.Name, err)
 	}

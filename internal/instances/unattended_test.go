@@ -126,6 +126,7 @@ func TestLaunchUnattendedPreseedRemaster(t *testing.T) {
 		PoolNames:      []string{"default"},
 		ISOExportBytes: []byte("original-iso-bytes"),
 		Instance:       &api.Instance{Name: "web-01"},
+		Volumes:        []api.StorageVolume{{Name: "debian-13.7.0-amd64-DVD-1", Type: "custom", ContentType: "iso", Location: "n305-server"}},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": source},
 		withIsoTool(&stubISOTool{}),
@@ -191,6 +192,7 @@ func TestLaunchUnattendedNoCloudSeed(t *testing.T) {
 	source := &incusfake.Server{
 		PoolNames: []string{"default"},
 		Instance:  &api.Instance{Name: "u-01"},
+		Volumes:   []api.StorageVolume{{Name: "ubuntu-24.04-live-server", Type: "custom", ContentType: "iso", Location: "n305-server"}},
 	}
 	tool := &stubISOTool{}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": source},
@@ -266,8 +268,12 @@ func TestLaunchUnattendedValidation(t *testing.T) {
 	}
 
 	// Missing xorriso-equivalent tool.
+	toolSource := &incusfake.Server{
+		PoolNames: []string{"default"},
+		Volumes:   []api.StorageVolume{{Name: "iso", Type: "custom", ContentType: "iso", Location: "n305-server"}},
+	}
 	failing := &stubISOTool{availableErr: errors.New("no xorriso")}
-	svc2 := newTestService(t, map[string]*incusfake.Server{"c1": source},
+	svc2 := newTestService(t, map[string]*incusfake.Server{"c1": toolSource},
 		withIsoTool(failing),
 		withUnattendedWorkDirForTest(t),
 	)
@@ -281,6 +287,7 @@ func TestLaunchUnattendedCustomAnswerFile(t *testing.T) {
 		PoolNames:      []string{"default"},
 		ISOExportBytes: []byte("iso"),
 		Instance:       &api.Instance{Name: "cust-01"},
+		Volumes:        []api.StorageVolume{{Name: "debian", Type: "custom", ContentType: "iso", Location: "n305-server"}},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": source},
 		withIsoTool(&stubISOTool{}),
