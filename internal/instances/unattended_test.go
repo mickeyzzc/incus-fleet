@@ -52,6 +52,11 @@ func (t *stubISOTool) Extract(_ context.Context, isoPath, isoFilePath, destPath 
 		return debianGrubFixture, nil
 	case "/EFI/BOOT/grub.cfg":
 		return anacondaGrubFixture, nil
+	case "/install.amd/initrd.gz":
+		if err := os.WriteFile(destPath, []byte("fake-initrd-bytes"), 0o600); err != nil {
+			return "", err
+		}
+		return "fake-initrd-bytes", nil
 	default:
 		return "", fmt.Errorf("no %s in image", isoFilePath)
 	}

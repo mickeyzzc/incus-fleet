@@ -132,13 +132,38 @@ type SeedFile struct {
 }
 
 // BootArgs renders the kernel command line fragment injected into the
-// installer's boot configuration.
+// installer's boot configuration. Debian preseeds ride inside the initrd
+// (d-i's S30initrd-preseed loads /preseed.cfg from the initramfs before the
+// installer even starts): a file=/cdrom/... argument cannot work there — the
+// preseed fetcher runs before the medium is mounted — so only the auto
+// flags live on the command line.
 func BootArgs(p Profile) string {
 	switch p {
 	case ProfileDebianPreseed:
-		return "auto=true priority=critical file=/cdrom/preseed.cfg"
+		return "auto=true priority=critical"
 	case ProfileKickstart:
 		return "inst.ks=cdrom:/ks.cfg"
+	default:
+		return ""
+	}
+}
+
+// InitrdPath is the installer initrd to patch for profiles that carry their
+// answer file inside the initramfs (empty for the others).
+func InitrdPath(p Profile) string {
+	switch p {
+	case ProfileDebianPreseed:
+		return "/install.amd/initrd.gz"
+	default:
+		return ""
+	}
+}
+
+// InitrdSeedName is the answer file name inside the initrd segment.
+func InitrdSeedName(p Profile) string {
+	switch p {
+	case ProfileDebianPreseed:
+		return "preseed.cfg"
 	default:
 		return ""
 	}

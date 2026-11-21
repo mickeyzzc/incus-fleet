@@ -272,6 +272,44 @@ func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member,
 		return "", fmt.Errorf("%w: write answer file: %w", ErrUnattended, err)
 	}
 
+	// Debian-family installers read their preseed from the initramfs root
+	// (S30initrd-preseed) long before the medium is mounted, so the answer
+	// file is appended to the initrd as a compressed cpio segment. The file
+	// also stays at the ISO root for operator visibility.
+	if initrdPath := unattended.InitrdPath(profile); initrdPath != "" {
+		initrdLocal := filepath.Join(dir, "initrd.gz")
+		if _, err := s.iso.Extract(ctx, srcPath, initrdPath, initrdLocal); err == nil {
+			segment, segErr := appendInitrdSeed(unattended.InitrdSeedName(profile), answer)
+			if segErr != nil {
+				return "", fmt.Errorf("%w: build initrd seed: %w", ErrUnattended, segErr)
+			}
+
+			initrdFile, err := os.Open(initrdLocal) //nolint:gosec // path inside the controlled work dir
+			if err != nil {
+				return "", fmt.Errorf("%w: open extracted initrd: %w", ErrUnattended, err)
+			}
+			patchedInitrd := filepath.Join(dir, "initrd-patched.gz")
+			out, err := os.Create(patchedInitrd) //nolint:gosec // path inside the controlled work dir
+			if err != nil {
+				initrdFile.Close() //nolint:errcheck // read-only handle
+				return "", fmt.Errorf("%w: create patched initrd: %w", ErrUnattended, err)
+			}
+			_, copyErr := io.Copy(out, initrdFile)
+			_, segErr2 := out.Write(segment)
+			closeErr := out.Close()
+			initrdFile.Close() //nolint:errcheck // read-only handle
+			if copyErr != nil || segErr2 != nil || closeErr != nil {
+				return "", fmt.Errorf("%w: append initrd seed segment", ErrUnattended)
+			}
+			patched[initrdPath] = patchedInitrd
+		}
+		// An initrd extraction failure is fatal for this profile: without
+		// the embedded preseed the install cannot run unattended.
+		if _, ok := patched[initrdPath]; !ok {
+			return "", fmt.Errorf("%w: installer initrd %s not found in %s", ErrUnattended, initrdPath, isoName)
+		}
+	}
+
 	outPath := filepath.Join(dir, "out.iso")
 	if err := s.iso.Rebuild(ctx, srcPath, outPath, patched, answerPath); err != nil {
 		return "", err

@@ -1,6 +1,8 @@
 package instances
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"os"
@@ -147,3 +149,103 @@ func derivedISOName(isoName string, profile unattended.Profile) string {
 
 // volumeNameRE constrains the names of derived installation media volumes.
 var volumeNameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
+
+// appendInitrdSeed builds a compressed cpio segment carrying the answer
+// file at the initramfs root and returns it; the caller concatenates it
+// with the installer's initrd. The Linux kernel processes concatenated
+// (optionally compressed) cpio archives in order, so the segment files
+// appear in the unpacked initramfs.
+func appendInitrdSeed(answerName, content string) ([]byte, error) {
+	var cpioBuf bytes.Buffer
+	if err := writeCpioEntry(&cpioBuf, answerName, []byte(content)); err != nil {
+		return nil, err
+	}
+	if err := writeCpioTrailer(&cpioBuf); err != nil {
+		return nil, err
+	}
+
+	var out bytes.Buffer
+	gz := gzip.NewWriter(&out)
+	if _, err := gz.Write(cpioBuf.Bytes()); err != nil {
+		return nil, err
+	}
+	if err := gz.Close(); err != nil {
+		return nil, err
+	}
+
+	return out.Bytes(), nil
+}
+
+// writeCpioEntry writes one file in the cpio "newc" format. Field values
+// are 8-hex-digit big-endian numbers; name and data are padded to 4 bytes.
+func writeCpioEntry(w *bytes.Buffer, name string, data []byte) error {
+	if strings.Contains(name, "\x00") || name == "" {
+		return fmt.Errorf("%w: invalid cpio entry name", ErrUnattended)
+	}
+
+	header := func(values ...int) string {
+		out := ""
+		for _, v := range values {
+			out += fmt.Sprintf("%08X", v)
+		}
+
+		return out
+	}
+
+	entry := header(
+		0x070701, // magic: newc
+		1,        // ino
+		0o100644, // mode: regular file
+		0,        // uid
+		0,        // gid
+		0,        // mtime
+		len(data),
+		0, // devmajor
+		0, // devminor
+		0, // rdevmajor
+		0, // rdevminor
+		len(name)+1,
+		0, // check
+	)
+	w.WriteString(entry)
+	w.WriteString(name)
+	w.WriteByte(0)
+
+	if pad := (4 - (110+len(name)+1)%4) % 4; pad > 0 {
+		w.Write(make([]byte, pad))
+	}
+	w.Write(data)
+	if pad := (4 - len(data)%4) % 4; pad > 0 {
+		w.Write(make([]byte, pad))
+	}
+
+	return nil
+}
+
+// writeCpioTrailer ends a cpio archive.
+func writeCpioTrailer(w *bytes.Buffer) error {
+	name := "TRAILER!!!"
+
+	header := func(values ...int) string {
+		out := ""
+		for _, v := range values {
+			out += fmt.Sprintf("%08X", v)
+		}
+
+		return out
+	}
+
+	entry := header(0x070701, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, len(name)+1, 0)
+	w.WriteString(entry)
+	w.WriteString(name)
+	w.WriteByte(0)
+
+	if pad := (4 - (110+len(name)+1)%4) % 4; pad > 0 {
+		w.Write(make([]byte, pad))
+	}
+	if pad := (4 - w.Len()%4) % 4; pad > 0 {
+		w.Write(make([]byte, pad))
+	}
+
+	return nil
+}
