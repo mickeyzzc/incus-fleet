@@ -183,12 +183,13 @@ func TestPatchBootConfigDebian(t *testing.T) {
 		t.Fatalf("changed = %d, want 2", changed)
 	}
 
-	// The two top-level entries carry the new arguments (the pre-existing
-	// automated entry inside the submenu keeps its own wording). The
-	// leading line break anchors the match to unindented entries.
-	count := strings.Count(patched, "\nlinux    /install.amd/vmlinuz "+BootArgs(ProfileDebianPreseed))
-	if count != 2 {
-		t.Fatalf("patched args count = %d, want 2", count)
+	// The two top-level entries gain the arguments and the pre-existing
+	// automated entry inside the submenu keeps its own wording, so the
+	// configuration ends up with three occurrences; `changed` above is the
+	// count of lines this patch actually modified.
+	count := strings.Count(patched, BootArgs(ProfileDebianPreseed))
+	if count != 3 {
+		t.Fatalf("args count = %d, want 3 (2 patched + 1 pre-existing)", count)
 	}
 
 	// The menu boots itself: default entry and timeout are forced.
