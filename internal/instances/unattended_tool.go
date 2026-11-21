@@ -2,7 +2,6 @@ package instances
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"fmt"
 	"os"
@@ -150,11 +149,11 @@ func derivedISOName(isoName string, profile unattended.Profile) string {
 // volumeNameRE constrains the names of derived installation media volumes.
 var volumeNameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 
-// appendInitrdSeed builds a compressed cpio segment carrying the answer
+// appendInitrdSeed builds an uncompressed cpio segment carrying the answer
 // file at the initramfs root and returns it; the caller concatenates it
-// with the installer's initrd. The Linux kernel processes concatenated
-// (optionally compressed) cpio archives in order, so the segment files
-// appear in the unpacked initramfs.
+// with the installer's (gzip'd) initrd. The kernel's initramfs unpacker
+// detects the archive format per segment, and an uncompressed cpio tail is
+// the most robustly supported concatenation form.
 func appendInitrdSeed(answerName, content string) ([]byte, error) {
 	var cpioBuf bytes.Buffer
 	if err := writeCpioEntry(&cpioBuf, answerName, []byte(content)); err != nil {
@@ -164,16 +163,7 @@ func appendInitrdSeed(answerName, content string) ([]byte, error) {
 		return nil, err
 	}
 
-	var out bytes.Buffer
-	gz := gzip.NewWriter(&out)
-	if _, err := gz.Write(cpioBuf.Bytes()); err != nil {
-		return nil, err
-	}
-	if err := gz.Close(); err != nil {
-		return nil, err
-	}
-
-	return out.Bytes(), nil
+	return cpioBuf.Bytes(), nil
 }
 
 // writeCpioEntry writes one file in the cpio "newc" format: a 6-byte magic

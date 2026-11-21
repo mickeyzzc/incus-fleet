@@ -1,10 +1,7 @@
 package instances
 
 import (
-	"bytes"
 	"fmt"
-	"compress/gzip"
-	"io"
 	"strings"
 	"testing"
 )
@@ -21,15 +18,7 @@ func TestAppendInitrdSeedLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("appendInitrdSeed() error = %v", err)
 	}
-
-	gz, err := gzip.NewReader(bytes.NewReader(segment))
-	if err != nil {
-		t.Fatalf("segment is not gzip: %v", err)
-	}
-	plain, err := io.ReadAll(gz)
-	if err != nil {
-		t.Fatalf("gunzip failed: %v", err)
-	}
+	plain := segment
 
 	// Header: 6-byte magic then 13 8-hex fields.
 	if string(plain[:6]) != "070701" {
