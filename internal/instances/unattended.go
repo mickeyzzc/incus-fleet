@@ -241,11 +241,15 @@ func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, pool, i
 		if changed == 0 {
 			continue
 		}
-		if err := os.WriteFile(localPath, []byte(newContent), 0o600); err != nil {
+
+		// Write the patched content to a fresh file: xorriso extraction
+		// preserves the read-only mode of files stored inside the ISO.
+		patchedPath := filepath.Join(dir, fmt.Sprintf("patched-%d.cfg", len(patched)))
+		if err := os.WriteFile(patchedPath, []byte(newContent), 0o600); err != nil {
 			return "", fmt.Errorf("%w: write patched boot config: %w", ErrUnattended, err)
 		}
 
-		patched[grubPath] = localPath
+		patched[grubPath] = patchedPath
 	}
 	if len(patched) == 0 {
 		return "", fmt.Errorf("%w: no installer boot configuration (%s) found in %s",
