@@ -186,6 +186,61 @@ and boot a blank virtual machine from the ISO to install the OS.
 5. When installation finishes, shut the VM down, detach the ISO in the device panel (or
    delete and recreate the VM), then boot into the installed system.
 
+### Unattended installation
+
+The interactive path above needs keyboard input in the remote desktop. **Unattended install**
+does the whole installation without a single keystroke: Fleet ships your answer file on the
+installation media, forces the installer's default boot entry, and watches for completion.
+
+1. In the **Create VM from ISO** dialog, fill in the VM name as usual, then enable
+   **Unattended install**.
+2. Pick the **installer profile** (Fleet guesses one from the ISO name):
+
+   ![Unattended install options in the Create VM from ISO dialog](images/iso/unattended-dialog.png)
+
+   - **Debian / d-i preseed** — Debian and derivatives shipping the debian-installer;
+   - **Ubuntu autoinstall (Subiquity)** — Ubuntu server 20.04+ ISOs;
+   - **RHEL / Fedora kickstart** — RHEL, Rocky, Alma, CentOS Stream, Fedora;
+   - **Generic cloud-init (NoCloud seed)** — custom ISOs that honor cloud-init.
+3. Either fill the template fields (user account, password, timezone; hostname defaults to the
+   VM name) or enable **Provide my own answer file** and paste a complete preseed.cfg / ks.cfg /
+   user-data. **Preview answer file** renders exactly what will be shipped.
+4. Click **Start unattended install**. What happens next:
+   - Debian/RHEL profiles are *remastered*: the answer file is added to the ISO and the GRUB
+     configuration gains the unattended kernel arguments plus a 10-second default boot. The
+     original ISO stays untouched; a derived `<iso>-<profile>-auto` volume is created instead.
+   - Ubuntu/generic profiles keep the installer ISO untouched and attach a generated NoCloud
+     seed ISO (`cidata-<vm>`) as a second media.
+5. Watch the progress on the **Remote desktop** — the installer runs from boot to finish with
+   no input. The patched boot menu boots itself after 10 seconds:
+
+   ![GRUB menu of the remastered Debian installer, booting the default entry automatically](images/iso/unattended-grub-menu.png)
+
+   When it completes, the VM powers off, Fleet automatically detaches the installation media
+   and deletes the derived volumes (including the answer-file copies), and you can simply
+   start the VM to boot the installed system.
+
+   ![Debian installer running unattended: installing the base system](images/iso/unattended-installing.png)
+
+Notes and requirements:
+
+- Unattended install is **fully self-contained**: everything runs inside Fleet and the cluster.
+  No external downloader, artifact service, or internet access is required — it works in isolated
+  cluster networks. Images only need to be present in the asset library (they can be uploaded
+  from a local file, so an external download helper is optional and never a prerequisite).
+- **xorriso** must be installed on the fleet server (`apt install xorriso`); it remasters the
+  installer ISO and builds the seed media. The scratch directory `unattended.work_dir`
+  (default `data/unattended` relative to the server working directory) needs several GB free
+  for large ISOs.
+- The remaster runs on the cluster member that stores the ISO; the VM is created on the same
+  member.
+- Debian/RHEL remaster profiles carry the answer file inside the derived ISO — treat those
+  volumes like any media containing credentials. They are deleted automatically after the
+  install; if the watch window (6 h) expires, detach the media and delete the derived volume
+  from the storage panel.
+- Generic NoCloud installs (custom ISOs) have no deterministic "finished" signal; media stays
+  attached until you detach it or the watch window expires.
+
 ISO files live in the storage pool and can be deleted from the list at any time.
 
 ## Create an instance

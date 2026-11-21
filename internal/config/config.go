@@ -26,8 +26,20 @@ type Config struct {
 	Metrics     MetricsConfig `yaml:"metrics"`
 	HA          HAConfig      `yaml:"ha"`
 	Mesh        MeshConfig    `yaml:"mesh"`
+	Unattended  Unattended    `yaml:"unattended"`
 	LocalMember string        `yaml:"local_member"`
 	Clusters    []Cluster     `yaml:"clusters"`
+}
+
+// Unattended configures the unattended OS installation pipeline. The work
+// directory holds temporary ISO images while the installer media is
+// remastered; it must be on a writable path of the fleet server (several GB
+// for large ISOs).
+type Unattended struct {
+	WorkDir string `yaml:"work_dir"`
+	// XorrisoPath is the xorriso executable used to remaster installer
+	// ISOs and build NoCloud seed media. Empty resolves xorriso via PATH.
+	XorrisoPath string `yaml:"xorriso_path"`
 }
 
 // MeshConfig configures the Raft center mesh. A healthy deployment has an odd
@@ -291,6 +303,13 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Database.Driver == "" {
 		c.Database.Driver = "sqlite"
+	}
+	c.Unattended.XorrisoPath = strings.TrimSpace(c.Unattended.XorrisoPath)
+	if c.Unattended.XorrisoPath == "" {
+		c.Unattended.XorrisoPath = "xorriso"
+	}
+	if strings.TrimSpace(c.Unattended.WorkDir) == "" {
+		c.Unattended.WorkDir = filepath.Join("data", "unattended")
 	}
 	if c.NodeAccess.SSHPort == 0 {
 		c.NodeAccess.SSHPort = 22

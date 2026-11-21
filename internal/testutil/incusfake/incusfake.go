@@ -117,9 +117,13 @@ type Server struct {
 	RemoteOperation   *RemoteOperation
 	Operation         *Operation
 	Disconnects       int
+	// ISOExportBytes is served as the raw volume backup payload for
+	// GetStorageVolumeBackupFile (used by the unattended install tests).
+	ISOExportBytes []byte
 
 	mu              sync.Mutex
 	calls           []string
+	backupExports   []BackupExportArgs
 	copyArgs        []*incus.InstanceCopyArgs
 	createArgs      []api.InstancesPost
 	updateArgs      []UpdateInstanceArgs
@@ -1106,6 +1110,66 @@ func (s *Server) DeleteStoragePoolVolume(pool string, volType string, name strin
 	s.mu.Unlock()
 
 	return s.DeleteVolumeErr
+}
+
+// BackupExportArgs records one volume backup export request.
+type BackupExportArgs struct {
+	Pool   string
+	Volume string
+}
+
+// CreateStorageVolumeBackup implements clusters.InstanceServer.
+func (s *Server) CreateStorageVolumeBackup(pool string, volName string, _ api.StorageVolumeBackupsPost) (incus.Operation, error) {
+	s.record("CreateStorageVolumeBackup:" + pool + "/" + volName)
+
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// GetStorageVolumeBackupFile implements clusters.InstanceServer. The served
+// bytes come from ISOExportBytes.
+func (s *Server) GetStorageVolumeBackupFile(pool string, volName string, name string, req *incus.BackupFileRequest) (*incus.BackupFileResponse, error) {
+	s.record("GetStorageVolumeBackupFile:" + pool + "/" + volName + "/" + name)
+
+	s.mu.Lock()
+	s.backupExports = append(s.backupExports, BackupExportArgs{Pool: pool, Volume: volName})
+	s.mu.Unlock()
+
+	if req == nil || req.BackupFile == nil {
+		return nil, fmt.Errorf("incusfake: BackupFileRequest.BackupFile is required")
+	}
+
+	size, err := io.Copy(req.BackupFile, bytes.NewReader(s.ISOExportBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	return &incus.BackupFileResponse{Size: size}, nil
+}
+
+// DeleteStorageVolumeBackup implements clusters.InstanceServer.
+func (s *Server) DeleteStorageVolumeBackup(pool string, volName string, name string) (incus.Operation, error) {
+	s.record("DeleteStorageVolumeBackup:" + pool + "/" + volName + "/" + name)
+
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// ExportBackupArgs returns the volume backup export calls recorded so far.
+func (s *Server) ExportBackupArgs() []BackupExportArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]BackupExportArgs, 0, len(s.backupExports))
+	out = append(out, s.backupExports...)
+
+	return out
 }
 
 // GetNetworkNames implements clusters.InstanceServer.

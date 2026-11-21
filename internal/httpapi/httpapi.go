@@ -244,6 +244,8 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /api/v1/clusters/{cluster}/iso", a.requireWriter(http.HandlerFunc(a.importISO)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/iso/{pool}/{name}", a.requireWriter(http.HandlerFunc(a.deleteISO)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/iso/{pool}/{name}/launch", a.requireWriter(http.HandlerFunc(a.launchFromISO)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/iso/{pool}/{name}/launch-unattended", a.requireWriter(http.HandlerFunc(a.launchUnattended)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/iso/{pool}/{name}/launch-unattended/preview", a.requireWriter(http.HandlerFunc(a.previewUnattendedAnswer)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/ops", a.requireWriter(http.HandlerFunc(a.runInstanceOps)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/agent/install", a.requireWriter(http.HandlerFunc(a.installGuestAgent)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/instances/{instance}/rebuild", a.requireWriter(http.HandlerFunc(a.rebuildInstance)))

@@ -69,6 +69,13 @@ async function openSession(): Promise<void> {
 
 async function mountTerminal(): Promise<boolean> {
   for (let attempt = 0; attempt < 30; attempt++) {
+    // The retry timers can outlive the environment (dialog closed, or in
+    // tests the document torn down after the test finished) — bail out
+    // instead of raising an unhandled rejection from a timer.
+    if (typeof document === 'undefined') {
+      return false
+    }
+
     const host = document.getElementById('terminal-host')
     if (host) {
       term = new Terminal({ convertEol: true, fontSize: 12 })

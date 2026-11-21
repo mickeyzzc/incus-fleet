@@ -100,6 +100,8 @@ vi.mock('@/api', async (importOriginal) => {
       importISO: vi.fn(),
       deleteISO: vi.fn(),
       launchFromISO: vi.fn(),
+      previewUnattendedAnswer: vi.fn(),
+      launchUnattended: vi.fn(),
       runOps: vi.fn(),
       rebuildInstance: vi.fn(),
       cloneInstance: vi.fn(),
