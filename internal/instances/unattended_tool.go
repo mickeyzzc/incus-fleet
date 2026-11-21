@@ -176,28 +176,20 @@ func appendInitrdSeed(answerName, content string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// writeCpioEntry writes one file in the cpio "newc" format. Field values
-// are 8-hex-digit big-endian numbers; name and data are padded to 4 bytes.
+// writeCpioEntry writes one file in the cpio "newc" format: a 6-byte magic
+// followed by 13 8-hex-digit fields (110 bytes), the name padded to 4 bytes
+// and the data padded to 4 bytes.
 func writeCpioEntry(w *bytes.Buffer, name string, data []byte) error {
 	if strings.Contains(name, "\x00") || name == "" {
 		return fmt.Errorf("%w: invalid cpio entry name", ErrUnattended)
 	}
 
-	header := func(values ...int) string {
-		out := ""
-		for _, v := range values {
-			out += fmt.Sprintf("%08X", v)
-		}
-
-		return out
-	}
-
-	entry := header(
-		0x070701, // magic: newc
+	fields := fmt.Sprintf("%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X",
 		1,        // ino
 		0o100644, // mode: regular file
 		0,        // uid
 		0,        // gid
+		1,        // nlink
 		0,        // mtime
 		len(data),
 		0, // devmajor
@@ -207,7 +199,9 @@ func writeCpioEntry(w *bytes.Buffer, name string, data []byte) error {
 		len(name)+1,
 		0, // check
 	)
-	w.WriteString(entry)
+
+	w.WriteString("070701")
+	w.WriteString(fields)
 	w.WriteString(name)
 	w.WriteByte(0)
 
@@ -226,17 +220,16 @@ func writeCpioEntry(w *bytes.Buffer, name string, data []byte) error {
 func writeCpioTrailer(w *bytes.Buffer) error {
 	name := "TRAILER!!!"
 
-	header := func(values ...int) string {
-		out := ""
-		for _, v := range values {
-			out += fmt.Sprintf("%08X", v)
-		}
+	fields := fmt.Sprintf("%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X",
+		0, 0, 0, 0,
+		1, // nlink
+		0, 0, 0, 0, 0, 0,
+		len(name)+1,
+		0,
+	)
 
-		return out
-	}
-
-	entry := header(0x070701, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, len(name)+1, 0)
-	w.WriteString(entry)
+	w.WriteString("070701")
+	w.WriteString(fields)
 	w.WriteString(name)
 	w.WriteByte(0)
 
