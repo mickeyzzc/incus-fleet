@@ -50,7 +50,7 @@ func (t *stubISOTool) Extract(_ context.Context, isoPath, isoFilePath, destPath 
 	// The initrd is binary and lives in a sidecar after the rebuild: the
 	// text "image" cannot carry its bytes next to the markers. The original
 	// is a real gzip stream so the multistream round trip stays valid.
-	if isoFilePath == "/install.amd/initrd.gz" {
+	if strings.HasSuffix(isoFilePath, ".gz") {
 		if strings.Contains(content, "[rebuilt]") && t.lastInitrd != nil {
 			if err := os.WriteFile(destPath, t.lastInitrd, 0o600); err != nil {
 				return "", err

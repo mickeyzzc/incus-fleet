@@ -148,14 +148,16 @@ func BootArgs(p Profile) string {
 	}
 }
 
-// InitrdPath is the installer initrd to patch for profiles that carry their
-// answer file inside the initramfs (empty for the others).
-func InitrdPath(p Profile) string {
+// InitrdPaths are the installer initrds to patch for profiles that carry
+// their answer file inside the initramfs. Debian ships two: the text-mode
+// installer and the GTK one used by the default (Graphical install) boot
+// entry - both must carry the seed.
+func InitrdPaths(p Profile) []string {
 	switch p {
 	case ProfileDebianPreseed:
-		return "/install.amd/initrd.gz"
+		return []string{"/install.amd/gtk/initrd.gz", "/install.amd/initrd.gz"}
 	default:
-		return ""
+		return nil
 	}
 }
 
