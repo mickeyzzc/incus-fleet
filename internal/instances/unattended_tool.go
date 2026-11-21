@@ -68,9 +68,12 @@ func (t *xorrisoTool) Extract(ctx context.Context, isoPath, isoFilePath, destPat
 }
 
 // Rebuild clones src into dst while updating boot configurations and adding
-// one extra file at the ISO root.
+// one extra file at the ISO root. -boot_image any replay re-creates the
+// boot catalog (El Torito BIOS+EFI entries) from the loaded image: a plain
+// clone of Debian's isohybrid images loses the catalog and the firmware
+// then reports "UEFI QEMU QEMU CD-ROM ... Not Found".
 func (t *xorrisoTool) Rebuild(ctx context.Context, srcPath, dstPath string, patched map[string]string, extraPath string) error {
-	args := []string{"-indev", srcPath, "-outdev", dstPath}
+	args := []string{"-indev", srcPath, "-outdev", dstPath, "-boot_image", "any", "replay"}
 	for isoPath, localPath := range patched {
 		args = append(args, "-update", localPath, isoPath)
 	}
