@@ -557,7 +557,8 @@ mod platform {
                     // The BPF map already attributed this event to an instance.
                     continue;
                 }
-                if let (Some((name, kind)), Ok(mut counts)) = (instance_from_proc(pid), extra.lock())
+                if let (Some((name, kind)), Ok(mut counts)) =
+                    (instance_from_proc(pid), extra.lock())
                 {
                     *counts.entry((name, kind.to_string())).or_insert(0) += 1;
                 }
