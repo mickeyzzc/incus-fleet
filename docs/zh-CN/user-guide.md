@@ -211,7 +211,10 @@ fleet 支持上传 ISO 安装镜像(如 Debian/Ubuntu/CentOS 官方安装盘),�
 - 通用 NoCloud(自定义 ISO)没有确定的"安装完成"信号;介质会一直挂着,直到手动卸载
   或看护窗口过期。
 
-ISO 镜像保存在存储池中,可随时在列表中删除。
+ISO 镜像保存在存储池中,可随时在列表中删除。下载好的安装镜像(例如当前 Debian netinst 与
+Arch Linux ISO)上传后会出现在共享资产库中:
+
+![共享资产库中已导入的安装 ISO](images/iso/asset-library-isos.png)
 
 ## 创建实例
 

@@ -241,7 +241,11 @@ Notes and requirements:
 - Generic NoCloud installs (custom ISOs) have no deterministic "finished" signal; media stays
   attached until you detach it or the watch window expires.
 
-ISO files live in the storage pool and can be deleted from the list at any time.
+ISO files live in the storage pool and can be deleted from the list at any time. Downloaded
+installer images (for example the current Debian netinst and Arch Linux ISOs) appear in the
+shared asset library once uploaded:
+
+![Imported installer ISOs in the shared asset library](images/iso/asset-library-isos.png)
 
 ## Create an instance
 
