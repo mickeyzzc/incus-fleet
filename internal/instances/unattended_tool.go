@@ -47,9 +47,15 @@ func (t *xorrisoTool) Available() error {
 }
 
 // Extract pulls one file out of an ISO image via xorriso osirrox.
+// Rebuilt images can carry an isohybrid MBR whose partition table exceeds
+// the cloned file size; xorriso then exits with a tolerated SORRY even
+// though the extraction succeeded. The extracted file is the authority.
 func (t *xorrisoTool) Extract(ctx context.Context, isoPath, isoFilePath, destPath string) (string, error) {
 	cmd := exec.CommandContext(ctx, t.bin, "-osirrox", "on", "-indev", isoPath, "-extract", isoFilePath, destPath) //nolint:gosec // tool path is configured, paths are inside the controlled work dir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, cmdErr := cmd.CombinedOutput()
+
+	info, statErr := os.Stat(destPath)
+	if cmdErr != nil && (statErr != nil || info == nil || info.Size() == 0) {
 		return "", fmt.Errorf("%w: extract %s from iso: %s", ErrUnattended, isoFilePath, combinedTail(out))
 	}
 
