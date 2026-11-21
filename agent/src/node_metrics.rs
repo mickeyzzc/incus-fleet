@@ -231,7 +231,6 @@ mod tests {
 
 #[cfg(test)]
 mod integration {
-    use super::*;
     use crate::metrics::Collector;
 
     #[test]
