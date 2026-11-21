@@ -20,7 +20,7 @@ func TestRepackInitrdAddsSeed(t *testing.T) {
 	var src bytes.Buffer
 	zw := gzip.NewWriter(&src)
 	var cpio bytes.Buffer
-	if err := writeCpioEntry(&cpio, "readme.txt", []byte("source initrd")); err != nil {
+	if err := writeCpioEntry(&cpio, "readme.txt", []byte("source initrd"), 0o100644); err != nil {
 		t.Fatal(err)
 	}
 	if err := writeCpioTrailer(&cpio); err != nil {

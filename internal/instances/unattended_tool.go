@@ -171,7 +171,7 @@ func repackInitrd(initrd []byte, answerName string, answer []byte) ([]byte, erro
 	if err := writeCpioEntries(&out, plain); err != nil {
 		return nil, err
 	}
-	if err := writeCpioEntry(&out, answerName, answer); err != nil {
+	if err := writeCpioEntry(&out, answerName, answer, 0o100644); err != nil {
 		return nil, err
 	}
 	if err := writeCpioTrailer(&out); err != nil {
@@ -225,6 +225,10 @@ func writeCpioEntries(out *bytes.Buffer, plain []byte) error {
 		if err != nil {
 			return err
 		}
+		mode, modeErr := parseHexField(header[6:], 1) // c_mode is field 1
+		if modeErr != nil {
+			return modeErr
+		}
 		nameSize, err := parseHexField(header[6:], 11) // c_namesize is field 11
 		if err != nil {
 			return err
@@ -247,7 +251,7 @@ func writeCpioEntries(out *bytes.Buffer, plain []byte) error {
 			return fmt.Errorf("%w: initrd cpio data truncated for %s", ErrUnattended, name)
 		}
 
-		if err := writeCpioEntry(out, name, plain[dataStart:dataEnd]); err != nil {
+		if err := writeCpioEntry(out, name, plain[dataStart:dataEnd], mode); err != nil {
 			return err
 		}
 
@@ -262,19 +266,21 @@ func align4(n int) int {
 
 // writeCpioEntry writes one file in the cpio "newc" format: a 6-byte magic
 // followed by 13 8-hex-digit fields (110 bytes), the name padded to 4 bytes
-// and the data padded to 4 bytes.
-func writeCpioEntry(w *bytes.Buffer, name string, data []byte) error {
+// and the data padded to 4 bytes. mode is caller-supplied so repacking
+// preserves the original initramfs metadata (losing the execute bit on
+// /init bricks the boot with error -13).
+func writeCpioEntry(w *bytes.Buffer, name string, data []byte, mode int64) error {
 	if strings.Contains(name, "\x00") || name == "" {
 		return fmt.Errorf("%w: invalid cpio entry name", ErrUnattended)
 	}
 
 	fields := fmt.Sprintf("%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X",
-		1,        // ino
-		0o100644, // mode: regular file
-		0,        // uid
-		0,        // gid
-		1,        // nlink
-		0,        // mtime
+		1,    // ino
+		mode,
+		0,    // uid
+		0,    // gid
+		1,    // nlink
+		0,    // mtime
 		len(data),
 		0, // devmajor
 		0, // devminor

@@ -61,7 +61,7 @@ func (t *stubISOTool) Extract(_ context.Context, isoPath, isoFilePath, destPath 
 
 		var buf bytes.Buffer
 		var cpio bytes.Buffer
-		if err := writeCpioEntry(&cpio, "readme.txt", []byte("source initrd")); err != nil {
+		if err := writeCpioEntry(&cpio, "readme.txt", []byte("source initrd"), 0o100644); err != nil {
 			return "", err
 		}
 		if err := writeCpioTrailer(&cpio); err != nil {
