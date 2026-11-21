@@ -7,8 +7,8 @@ use tracing::warn;
 
 use crate::cgroup;
 use crate::ebpf;
-use crate::node_metrics::NodeMetrics;
 use crate::histogram::Histogram;
+use crate::node_metrics::NodeMetrics;
 use crate::proto::v1::{MetricType, Sample, Series, TelemetryBatch};
 
 /// Collector keeps the previous CPU counters needed for a rate.
