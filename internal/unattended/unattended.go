@@ -291,6 +291,9 @@ func renderPreseed(spec AnswerSpec) string {
 		"### Finishing up",
 		"d-i finish-install/keep-consoles boolean false",
 		"d-i finish-install/reboot_in_progress note",
+		"# Power off instead of rebooting when done: the fleet watches for the",
+		"# poweroff to detach the installation media (Incus forbids -no-reboot).",
+		"d-i debian-installer/exit/poweroff boolean true",
 		"",
 	)
 	return strings.Join(lines, "\n")
@@ -315,7 +318,9 @@ func renderKickstart(spec AnswerSpec) string {
 		"bootloader --location=mbr",
 		"clearpart --all --initlabel",
 		"autopart --type=plain",
-		"reboot",
+		"# Power off instead of rebooting when done: the fleet watches for the",
+		"# poweroff to detach the installation media.",
+		"poweroff",
 		"%packages",
 		"@core",
 		"openssh-server",
@@ -348,6 +353,7 @@ identity:
 ssh:
   install-server: true
   allow-pw: true
+shutdown: poweroff
 storage:
   layout:
     name: direct

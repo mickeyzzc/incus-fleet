@@ -417,9 +417,9 @@ func (s *Service) exportISOVolume(ctx context.Context, client clusters.InstanceS
 // launchUnattendedVM creates the VM on the same member as its installation
 // media. The installer ISO (remastered when the profile requires it) boots
 // first; the NoCloud seed, when present, is attached as a second read-only
-// media. -no-reboot makes the installer's final reboot power the VM off
-// instead of looping back into the installer, which is the deterministic
-// signal for the media watcher.
+// media. The installer profiles power the VM off when the installation
+// finishes (that poweroff is the media watcher signal; -no-reboot cannot be
+// used because Incus resets the VM at start and owns the QMP actions).
 func (s *Service) launchUnattendedVM(ctx context.Context, clusterName, member, pool, installerISO, seedISO string, req UnattendedRequest) (Detail, error) {
 	client, err := s.client(clusterName)
 	if err != nil {
@@ -487,10 +487,12 @@ func (s *Service) launchUnattendedVM(ctx context.Context, clusterName, member, p
 		start = *req.Start
 	}
 
-	// Same console/secure-boot arming as LaunchFromISO, plus -no-reboot so
-	// the finished install powers off instead of re-entering the installer.
+	// Same console/secure-boot arming as LaunchFromISO. No -no-reboot:
+	// Incus resets the VM at start and owns the QMP actions, so the flag
+	// breaks startup. The installer profiles power off when finished
+	// instead — that poweroff is the media watcher signal.
 	config := api.ConfigMap{}
-	config["raw.qemu"] = fmt.Sprintf("%s unix=off,port=%d,disable-ticketing=on,addr=%s\n-no-reboot",
+	config["raw.qemu"] = fmt.Sprintf("%s unix=off,port=%d,disable-ticketing=on,addr=%s",
 		spiceArgMarker, SPICEPortFor(req.Name), spiceListenAddr)
 	config["security.secureboot"] = "false"
 
@@ -520,10 +522,11 @@ func (s *Service) launchUnattendedVM(ctx context.Context, clusterName, member, p
 }
 
 // watchUnattendedInstall polls the instance until the installer finishes
-// (the VM stops, thanks to -no-reboot) and then detaches the installation
-// media and deletes the created volumes. If the instance is deleted first,
-// the volumes are still cleaned up. The watch gives up after 6 hours and
-// leaves the media for manual removal.
+// (the VM powers off; the installer profiles configure poweroff instead of
+// reboot) and then detaches the installation media and deletes the created
+// volumes. If the instance is deleted first, the volumes are still cleaned
+// up. The watch gives up after 6 hours and leaves the media for manual
+// removal.
 func (s *Service) watchUnattendedInstall(clusterName, instance, pool string, media []UnattendedMedia) {
 	if len(media) == 0 {
 		return

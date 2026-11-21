@@ -160,8 +160,10 @@ func TestLaunchUnattendedPreseedRemaster(t *testing.T) {
 	if creates[0].Name != "web-01" || creates[0].Type != api.InstanceTypeVM {
 		t.Fatalf("created = %#v", creates[0])
 	}
-	if !strings.Contains(creates[0].Config["raw.qemu"], "-no-reboot") {
-		t.Errorf("raw.qemu missing -no-reboot: %q", creates[0].Config["raw.qemu"])
+	if strings.Contains(creates[0].Config["raw.qemu"], "-no-reboot") {
+		// Incus resets the VM at start and owns the QMP actions; the flag
+		// breaks VM startup ("Failed setting reboot action").
+		t.Errorf("raw.qemu must not carry -no-reboot: %q", creates[0].Config["raw.qemu"])
 	}
 	if creates[0].Config["security.secureboot"] != "false" {
 		t.Errorf("secureboot = %q", creates[0].Config["security.secureboot"])
