@@ -145,10 +145,13 @@ func BootArgs(p Profile) string {
 }
 
 // PatchBootConfig injects the profile's unattended arguments into a GRUB
-// boot configuration. Only kernel lines matching the profile's loader path
-// are patched; lines already carrying unattended arguments are left
-// untouched so the function is idempotent. It returns the patched
-// configuration and the number of kernel lines changed.
+// boot configuration. Kernel lines matching the profile's loader path gain
+// the unattended arguments, and a default entry with a short timeout is
+// forced at the top so the menu boots without keyboard input (installer
+// ISOs ship GRUB menus that wait for Enter). Lines already carrying
+// unattended arguments are left untouched so the function is idempotent.
+// It returns the patched configuration and the number of kernel lines
+// changed.
 func PatchBootConfig(p Profile, content string) (string, int, error) {
 	args := BootArgs(p)
 	if args == "" {
@@ -197,7 +200,12 @@ func PatchBootConfig(p Profile, content string) (string, int, error) {
 		return content, 0, fmt.Errorf("unattended: no %s kernel lines found to patch", string(p))
 	}
 
-	return strings.Join(lines, "\n"), changed, nil
+	// Boot the default entry automatically: installer menus otherwise wait
+	// for keyboard input forever.
+	header := []string{"set default=0", "set timeout=10", ""}
+	out := append(header, lines...)
+
+	return strings.Join(out, "\n"), changed, nil
 }
 
 // RenderSeedFiles produces the NoCloud seed media files for profiles that
