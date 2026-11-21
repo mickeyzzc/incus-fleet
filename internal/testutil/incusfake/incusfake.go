@@ -1119,7 +1119,7 @@ type BackupExportArgs struct {
 }
 
 // CreateStorageVolumeBackup implements clusters.InstanceServer.
-func (s *Server) CreateStorageVolumeBackup(pool string, volName string, backup api.StorageVolumeBackupsPost) (incus.Operation, error) {
+func (s *Server) CreateStorageVolumeBackup(pool string, volName string, _ api.StorageVolumeBackupsPost) (incus.Operation, error) {
 	s.record("CreateStorageVolumeBackup:" + pool + "/" + volName)
 
 	if s.Operation != nil {

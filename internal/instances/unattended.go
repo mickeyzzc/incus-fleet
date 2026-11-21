@@ -231,7 +231,7 @@ func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member,
 	if err != nil {
 		return "", fmt.Errorf("%w: create work dir: %w", ErrUnattended, err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	srcPath := filepath.Join(dir, "src.iso")
 	if err := s.exportISOVolume(ctx, client, pool, isoName, srcPath); err != nil {
@@ -295,7 +295,7 @@ func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member,
 		}
 
 		patchedPath := filepath.Join(dir, fmt.Sprintf("initrd-patched-%d.gz", idx))
-		if err := os.WriteFile(patchedPath, patchedInitrd, 0o600); err != nil {
+		if err := os.WriteFile(patchedPath, patchedInitrd, 0o600); err != nil { //nolint:gosec // G703: path built inside the controlled work dir
 			return "", fmt.Errorf("%w: write patched initrd: %w", ErrUnattended, err)
 		}
 		patched[initrdPath] = patchedPath
@@ -407,7 +407,7 @@ func (s *Service) buildAndImportSeedISO(ctx context.Context, clusterName, member
 	if err != nil {
 		return "", fmt.Errorf("%w: create seed work dir: %w", ErrUnattended, err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	seedPath, err := s.iso.BuildSeed(ctx, dir, files)
 	if err != nil {

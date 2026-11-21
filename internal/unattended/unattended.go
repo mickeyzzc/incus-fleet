@@ -230,7 +230,9 @@ func PatchBootConfig(p Profile, content string) (string, int, error) {
 	// Boot the default entry automatically: installer menus otherwise wait
 	// for keyboard input forever.
 	header := []string{"set default=0", "set timeout=10", ""}
-	out := append(header, lines...)
+	out := make([]string, 0, len(header)+len(lines))
+	out = append(out, header...)
+	out = append(out, lines...)
 
 	return strings.Join(out, "\n"), changed, nil
 }

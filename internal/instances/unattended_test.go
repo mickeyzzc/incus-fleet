@@ -40,7 +40,7 @@ func (t *stubISOTool) Extract(_ context.Context, isoPath, isoFilePath, destPath 
 		return "", t.extractErr
 	}
 
-	data, err := os.ReadFile(isoPath)
+	data, err := os.ReadFile(isoPath) //nolint:gosec // G304: test fixture path
 	if err != nil {
 		return "", err
 	}
@@ -109,7 +109,7 @@ func (t *stubISOTool) Rebuild(_ context.Context, srcPath, dstPath string, patche
 	var out strings.Builder
 	out.WriteString("[rebuilt]\n")
 	for isoPath, localPath := range patched {
-		content, err := os.ReadFile(localPath)
+		content, err := os.ReadFile(localPath) //nolint:gosec // G304: test fixture path
 		if err != nil {
 			return err
 		}
@@ -119,7 +119,7 @@ func (t *stubISOTool) Rebuild(_ context.Context, srcPath, dstPath string, patche
 			fmt.Fprintf(&out, "[%s]\n%s", isoPath, content)
 		}
 	}
-	answer, err := os.ReadFile(extraPath)
+	answer, err := os.ReadFile(extraPath) //nolint:gosec // G304: test fixture path
 	if err != nil {
 		return err
 	}
