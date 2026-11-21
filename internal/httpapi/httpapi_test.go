@@ -19,6 +19,7 @@ import (
 
 	"github.com/lxc/incus/v7/shared/api"
 
+	"github.com/mickeyzzc/incus-fleet/internal/answerprofiles"
 	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
@@ -107,16 +108,17 @@ func newAPIFixtureWithDeps(t *testing.T, source, target *incusfake.Server, authe
 		authenticator = auth.New("secret", time.Hour)
 	}
 	deps := Deps{
-		Clusters:   manager,
-		Instances:  instances.New(manager),
-		Assets:     assets.New(st, instances.New(manager)),
-		Migrations: migrationService,
-		Store:      st,
-		NodeNet:    nodeAccess,
-		Auth:       authenticator,
-		StaticFS:   staticFS,
-		Logger:     logger,
-		Version:    "test",
+		Clusters:       manager,
+		Instances:      instances.New(manager),
+		Assets:         assets.New(st, instances.New(manager)),
+		AnswerProfiles: answerprofiles.New(st),
+		Migrations:     migrationService,
+		Store:          st,
+		NodeNet:        nodeAccess,
+		Auth:           authenticator,
+		StaticFS:       staticFS,
+		Logger:         logger,
+		Version:        "test",
 	}
 	if mutate != nil {
 		mutate(&deps)

@@ -40,11 +40,15 @@ type UnattendedRequest struct {
 	Profile string `json:"profile"`
 	// AnswerFile overrides the built-in template with operator-provided
 	// content (preseed.cfg / ks.cfg / user-data).
-	AnswerFile string                `json:"answer_file,omitempty"`
-	Spec       unattended.AnswerSpec `json:"spec,omitempty"`
-	Network    string                `json:"network,omitempty"`
-	RootDisk   string                `json:"root_disk,omitempty"`
-	Start      *bool                 `json:"start,omitempty"`
+	AnswerFile string `json:"answer_file,omitempty"`
+	// AnswerProfileID selects a stored answer configuration. When set, the
+	// HTTP layer resolves it (or the profile's default) into AnswerFile/Spec
+	// before launching.
+	AnswerProfileID string                `json:"answer_profile_id,omitempty"`
+	Spec            unattended.AnswerSpec `json:"spec,omitempty"`
+	Network         string                `json:"network,omitempty"`
+	RootDisk        string                `json:"root_disk,omitempty"`
+	Start           *bool                 `json:"start,omitempty"`
 }
 
 // UnattendedLaunch reports the artifacts and watch state of one unattended

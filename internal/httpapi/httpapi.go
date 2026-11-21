@@ -17,17 +17,18 @@ import (
 	"time"
 
 	"github.com/mickeyzzc/incus-fleet/internal/agentinstall"
+	"github.com/mickeyzzc/incus-fleet/internal/answerprofiles"
 	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/console"
+	"github.com/mickeyzzc/incus-fleet/internal/guestagent"
 	"github.com/mickeyzzc/incus-fleet/internal/hostops"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
 	"github.com/mickeyzzc/incus-fleet/internal/mesh"
 	"github.com/mickeyzzc/incus-fleet/internal/metricsquery"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
 	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
-	"github.com/mickeyzzc/incus-fleet/internal/guestagent"
 	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
@@ -43,26 +44,27 @@ const (
 
 // Deps are the dependencies of the HTTP API.
 type Deps struct {
-	Clusters     *clusters.Manager
-	Instances    *instances.Service
-	Assets       *assets.Service
-	Migrations   *migrations.Service
-	Store        *store.SQLStore
-	NodeNet      *nodeaccess.Service
-	NodeJoin     *nodejoin.Service
-	GuestAgent   *guestagent.Service
-	Agent        AgentDispatcher
-	AgentInstall *agentinstall.Handler
-	Mesh         *mesh.Mesh
-	Bootstrap    BootstrapSigner
-	Telemetry    *telemetry.Store
-	MetricsSD    MetricsSDConfig
-	MetricsQuery *metricsquery.Proxy
-	CertIssuer   CertificateIssuer
-	Auth         *auth.Authenticator
-	StaticFS     fs.FS
-	Logger       *slog.Logger
-	Version      string
+	Clusters       *clusters.Manager
+	Instances      *instances.Service
+	Assets         *assets.Service
+	AnswerProfiles *answerprofiles.Service
+	Migrations     *migrations.Service
+	Store          *store.SQLStore
+	NodeNet        *nodeaccess.Service
+	NodeJoin       *nodejoin.Service
+	GuestAgent     *guestagent.Service
+	Agent          AgentDispatcher
+	AgentInstall   *agentinstall.Handler
+	Mesh           *mesh.Mesh
+	Bootstrap      BootstrapSigner
+	Telemetry      *telemetry.Store
+	MetricsSD      MetricsSDConfig
+	MetricsQuery   *metricsquery.Proxy
+	CertIssuer     CertificateIssuer
+	Auth           *auth.Authenticator
+	StaticFS       fs.FS
+	Logger         *slog.Logger
+	Version        string
 	// DesktopRunner overrides the host-command backend of the graphical
 	// console. Production leaves it nil, which uses the nodeaccess SSH path.
 	DesktopRunner DesktopRunnerFunc
@@ -74,27 +76,28 @@ type DesktopRunnerFunc func(ctx context.Context, cluster, member string) (consol
 
 // API is the complete HTTP handler for incus-fleet.
 type API struct {
-	clusters     *clusters.Manager
-	instances    *instances.Service
-	assets       *assets.Service
-	migrations   *migrations.Service
-	store        *store.SQLStore
-	nodenet      *nodeaccess.Service
-	nodejoin     *nodejoin.Service
-	guestAgent   *guestagent.Service
-	agent        AgentDispatcher
-	agentInstall *agentinstall.Handler
-	mesh         *mesh.Mesh
-	bootstrap    BootstrapSigner
-	telemetry    *telemetry.Store
-	metricsSD    MetricsSDConfig
-	metricsQuery *metricsquery.Proxy
-	certIssuer   CertificateIssuer
-	auth         *auth.Authenticator
-	logger       *slog.Logger
-	version      string
-	static       fs.FS
-	desktopRun   DesktopRunnerFunc
+	clusters       *clusters.Manager
+	instances      *instances.Service
+	assets         *assets.Service
+	answerProfiles *answerprofiles.Service
+	migrations     *migrations.Service
+	store          *store.SQLStore
+	nodenet        *nodeaccess.Service
+	nodejoin       *nodejoin.Service
+	guestAgent     *guestagent.Service
+	agent          AgentDispatcher
+	agentInstall   *agentinstall.Handler
+	mesh           *mesh.Mesh
+	bootstrap      BootstrapSigner
+	telemetry      *telemetry.Store
+	metricsSD      MetricsSDConfig
+	metricsQuery   *metricsquery.Proxy
+	certIssuer     CertificateIssuer
+	auth           *auth.Authenticator
+	logger         *slog.Logger
+	version        string
+	static         fs.FS
+	desktopRun     DesktopRunnerFunc
 }
 
 // New builds the HTTP handler.
@@ -105,26 +108,27 @@ func New(deps Deps) *API {
 	}
 
 	api := &API{
-		clusters:     deps.Clusters,
-		instances:    deps.Instances,
-		assets:       deps.Assets,
-		migrations:   deps.Migrations,
-		store:        deps.Store,
-		nodenet:      deps.NodeNet,
-		nodejoin:     deps.NodeJoin,
-		guestAgent:   deps.GuestAgent,
-		agent:        deps.Agent,
-		agentInstall: deps.AgentInstall,
-		mesh:         deps.Mesh,
-		bootstrap:    deps.Bootstrap,
-		telemetry:    deps.Telemetry,
-		metricsSD:    deps.MetricsSD,
-		metricsQuery: deps.MetricsQuery,
-		certIssuer:   deps.CertIssuer,
-		auth:         deps.Auth,
-		logger:       logger,
-		version:      deps.Version,
-		desktopRun:   deps.DesktopRunner,
+		clusters:       deps.Clusters,
+		instances:      deps.Instances,
+		assets:         deps.Assets,
+		answerProfiles: deps.AnswerProfiles,
+		migrations:     deps.Migrations,
+		store:          deps.Store,
+		nodenet:        deps.NodeNet,
+		nodejoin:       deps.NodeJoin,
+		guestAgent:     deps.GuestAgent,
+		agent:          deps.Agent,
+		agentInstall:   deps.AgentInstall,
+		mesh:           deps.Mesh,
+		bootstrap:      deps.Bootstrap,
+		telemetry:      deps.Telemetry,
+		metricsSD:      deps.MetricsSD,
+		metricsQuery:   deps.MetricsQuery,
+		certIssuer:     deps.CertIssuer,
+		auth:           deps.Auth,
+		logger:         logger,
+		version:        deps.Version,
+		desktopRun:     deps.DesktopRunner,
 	}
 
 	if deps.StaticFS != nil {
@@ -237,6 +241,10 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /api/v1/scripts", a.requireWriter(http.HandlerFunc(a.createScript)))
 	mux.Handle("PATCH /api/v1/scripts/{id}", a.requireWriter(http.HandlerFunc(a.updateScript)))
 	mux.Handle("DELETE /api/v1/scripts/{id}", a.requireWriter(http.HandlerFunc(a.deleteScript)))
+	mux.Handle("GET /api/v1/answer-profiles", a.requireAuth(http.HandlerFunc(a.listAnswerProfiles)))
+	mux.Handle("POST /api/v1/answer-profiles", a.requireWriter(http.HandlerFunc(a.createAnswerProfile)))
+	mux.Handle("PATCH /api/v1/answer-profiles/{id}", a.requireWriter(http.HandlerFunc(a.updateAnswerProfile)))
+	mux.Handle("DELETE /api/v1/answer-profiles/{id}", a.requireWriter(http.HandlerFunc(a.deleteAnswerProfile)))
 	mux.Handle("POST /api/v1/batch/keys", a.requireWriter(http.HandlerFunc(a.batchKeys)))
 	mux.Handle("POST /api/v1/batch/scripts", a.requireWriter(http.HandlerFunc(a.batchScripts)))
 	mux.Handle("POST /api/v1/batch/power", a.requireWriter(http.HandlerFunc(a.batchPower)))

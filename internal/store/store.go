@@ -58,6 +58,12 @@ type Store interface {
 	GetScript(ctx context.Context, id string) (*Script, error)
 	UpdateScript(ctx context.Context, script *Script) error
 	DeleteScript(ctx context.Context, id string) error
+	CreateAnswerProfile(ctx context.Context, p *AnswerProfile) error
+	ListAnswerProfiles(ctx context.Context) ([]*AnswerProfile, error)
+	GetAnswerProfile(ctx context.Context, id string) (*AnswerProfile, error)
+	GetDefaultAnswerProfile(ctx context.Context, profile string) (*AnswerProfile, error)
+	UpdateAnswerProfile(ctx context.Context, p *AnswerProfile) error
+	DeleteAnswerProfile(ctx context.Context, id string) error
 	Ping(ctx context.Context) error
 	Close() error
 }

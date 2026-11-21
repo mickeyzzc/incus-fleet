@@ -1,12 +1,58 @@
 package httpapi
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/mickeyzzc/incus-fleet/internal/answerprofiles"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
+	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/unattended"
 )
+
+// applyAnswerProfile resolves a stored answer configuration into the request
+// when asked. An explicit id wins; with no answer content supplied at all the
+// installer profile's default is used. The caller falls back to the built-in
+// template when no configuration is found.
+func (a *API) applyAnswerProfile(r *http.Request, req *instances.UnattendedRequest) error {
+	if a.answerProfiles == nil {
+		return nil
+	}
+	profile := unattended.Profile(strings.TrimSpace(req.Profile))
+
+	hasAnswer := strings.TrimSpace(req.AnswerFile) != "" || answerSpecProvided(req.Spec)
+	explicit := strings.TrimSpace(req.AnswerProfileID) != ""
+	if !explicit && hasAnswer {
+		return nil // caller supplied content directly; no stored profile needed
+	}
+
+	p, err := a.answerProfiles.Resolve(r.Context(), req.AnswerProfileID, string(profile))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			if explicit {
+				return fmt.Errorf("%w: answer profile not found", instances.ErrInvalidRequest)
+			}
+			return nil // no default configured: built-in template
+		}
+		return err
+	}
+
+	if strings.TrimSpace(p.AnswerFile) != "" {
+		req.AnswerFile = p.AnswerFile
+	} else {
+		req.Spec = answerprofiles.ToSpec(p)
+	}
+	return nil
+}
+
+func answerSpecProvided(spec unattended.AnswerSpec) bool {
+	return strings.TrimSpace(spec.Hostname) != "" || strings.TrimSpace(spec.Username) != "" ||
+		strings.TrimSpace(spec.Password) != "" || strings.TrimSpace(spec.Timezone) != "" ||
+		strings.TrimSpace(spec.Disk) != "" || strings.TrimSpace(spec.Locale) != "" ||
+		strings.TrimSpace(spec.Keyboard) != ""
+}
 
 // listISOs lists installer ISO volumes stored on the cluster.
 func (a *API) listISOs(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +136,10 @@ func (a *API) previewUnattendedAnswer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	if err := a.applyAnswerProfile(r, &req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
 
 	content := strings.TrimSpace(req.AnswerFile)
 	if content == "" {
@@ -120,6 +170,10 @@ func (a *API) launchUnattended(w http.ResponseWriter, r *http.Request) {
 	var req instances.UnattendedRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := a.applyAnswerProfile(r, &req); err != nil {
+		a.serviceError(w, r, err)
 		return
 	}
 
