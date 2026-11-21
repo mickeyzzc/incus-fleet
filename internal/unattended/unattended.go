@@ -241,14 +241,23 @@ func PatchBootConfig(p Profile, content string) (string, int, error) {
 // consume a cidata media (autoinstall needs meta-data next to user-data).
 // Remaster profiles (preseed/kickstart) carry the answer file inside the
 // patched installer ISO and produce no seed files.
-func RenderSeedFiles(p Profile, spec AnswerSpec) ([]SeedFile, error) {
+//
+// answerOverride, when non-empty, replaces the rendered user-data content;
+// the operator's custom answer file must reach the seed media exactly as the
+// preview endpoint showed it. meta-data always comes from spec (the seed's
+// identity is independent of the answer file).
+func RenderSeedFiles(p Profile, spec AnswerSpec, answerOverride string) ([]SeedFile, error) {
 	if NeedsRemaster(p) {
 		return nil, nil
 	}
 
-	content, err := RenderAnswerFile(p, spec)
-	if err != nil {
-		return nil, err
+	content := strings.TrimSpace(answerOverride)
+	if content == "" {
+		rendered, err := RenderAnswerFile(p, spec)
+		if err != nil {
+			return nil, err
+		}
+		content = rendered
 	}
 	return []SeedFile{
 		{Name: "user-data", Content: content},

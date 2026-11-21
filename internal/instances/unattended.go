@@ -160,7 +160,11 @@ func (s *Service) LaunchUnattended(ctx context.Context, clusterName, pool, isoNa
 	}
 
 	var seedISO string
-	seedFiles, err := unattended.RenderSeedFiles(profile, req.Spec)
+	// Pass the operator's answer file through to the seed media, matching
+	// the content the preview endpoint showed. Without this the custom
+	// user-data was silently replaced by the built-in template on seed
+	// profiles (autoinstall/nocloud).
+	seedFiles, err := unattended.RenderSeedFiles(profile, req.Spec, req.AnswerFile)
 	if err != nil {
 		cleanup()
 		return Detail{}, UnattendedLaunch{}, err

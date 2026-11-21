@@ -31,6 +31,8 @@ type stubISOTool struct {
 	// lastInitrd carries the binary initrd bytes through the rebuild round
 	// trip (the text "image" cannot hold them next to the markers).
 	lastInitrd []byte
+	// lastSeedFiles records what the service asked to put on the seed media.
+	lastSeedFiles []unattended.SeedFile
 }
 
 func (t *stubISOTool) Available() error { return t.availableErr }
@@ -134,6 +136,7 @@ func (t *stubISOTool) BuildSeed(_ context.Context, dir string, files []unattende
 		return "", t.seedErr
 	}
 	t.seedCalls++
+	t.lastSeedFiles = append([]unattended.SeedFile(nil), files...)
 
 	var out strings.Builder
 	for _, file := range files {
@@ -276,6 +279,37 @@ func TestLaunchUnattendedNoCloudSeed(t *testing.T) {
 	}
 	if len(launch.Media) != 1 || !launch.Media[0].Seed {
 		t.Fatalf("media = %#v", launch.Media)
+	}
+}
+
+func TestLaunchUnattendedCustomAnswerReachesSeed(t *testing.T) {
+	source := &incusfake.Server{
+		PoolNames: []string{"default"},
+		Instance:  &api.Instance{Name: "u-custom"},
+		Volumes:   []api.StorageVolume{{Name: "ubuntu-24.04-live-server", Type: "custom", ContentType: "iso", Location: "n305-server"}},
+	}
+	tool := &stubISOTool{}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": source},
+		withIsoTool(tool),
+		withUnattendedWorkDirForTest(t),
+	)
+
+	custom := "#cloud-config\n# operator custom user-data\nhostname: my-node\n"
+	_, _, err := svc.LaunchUnattended(context.Background(), "c1", "default", "ubuntu-24.04-live-server", UnattendedRequest{
+		Name:       "u-custom",
+		Profile:    string(unattended.ProfileNoCloud),
+		AnswerFile: custom,
+		Spec:       unattended.AnswerSpec{Hostname: "different-template-host"},
+	})
+	if err != nil {
+		t.Fatalf("LaunchUnattended() error = %v", err)
+	}
+
+	if len(tool.lastSeedFiles) != 2 {
+		t.Fatalf("seed files = %#v", tool.lastSeedFiles)
+	}
+	if tool.lastSeedFiles[0].Name != "user-data" || tool.lastSeedFiles[0].Content != strings.TrimSpace(custom) {
+		t.Errorf("seed user-data = %q, want operator answer %q", tool.lastSeedFiles[0].Content, strings.TrimSpace(custom))
 	}
 }
 

@@ -136,7 +136,7 @@ func TestRenderAnswerFileAutoinstall(t *testing.T) {
 }
 
 func TestRenderSeedFiles(t *testing.T) {
-	files, err := RenderSeedFiles(ProfileUbuntuAutoinstall, AnswerSpec{Hostname: "u1"})
+	files, err := RenderSeedFiles(ProfileUbuntuAutoinstall, AnswerSpec{Hostname: "u1"}, "")
 	if err != nil {
 		t.Fatalf("RenderSeedFiles() error = %v", err)
 	}
@@ -147,7 +147,7 @@ func TestRenderSeedFiles(t *testing.T) {
 		t.Errorf("meta-data missing hostname: %q", files[1].Content)
 	}
 
-	files, err = RenderSeedFiles(ProfileDebianPreseed, AnswerSpec{})
+	files, err = RenderSeedFiles(ProfileDebianPreseed, AnswerSpec{}, "")
 	if err != nil {
 		t.Fatalf("RenderSeedFiles(preseed) error = %v", err)
 	}
@@ -255,5 +255,22 @@ func TestAnswerFileName(t *testing.T) {
 		if got := AnswerFileName(profile); got != want {
 			t.Errorf("AnswerFileName(%s) = %q, want %q", profile, got, want)
 		}
+	}
+}
+
+func TestRenderSeedFilesWithOverride(t *testing.T) {
+	override := "#cloud-config\n# operator supplied custom user-data\nhostname: custom-host\n"
+	files, err := RenderSeedFiles(ProfileUbuntuAutoinstall, AnswerSpec{Hostname: "template-host"}, override)
+	if err != nil {
+		t.Fatalf("RenderSeedFiles(override) error = %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("seed files = %#v", files)
+	}
+	if files[0].Name != "user-data" || files[0].Content != strings.TrimSpace(override) {
+		t.Errorf("user-data = %q, want operator override %q", files[0].Content, strings.TrimSpace(override))
+	}
+	if !strings.Contains(files[1].Content, "local-hostname: template-host") {
+		t.Errorf("meta-data should still use spec hostname: %q", files[1].Content)
 	}
 }
