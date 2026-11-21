@@ -1,6 +1,8 @@
 package instances
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -316,8 +318,16 @@ func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member,
 	}
 
 	// Integrity gate: the rebuilt image must carry the unattended
-	// arguments before it becomes installation media.
-	for grubPath := range patched {
+	// arguments before it becomes installation media. Only boot
+	// configurations are text-checked here; the patched initrd is binary.
+	grubPatched := make(map[string]string, len(patched))
+	for isoPath, localPath := range patched {
+		if strings.HasSuffix(isoPath, ".gz") {
+			continue
+		}
+		grubPatched[isoPath] = localPath
+	}
+	for grubPath := range grubPatched {
 		verifyPath := filepath.Join(dir, "verify.cfg")
 		content, err := s.iso.Extract(ctx, outPath, grubPath, verifyPath)
 		if err != nil {
@@ -325,6 +335,27 @@ func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member,
 		}
 		if !strings.Contains(content, unattended.BootArgs(profile)) {
 			return "", fmt.Errorf("%w: rebuilt %s does not carry unattended boot arguments", ErrUnattended, grubPath)
+		}
+	}
+
+	// The patched initrd must still carry the embedded preseed after the
+	// rebuild: gunzip the multistream image and look for the answer file.
+	if initrdPath := unattended.InitrdPath(profile); initrdPath != "" {
+		verifyPath := filepath.Join(dir, "verify-initrd.gz")
+		content, err := s.iso.Extract(ctx, outPath, initrdPath, verifyPath)
+		if err != nil {
+			return "", fmt.Errorf("%w: verify %s: %w", ErrUnattended, initrdPath, err)
+		}
+		gz, err := gzip.NewReader(strings.NewReader(content))
+		if err != nil {
+			return "", fmt.Errorf("%w: rebuilt %s is not readable gzip: %w", ErrUnattended, initrdPath, err)
+		}
+		plain, err := io.ReadAll(gz)
+		if err != nil {
+			return "", fmt.Errorf("%w: rebuilt %s failed to decompress: %w", ErrUnattended, initrdPath, err)
+		}
+		if !bytes.Contains(plain, []byte(answer[:min(64, len(answer))])) {
+			return "", fmt.Errorf("%w: rebuilt %s does not carry the embedded preseed", ErrUnattended, initrdPath)
 		}
 	}
 

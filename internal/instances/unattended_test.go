@@ -1,6 +1,8 @@
 package instances
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +28,9 @@ type stubISOTool struct {
 	seedErr      error
 	rebuildCalls int
 	seedCalls    int
+	// lastInitrd carries the binary initrd bytes through the rebuild round
+	// trip (the text "image" cannot hold them next to the markers).
+	lastInitrd []byte
 }
 
 func (t *stubISOTool) Available() error { return t.availableErr }
@@ -40,9 +45,33 @@ func (t *stubISOTool) Extract(_ context.Context, isoPath, isoFilePath, destPath 
 		return "", err
 	}
 
+	content := string(data)
+
+	// The initrd is binary and lives in a sidecar after the rebuild: the
+	// text "image" cannot carry its bytes next to the markers. The original
+	// is a real gzip stream so the multistream round trip stays valid.
+	if isoFilePath == "/install.amd/initrd.gz" {
+		if strings.Contains(content, "[rebuilt]") && t.lastInitrd != nil {
+			if err := os.WriteFile(destPath, t.lastInitrd, 0o600); err != nil {
+				return "", err
+			}
+
+			return string(t.lastInitrd), nil
+		}
+
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		_, _ = gz.Write([]byte("fake-initrd-bytes"))
+		_ = gz.Close()
+		if err := os.WriteFile(destPath, buf.Bytes(), 0o600); err != nil {
+			return "", err
+		}
+
+		return buf.String(), nil
+	}
+
 	// Simulate the round trip: the rebuilt image contains the patched boot
 	// configuration, the original does not.
-	content := string(data)
 	if strings.Contains(content, "[rebuilt]") {
 		return content, nil
 	}
@@ -52,11 +81,6 @@ func (t *stubISOTool) Extract(_ context.Context, isoPath, isoFilePath, destPath 
 		return debianGrubFixture, nil
 	case "/EFI/BOOT/grub.cfg":
 		return anacondaGrubFixture, nil
-	case "/install.amd/initrd.gz":
-		if err := os.WriteFile(destPath, []byte("fake-initrd-bytes"), 0o600); err != nil {
-			return "", err
-		}
-		return "fake-initrd-bytes", nil
 	default:
 		return "", fmt.Errorf("no %s in image", isoFilePath)
 	}
@@ -72,6 +96,9 @@ func (t *stubISOTool) Rebuild(_ context.Context, srcPath, dstPath string, patche
 		return err
 	}
 
+	// Binary entries (initrd) pass through to a sidecar; text entries get
+	// the marker so the extraction round trip can tell patched from
+	// original.
 	var out strings.Builder
 	out.WriteString("[rebuilt]\n")
 	for isoPath, localPath := range patched {
@@ -79,7 +106,11 @@ func (t *stubISOTool) Rebuild(_ context.Context, srcPath, dstPath string, patche
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(&out, "[%s]\n%s", isoPath, content)
+		if strings.HasSuffix(isoPath, ".gz") {
+			t.lastInitrd = append([]byte(nil), content...)
+		} else {
+			fmt.Fprintf(&out, "[%s]\n%s", isoPath, content)
+		}
 	}
 	answer, err := os.ReadFile(extraPath)
 	if err != nil {
