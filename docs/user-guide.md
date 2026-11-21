@@ -221,6 +221,10 @@ installation media, forces the installer's default boot entry, and watches for c
 
 Notes and requirements:
 
+- Unattended install is **fully self-contained**: everything runs inside Fleet and the cluster.
+  No external downloader, artifact service, or internet access is required — it works in isolated
+  cluster networks. Images only need to be present in the asset library (they can be uploaded
+  from a local file, so an external download helper is optional and never a prerequisite).
 - **xorriso** must be installed on the fleet server (`apt install xorriso`); it remasters the
   installer ISO and builds the seed media. The scratch directory `unattended.work_dir`
   (default `data/unattended` relative to the server working directory) needs several GB free
