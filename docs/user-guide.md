@@ -209,9 +209,15 @@ installation media, forces the installer's default boot entry, and watches for c
    - Ubuntu/generic profiles keep the installer ISO untouched and attach a generated NoCloud
      seed ISO (`cidata-<vm>`) as a second media.
 5. Watch the progress on the **Remote desktop** — the installer runs from boot to finish with
-   no input. When it completes, the VM powers off, Fleet automatically detaches the
-   installation media and deletes the derived volumes (including the answer-file copies), and
-   you can simply start the VM to boot the installed system.
+   no input. The patched boot menu boots itself after 10 seconds:
+
+   ![GRUB menu of the remastered Debian installer, booting the default entry automatically](images/iso/unattended-grub-menu.png)
+
+   When it completes, the VM powers off, Fleet automatically detaches the installation media
+   and deletes the derived volumes (including the answer-file copies), and you can simply
+   start the VM to boot the installed system.
+
+   ![Debian installer running unattended: installing the base system](images/iso/unattended-installing.png)
 
 Notes and requirements:
 

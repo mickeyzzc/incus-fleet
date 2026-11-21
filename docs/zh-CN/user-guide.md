@@ -184,8 +184,15 @@ fleet 支持上传 ISO 安装镜像(如 Debian/Ubuntu/CentOS 官方安装盘),�
      内核参数与 10 秒自动引导。原 ISO 不动,派生出 `<iso>-<profile>-auto` 卷。
    - Ubuntu/通用类型不修改安装盘,在旁边挂一张生成的 NoCloud 种子盘
      (`cidata-<vm>`)。
-5. 通过 **远程桌面** 观察进度——安装从引导到结束零输入。完成后虚拟机自动关机,fleet
-   自动卸载安装介质并删除派生卷(含应答文件副本),之后直接开机进入新系统即可。
+5. 通过 **远程桌面** 观察进度——安装从引导到结束零输入。补丁后的引导菜单 10 秒后自动
+   启动默认安装项:
+
+   ![重制后 Debian 安装器的 GRUB 菜单,自动引导默认项](images/iso/unattended-grub-menu.png)
+
+   完成后虚拟机自动关机,fleet 自动卸载安装介质并删除派生卷(含应答文件副本),之后
+   直接开机进入新系统即可。
+
+   ![Debian 安装器无人值守运行中:安装基本系统](images/iso/unattended-installing.png)
 
 注意事项:
 
