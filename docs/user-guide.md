@@ -195,6 +195,9 @@ installation media, forces the installer's default boot entry, and watches for c
 1. In the **Create VM from ISO** dialog, fill in the VM name as usual, then enable
    **Unattended install**.
 2. Pick the **installer profile** (Fleet guesses one from the ISO name):
+
+   ![Unattended install options in the Create VM from ISO dialog](images/iso/unattended-dialog.png)
+
    - **Debian / d-i preseed** — Debian and derivatives shipping the debian-installer;
    - **Ubuntu autoinstall (Subiquity)** — Ubuntu server 20.04+ ISOs;
    - **RHEL / Fedora kickstart** — RHEL, Rocky, Alma, CentOS Stream, Fedora;

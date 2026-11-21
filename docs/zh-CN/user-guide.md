@@ -172,6 +172,9 @@ fleet 支持上传 ISO 安装镜像(如 Debian/Ubuntu/CentOS 官方安装盘),�
 
 1. 在 **从 ISO 创建虚拟机** 对话框里照常填写虚拟机名称,然后打开 **无人值守安装** 开关。
 2. 选择 **安装器类型**(fleet 会按 ISO 名自动预选):
+
+   ![从 ISO 创建虚拟机对话框中的无人值守安装选项](images/iso/unattended-dialog.png)
+
    - **Debian / d-i preseed** —— Debian 及使用 debian-installer 的衍生版;
    - **Ubuntu autoinstall(Subiquity)** —— Ubuntu Server 20.04+ 镜像;
    - **RHEL / Fedora kickstart** —— RHEL、Rocky、Alma、CentOS Stream、Fedora;
