@@ -223,6 +223,16 @@ Arch Linux ISO)上传后会出现在共享资产库中:
 
 ![共享资产库中已导入的安装 ISO](images/iso/asset-library-isos.png)
 
+安装程序会进入 GRUB 菜单或发行版启动画面,远程桌面会自动跟随画面分辨率变化。
+
+![从 ISO 引导的 Debian 安装程序](../images/iso-install-grub.png)
+
+*浏览器远程桌面中的 ISO 安装引导菜单(英文界面)。*
+
+![安装程序启动画面](../images/iso-install-boot.png)
+
+*同一台虚拟机进入图形安装程序后的画面,分辨率已自动调整。*
+
 ## 创建实例
 
 进入集群 → **实例** → **创建实例**。关键字段:
@@ -258,6 +268,15 @@ Arch Linux ISO)上传后会出现在共享资产库中:
 创建完成后,在实例列表的地址列确认 IP 已落在预期网段;若长时间未获取地址,
 检查交换机/路由器的 DHCP 与该网卡的桥接状态。
 
+> ** bond 环境注意**:若物理网卡是某个 bond 的从属接口,它不能作为 macvlan 的
+> 父接口(会报 `Failed to start device "eth0": device or resource busy`)。此时应选择
+> bond 接口本身,或在实例 **设备** 标签页中以 bond 为 parent 手动添加 macvlan 网卡。
+> 编辑表单的"网络"字段只接受 Incus 托管网络;物理父接口请到设备面板添加。
+
+![创建/编辑表单中的资源限制](../images/instance-create-form-resources.png)
+
+*创建与编辑表单中的 CPU、内存、根盘与网络选择(英文界面)。*
+
 ## 实例日常管理
 
 实例列表或详情抽屉中可执行:
@@ -274,6 +293,10 @@ Arch Linux ISO)上传后会出现在共享资产库中:
   托管网络会自动重写旧的 `nictype`/`parent` 设备。
 - **删除实例**:需二次确认,对话框中可勾选**同时删除已挂载的存储卷**(共享的 ISO 安装
   镜像资产会保留)。
+
+![实例设备面板](../images/instance-devices-panel.png)
+
+*设备标签页:根盘、macvlan 网卡与已挂载的自定义卷(英文界面)。*
 
 ## 远程桌面
 

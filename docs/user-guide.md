@@ -260,6 +260,17 @@ shared asset library once uploaded:
 
 ![Imported installer ISOs in the shared asset library](images/iso/asset-library-isos.png)
 
+The installer boots into a GRUB menu or the distribution's splash screen; the remote desktop
+follows the framebuffer size automatically.
+
+![Debian installer booting from an ISO](images-en/iso-install-grub.png)
+
+*ISO installer boot menu in the browser remote desktop (English UI).*
+
+![Installer splash screen](images-en/iso-install-boot.png)
+
+*The same VM after the graphical installer started; resolution adapted automatically.*
+
 ## Create an instance
 
 Open a cluster → **Instances** → **Create instance**. Key fields:
@@ -300,6 +311,16 @@ DHCP server.
 After creation, confirm in the address column that the IP is in the expected subnet. If no
 address appears, check the switch/router DHCP service and the NIC bridge state.
 
+> **Bonded hosts:** if the physical NIC is a slave of a bond, it cannot be used as a macvlan
+> parent (`Failed to start device "eth0": device or resource busy`). Select the bond interface
+> itself instead, or attach the NIC later from the instance's **Devices** tab as a macvlan
+> device with the bond as its parent. The edit form's Network field only accepts managed
+> Incus networks; use the Devices tab for physical parents.
+
+![Instance resource limits in the create form](images-en/instance-create-form-resources.png)
+
+*CPU, memory, root disk and network selection in the create/edit form (English UI).*
+
 ## Day-to-day instance management
 
 From the instance list or the detail drawer you can:
@@ -321,6 +342,10 @@ From the instance list or the detail drawer you can:
   Switching a NIC to a managed network rewrites legacy `nictype`/`parent` devices.
 - **Delete instance**: asks for confirmation and offers a checkbox to delete the instance's
   attached storage volumes in the same step (shared ISO installer assets are kept).
+
+![Instance devices panel](images-en/instance-devices-panel.png)
+
+*Devices tab: root disk, a macvlan NIC and an attached custom volume (English UI).*
 
 ## Remote desktop
 
