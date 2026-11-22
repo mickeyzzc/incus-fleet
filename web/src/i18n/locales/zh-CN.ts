@@ -646,6 +646,7 @@ export default {
     ctrlAltDel: '发送 Ctrl+Alt+Del',
     hint: '点击画面后键盘输入将发送到虚拟机;按住拖动可移动指针,滚轮对应滚轮事件。',
     powerDone: '已向虚拟机发送：{action}。',
+    powerBusy: '电源操作执行中……',
     powerFailed: '电源操作失败：{error}',
     offline: '虚拟机已停止，点击"开机"启动后可继续在此操作。',
   },

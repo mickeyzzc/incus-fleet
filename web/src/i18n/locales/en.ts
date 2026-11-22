@@ -650,6 +650,7 @@ export default {
     ctrlAltDel: 'Send Ctrl+Alt+Del',
     hint: 'Click into the console, then keyboard input goes to the guest. Dragging moves the pointer; scrolling wheels it.',
     powerDone: '{action} sent to the guest.',
+    powerBusy: 'Power action in progress…',
     powerFailed: 'Power action failed: {error}',
     offline: 'The VM is stopped. Press Start to boot it, then keep operating here.',
   },
