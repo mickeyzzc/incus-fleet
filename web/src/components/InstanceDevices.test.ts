@@ -108,6 +108,7 @@ describe('InstanceDevices', () => {
     expect(api.attachDevice).toHaveBeenCalledWith('c1', 'web', {
       name: 'scratch',
       type: 'disk',
+      pool: 'default',
       path: '/scratch',
       size: '10GiB',
     })
