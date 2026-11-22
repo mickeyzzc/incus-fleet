@@ -21,6 +21,8 @@ import type {
   LaunchISORequest,
   MemberUpdateRequest,
   NetworkRequest,
+  OverlayRequest,
+  OverlayStatus,
   OpsRequest,
   OpsResult,
   Profile,
@@ -46,6 +48,8 @@ export const useInstancesStore = defineStore('instances', () => {
   const snapshotCache = ref<Record<string, InstanceSnapshot[]>>({})
   const volumeCache = ref<Record<string, StorageVolume[]>>({})
   const fileCache = ref<Record<string, FileEntry[]>>({})
+  const overlayCache = ref<Record<string, OverlayStatus[]>>({})
+  const overlayLoading = ref(false)
   const loading = ref(false)
   const detailLoading = ref(false)
   const imagesLoading = ref(false)
@@ -358,6 +362,75 @@ export const useInstancesStore = defineStore('instances', () => {
     try {
       await api.deleteNetwork(cluster, name)
       delete resourceCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Loads the private overlay definitions of one cluster. */
+  async function fetchOverlays(cluster: string, force = false): Promise<OverlayStatus[]> {
+    if (!force && overlayCache.value[cluster]) {
+      return overlayCache.value[cluster] ?? []
+    }
+
+    overlayLoading.value = true
+    try {
+      const overlays = await api.listOverlays(cluster)
+      overlayCache.value[cluster] = overlays
+      return overlays
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      overlayLoading.value = false
+    }
+  }
+
+  /** Enables a private overlay and refreshes the cached list. */
+  async function enableOverlay(cluster: string, request: OverlayRequest): Promise<OverlayStatus> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const status = await api.enableOverlay(cluster, request)
+      delete overlayCache.value[cluster]
+      return status
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Re-applies an overlay against the current member list. */
+  async function reconcileOverlay(cluster: string, name: string): Promise<OverlayStatus> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const status = await api.reconcileOverlay(cluster, name)
+      delete overlayCache.value[cluster]
+      return status
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Tears a private overlay down. */
+  async function disableOverlay(cluster: string, name: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.disableOverlay(cluster, name)
+      delete overlayCache.value[cluster]
     } catch (err) {
       error.value = errorMessage(err)
       throw err
@@ -973,6 +1046,8 @@ export const useInstancesStore = defineStore('instances', () => {
     filesLoading,
     saving,
     error,
+    overlayCache,
+    overlayLoading,
     filter,
     lastUpdated,
     containers,
@@ -995,6 +1070,10 @@ export const useInstancesStore = defineStore('instances', () => {
     createNetwork,
     updateNetwork,
     deleteNetwork,
+    fetchOverlays,
+    enableOverlay,
+    reconcileOverlay,
+    disableOverlay,
     createProfile,
     updateProfile,
     deleteProfile,

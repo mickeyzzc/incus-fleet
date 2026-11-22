@@ -17,6 +17,7 @@ import IsoLaunchDialog from '@/components/IsoLaunchDialog.vue'
 import MemberDialog from '@/components/MemberDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
 import NetworkDialog from '@/components/NetworkDialog.vue'
+import OverlayDialog from '@/components/OverlayDialog.vue'
 import NodeUpgradeDialog from '@/components/NodeUpgradeDialog.vue'
 import ProfileDialog from '@/components/ProfileDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
@@ -29,6 +30,7 @@ import type {
   InstanceSummary,
   InstanceType,
   NetworkResource,
+  OverlayStatus,
   Profile,
   StoragePoolResource,
 } from '@/api/types'
@@ -56,6 +58,9 @@ const poolDialogOpen = ref(false)
 const poolEditing = ref<StoragePoolResource | null>(null)
 const networkDialogOpen = ref(false)
 const networkEditing = ref<NetworkResource | null>(null)
+const overlayDialogOpen = ref(false)
+const overlayItems = ref<OverlayStatus[]>([])
+const overlayLoading = ref(false)
 const profileDialogOpen = ref(false)
 const profileEditing = ref<Profile | null>(null)
 const memberDialogOpen = ref(false)
@@ -129,6 +134,7 @@ async function load(force = false): Promise<void> {
     instances.fetchProfiles(props.cluster, force),
     instances.fetchImages(props.cluster, force),
     instances.fetchISOs(props.cluster, force),
+    loadOverlays(force),
   ]).catch(() => {})
 }
 
@@ -219,6 +225,51 @@ async function confirmDeletePool(pool: StoragePoolResource): Promise<void> {
     await instances.deleteStoragePool(props.cluster, pool.name)
     ElMessage.success(t('admin.poolDeleted', { name: pool.name }))
     await instances.fetchResources(props.cluster, true)
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  }
+}
+
+async function loadOverlays(force = false): Promise<void> {
+  overlayLoading.value = true
+  try {
+    overlayItems.value = await instances.fetchOverlays(props.cluster, force)
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  } finally {
+    overlayLoading.value = false
+  }
+}
+
+function openOverlayDialog(): void {
+  overlayDialogOpen.value = true
+}
+
+async function reconcileOverlay(overlay: OverlayStatus): Promise<void> {
+  try {
+    await instances.reconcileOverlay(props.cluster, overlay.name)
+    ElMessage.success(t('cluster.overlayReconciled', { name: overlay.name }))
+    await loadOverlays(true)
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  }
+}
+
+async function confirmDisableOverlay(overlay: OverlayStatus): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      t('cluster.overlayConfirmDisable', { name: overlay.name }),
+      t('cluster.overlayDisable'),
+      { type: 'warning', confirmButtonText: t('cluster.overlayDisable'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await instances.disableOverlay(props.cluster, overlay.name)
+    ElMessage.success(t('cluster.overlayRemoved', { name: overlay.name }))
+    await loadOverlays(true)
   } catch (err) {
     ElMessage.error(errorMessage(err))
   }
@@ -915,6 +966,86 @@ function openNodeUpgrade(member: ClusterMember): void {
       </div>
     </section>
 
+
+    <section class="panel">
+      <div class="panel-body">
+        <div class="section-heading page-header">
+          <div>
+            <h3 class="section-title">{{ t('cluster.overlayTitle') }}</h3>
+            <p class="subtitle">{{ t('cluster.overlayHint') }}</p>
+          </div>
+          <div class="page-actions">
+            <el-button :icon="Plus" @click="openOverlayDialog">
+              {{ t('cluster.overlayCreate') }}
+            </el-button>
+          </div>
+        </div>
+
+        <el-table v-loading="overlayLoading" :data="overlayItems" stripe>
+          <el-table-column :label="t('cluster.overlaySubnet')" min-width="150">
+            <template #default="{ row }">
+              <strong>{{ row.name }}</strong>
+              <span class="mini-label mono">{{ row.subnet }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.overlayBridge')" width="130" prop="bridge" />
+          <el-table-column :label="t('cluster.overlayVNI')" width="100">
+            <template #default="{ row }">
+              <span class="mono">{{ row.vni }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.overlayGateway')" min-width="130">
+            <template #default="{ row }">
+              {{ row.gateway_member }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.overlayMTU')" width="90">
+            <template #default="{ row }">
+              <span class="mono">{{ row.mtu }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.overlayTunnels', { count: 0 })" width="140">
+            <template #default="{ row }">
+              {{ t('cluster.overlayTunnels', { count: row.tunnels.length }) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.overlayStatus')" width="110">
+            <template #default="{ row }">
+              <el-tag :type="row.enabled ? 'success' : 'info'" size="small" effect="light">
+                {{ row.enabled ? t('cluster.overlayEnabled') : t('cluster.overlayDisabled') }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" width="180" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="reconcileOverlay(row)">
+                {{ t('cluster.overlayReconcile') }}
+              </el-button>
+              <el-button link type="danger" @click="confirmDisableOverlay(row)">
+                {{ t('cluster.overlayDisable') }}
+              </el-button>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty :description="t('cluster.overlayEmpty')" />
+          </template>
+        </el-table>
+
+        <div v-for="overlay in overlayItems" :key="`${overlay.name}-members`" class="overlay-members">
+          <h4 class="mini-title">{{ overlay.name }} · {{ t('cluster.overlayMember') }}</h4>
+          <div class="overlay-member-grid">
+            <div v-for="member in overlay.members" :key="member.member" class="overlay-member">
+              <strong>{{ member.member }}</strong>
+              <el-tag :type="member.gateway ? 'warning' : 'info'" size="small" effect="plain">
+                {{ member.gateway ? t('cluster.overlayRoleGateway') : t('cluster.overlayRoleMember') }}
+              </el-tag>
+              <span class="muted mono">{{ member.bridge_ip }}</span>
+              <span class="muted mono">{{ member.underlay_ip }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
     <section class="panel">
       <div class="panel-body">
         <div class="section-heading page-header">
@@ -998,6 +1129,12 @@ function openNodeUpgrade(member: ClusterMember): void {
       :cluster="cluster"
       :pool="poolEditing"
       @saved="instances.fetchResources(cluster, true)"
+    />
+    <OverlayDialog
+      v-model="overlayDialogOpen"
+      :cluster="cluster"
+      :members="summary?.members ?? []"
+      @saved="loadOverlays(true)"
     />
     <NetworkDialog
       v-model="networkDialogOpen"

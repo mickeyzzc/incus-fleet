@@ -142,6 +142,11 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | POST | `/clusters/{cluster}/networks` | yes | Create a managed network |
 | PATCH | `/clusters/{cluster}/networks/{network}` | yes | Update a managed network |
 | DELETE | `/clusters/{cluster}/networks/{network}` | yes | Delete a managed network |
+| GET | `/clusters/{cluster}/overlay` | yes | List private overlay networks |
+| POST | `/clusters/{cluster}/overlay` | yes | Enable a private overlay network |
+| GET | `/clusters/{cluster}/overlay/{overlay}` | yes | Get one private overlay network |
+| DELETE | `/clusters/{cluster}/overlay/{overlay}` | yes | Disable and remove a private overlay network |
+| POST | `/clusters/{cluster}/overlay/{overlay}/reconcile` | yes | Re-apply an overlay against current members |
 | GET | `/clusters/{cluster}/profiles` | yes | List instance profiles |
 | POST | `/clusters/{cluster}/profiles` | yes | Create a profile |
 | PATCH | `/clusters/{cluster}/profiles/{profile}` | yes | Update a profile |

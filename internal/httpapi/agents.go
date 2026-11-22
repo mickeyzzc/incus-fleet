@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/mickeyzzc/incus-fleet/internal/agentgw"
+	"github.com/mickeyzzc/incus-fleet/internal/agentops"
 	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
 	"github.com/mickeyzzc/incus-fleet/internal/bootstrap"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
@@ -150,11 +151,11 @@ func (a *API) agentNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	spec.Action = strings.TrimSpace(spec.Action)
 	taskType := agentpb.TaskType_TASK_TYPE_NODENET_APPLY
-	switch spec.Action {
-	case "link-state", "address", "route-add", "route-delete", "firewall-add", "firewall-delete", "wifi-connect":
-	case "confirm":
+	switch {
+	case agentops.IsNodenetAction(spec.Action):
+	case spec.Action == "confirm":
 		taskType = agentpb.TaskType_TASK_TYPE_NODENET_CONFIRM
-	case "rollback":
+	case spec.Action == "rollback":
 		taskType = agentpb.TaskType_TASK_TYPE_NODENET_ROLLBACK
 	default:
 		writeError(w, http.StatusBadRequest, "invalid_request", "unsupported network action")

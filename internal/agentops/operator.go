@@ -155,6 +155,100 @@ func (o *Operator) WifiConnect(dev, ssid, password string) error {
 	})
 }
 
+// overlayActions lists the fleet-managed overlay host mutations. The center
+// repeats this allowlist in the HTTP layer; keeping one exported slice makes
+// the two sides impossible to drift apart.
+var overlayActions = []string{
+	"bridge-add", "bridge-del",
+	"vxlan-add", "vxlan-del",
+	"dhcp-config", "dhcp-start", "dhcp-stop",
+	"nat-add", "nat-del",
+}
+
+// NodenetActions returns the allowlisted nodenet mutation actions.
+func NodenetActions() []string {
+	base := []string{"link-state", "address", "route-add", "route-delete", "firewall-add", "firewall-delete", "wifi-connect"}
+	return append(base, overlayActions...)
+}
+
+// IsNodenetAction reports whether action is an allowlisted mutation.
+func IsNodenetAction(action string) bool {
+	for _, candidate := range NodenetActions() {
+		if candidate == action {
+			return true
+		}
+	}
+	return false
+}
+
+// AddBridge creates the fleet bridge for a private overlay.
+func (o *Operator) AddBridge(cfg nodenet.BridgeConfig) error {
+	return o.apply(context.Background(), &agentpb.NodenetApplySpec{
+		Action: "bridge-add", Interface: cfg.Name, Address: cfg.Address,
+		Mtu: int32(cfg.MTU), //nolint:gosec // MTU is range-validated
+	})
+}
+
+// DeleteBridge removes the fleet bridge.
+func (o *Operator) DeleteBridge(name string) error {
+	return o.apply(context.Background(), &agentpb.NodenetApplySpec{
+		Action: "bridge-del", Interface: name,
+	})
+}
+
+// AddVXLAN creates one point-to-point overlay tunnel.
+func (o *Operator) AddVXLAN(link nodenet.VXLANLink) error {
+	return o.apply(context.Background(), &agentpb.NodenetApplySpec{
+		Action: "vxlan-add", Interface: link.Name, Bridge: link.Bridge,
+		Vni: int32(link.VNI), LocalIp: link.LocalIP, RemoteIp: link.RemoteIP, //nolint:gosec // VNI is range-validated
+		Device: link.Underlay, Mtu: int32(link.MTU), Port: int32(link.Port), //nolint:gosec // MTU/port are range-validated
+	})
+}
+
+// DeleteVXLAN removes one overlay tunnel.
+func (o *Operator) DeleteVXLAN(name string) error {
+	return o.apply(context.Background(), &agentpb.NodenetApplySpec{
+		Action: "vxlan-del", Interface: name,
+	})
+}
+
+// WriteDHCPConfig writes the overlay dnsmasq config and unit.
+func (o *Operator) WriteDHCPConfig(cfg nodenet.DHCPConfig) error {
+	return o.apply(context.Background(), &agentpb.NodenetApplySpec{
+		Action: "dhcp-config", Comment: cfg.Name, Interface: cfg.Interface,
+		RangeStart: cfg.RangeStart, RangeEnd: cfg.RangeEnd, Gateway: cfg.Gateway,
+		Netmask: cfg.Netmask, Dns: cfg.DNS,
+	})
+}
+
+// StartDHCP starts the overlay DHCP unit.
+func (o *Operator) StartDHCP(name string) error {
+	return o.apply(context.Background(), &agentpb.NodenetApplySpec{
+		Action: "dhcp-start", Comment: name,
+	})
+}
+
+// StopDHCP stops and removes the overlay DHCP unit.
+func (o *Operator) StopDHCP(name string) error {
+	return o.apply(context.Background(), &agentpb.NodenetApplySpec{
+		Action: "dhcp-stop", Comment: name,
+	})
+}
+
+// AddNAT installs the overlay masquerade rule.
+func (o *Operator) AddNAT(cfg nodenet.NATConfig) error {
+	return o.apply(context.Background(), &agentpb.NodenetApplySpec{
+		Action: "nat-add", Source: cfg.Source, OutDevice: cfg.OutDevice, Comment: cfg.Comment,
+	})
+}
+
+// DeleteNAT removes the overlay NAT table.
+func (o *Operator) DeleteNAT(name string) error {
+	return o.apply(context.Background(), &agentpb.NodenetApplySpec{
+		Action: "nat-del", Comment: name,
+	})
+}
+
 func (o *Operator) apply(ctx context.Context, spec *agentpb.NodenetApplySpec) error {
 	payload, err := proto.Marshal(spec)
 	if err != nil {

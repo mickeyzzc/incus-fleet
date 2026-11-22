@@ -74,6 +74,47 @@ function mockFleet() {
   vi.mocked(api.updateStoragePool).mockResolvedValue(undefined)
   vi.mocked(api.deleteStoragePool).mockResolvedValue(undefined)
   vi.mocked(api.updateNetwork).mockResolvedValue(undefined)
+  vi.mocked(api.listOverlays).mockResolvedValue([
+    {
+      cluster: 'c1',
+      name: 'c1',
+      bridge: 'fleetbr0',
+      vni: 6200,
+      subnet: '198.51.100.0/24',
+      gateway_member: 'node-1',
+      mtu: 1450,
+      enabled: true,
+      members: [
+        { member: 'node-1', underlay_ip: '192.0.2.10', bridge_ip: '198.51.100.1/24', links: 1, gateway: true },
+      ],
+      tunnels: [['node-1', 'node-2']],
+    },
+  ])
+  vi.mocked(api.enableOverlay).mockResolvedValue({
+    cluster: 'c1',
+    name: 'c1',
+    bridge: 'fleetbr0',
+    vni: 6200,
+    subnet: '198.51.100.0/24',
+    gateway_member: 'node-1',
+    mtu: 1450,
+    enabled: true,
+    members: [],
+    tunnels: [],
+  })
+  vi.mocked(api.reconcileOverlay).mockResolvedValue({
+    cluster: 'c1',
+    name: 'c1',
+    bridge: 'fleetbr0',
+    vni: 6200,
+    subnet: '198.51.100.0/24',
+    gateway_member: 'node-1',
+    mtu: 1450,
+    enabled: true,
+    members: [],
+    tunnels: [],
+  })
+  vi.mocked(api.disableOverlay).mockResolvedValue(undefined)
   vi.mocked(api.deleteNetwork).mockResolvedValue(undefined)
   vi.mocked(api.createProfile).mockResolvedValue(undefined)
   vi.mocked(api.deleteProfile).mockResolvedValue(undefined)
@@ -551,5 +592,50 @@ describe('ClusterView navigation and helpers', () => {
     const vm = wrapper.vm as unknown as { memberStatusLabel: (s: string) => string }
     expect(vm.memberStatusLabel('Online')).toBeTruthy()
     expect(vm.memberStatusLabel('UnknownState')).toBe('UnknownState')
+  })
+
+  it('renders the private overlay network panel', async () => {
+    const { wrapper } = await mountCluster()
+
+    expect(wrapper.text()).toContain('Private interconnect')
+    expect(wrapper.text()).toContain('fleetbr0')
+    expect(wrapper.text()).toContain('198.51.100.0/24')
+    expect(wrapper.text()).toContain('Gateway')
+  })
+
+  it('opens the overlay dialog', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Enable private network').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Enable private interconnect')
+  })
+
+  it('reconciles an overlay', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Reconcile').trigger('click')
+    await flushPromises()
+
+    expect(api.reconcileOverlay).toHaveBeenCalledWith('c1', 'c1')
+    expect(ElMessage.success).toHaveBeenCalled()
+  })
+
+  it('disables an overlay after confirmation', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Disable').trigger('click')
+    await flushPromises()
+
+    expect(api.disableOverlay).toHaveBeenCalledWith('c1', 'c1')
+    expect(ElMessage.success).toHaveBeenCalled()
+  })
+
+  it('surfaces overlay loading errors', async () => {
+    vi.mocked(api.listOverlays).mockRejectedValue(new Error('overlay offline'))
+    await mountCluster()
+
+    expect(ElMessage.error).toHaveBeenCalledWith('overlay offline')
   })
 })

@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/mickeyzzc/incus-fleet/internal/agentops"
 	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
 	"github.com/mickeyzzc/incus-fleet/internal/bootstrap"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
@@ -79,9 +80,7 @@ func (a *API) enqueueHostTask(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_request", "plan must be a valid NodenetApplySpec with an action")
 			return
 		}
-		switch spec.Action {
-		case "link-state", "address", "route-add", "route-delete", "firewall-add", "firewall-delete", "wifi-connect":
-		default:
+		if !agentops.IsNodenetAction(spec.Action) {
 			writeError(w, http.StatusBadRequest, "invalid_request", "unsupported network action")
 			return
 		}

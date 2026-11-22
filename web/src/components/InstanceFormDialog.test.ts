@@ -4,6 +4,7 @@ import ElementPlus, { ElMessage } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
+import { useInstancesStore } from '@/stores/instances'
 import { clusterResources, clusterSummary, instanceDetail, instanceImage } from '@/test/fixtures'
 import InstanceFormDialog from './InstanceFormDialog.vue'
 
@@ -262,5 +263,32 @@ describe('InstanceFormDialog', () => {
 
     expect(ElMessage.error).toHaveBeenCalledWith('Could not save the instance: quota exceeded')
     expect(wrapper.emitted('saved')).toBeUndefined()
+  })
+
+  it('offers a fleet overlay bridge as a NIC choice', async () => {
+    const store = useInstancesStore()
+    store.overlayCache = {
+      c1: [
+        {
+          cluster: 'c1',
+          name: 'c1',
+          bridge: 'fleetbr0',
+          vni: 6200,
+          subnet: '10.10.0.0/24',
+          gateway_member: 'node-1',
+          mtu: 1450,
+          enabled: true,
+          members: [],
+          tunnels: [],
+        },
+      ],
+    }
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    // The overlay bridge must appear among the NIC options even though Incus
+    // does not report it as a managed network.
+    const text = wrapper.html()
+    expect(text).toContain('fleetbr0')
   })
 })

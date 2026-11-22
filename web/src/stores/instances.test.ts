@@ -390,6 +390,62 @@ describe('instances store', () => {
     expect(store.error).toBe('delete failed')
   })
 
+  it('loads and mutates overlays', async () => {
+    const store = useInstancesStore()
+    const status = {
+      cluster: 'c1',
+      name: 'c1',
+      bridge: 'fleetbr0',
+      vni: 6200,
+      subnet: '198.51.100.0/24',
+      gateway_member: 'node-1',
+      mtu: 1450,
+      enabled: true,
+      members: [],
+      tunnels: [],
+    }
+    vi.mocked(api.listOverlays).mockResolvedValue([status])
+    vi.mocked(api.enableOverlay).mockResolvedValue(status)
+    vi.mocked(api.reconcileOverlay).mockResolvedValue(status)
+    vi.mocked(api.disableOverlay).mockResolvedValue(undefined)
+
+    const loaded = await store.fetchOverlays('c1')
+    expect(loaded).toHaveLength(1)
+    expect(api.listOverlays).toHaveBeenCalledWith('c1')
+    expect(store.overlayLoading).toBe(false)
+
+    // A cached read does not hit the API again.
+    await store.fetchOverlays('c1')
+    expect(api.listOverlays).toHaveBeenCalledTimes(1)
+
+    await store.enableOverlay('c1', { name: 'c1', subnet: '198.51.100.0/24' })
+    expect(api.enableOverlay).toHaveBeenCalledWith('c1', { name: 'c1', subnet: '198.51.100.0/24' })
+    expect(store.overlayCache.c1).toBeUndefined()
+
+    await store.reconcileOverlay('c1', 'c1')
+    expect(api.reconcileOverlay).toHaveBeenCalledWith('c1', 'c1')
+
+    await store.disableOverlay('c1', 'c1')
+    expect(api.disableOverlay).toHaveBeenCalledWith('c1', 'c1')
+  })
+
+  it('records overlay errors', async () => {
+    vi.mocked(api.listOverlays).mockRejectedValue(new Error('list failed'))
+    vi.mocked(api.enableOverlay).mockRejectedValue(new Error('enable failed'))
+    vi.mocked(api.reconcileOverlay).mockRejectedValue(new Error('reconcile failed'))
+    vi.mocked(api.disableOverlay).mockRejectedValue(new Error('disable failed'))
+    const store = useInstancesStore()
+
+    await expect(store.fetchOverlays('c1', true)).rejects.toThrow('list failed')
+    expect(store.error).toBe('list failed')
+    await expect(store.enableOverlay('c1', {})).rejects.toThrow('enable failed')
+    expect(store.error).toBe('enable failed')
+    await expect(store.reconcileOverlay('c1', 'c1')).rejects.toThrow('reconcile failed')
+    expect(store.error).toBe('reconcile failed')
+    await expect(store.disableOverlay('c1', 'c1')).rejects.toThrow('disable failed')
+    expect(store.error).toBe('disable failed')
+  })
+
   it('mutates profiles and invalidates the profile cache', async () => {
     const store = useInstancesStore()
     store.profileCache = { c1: [] }

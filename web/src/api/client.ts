@@ -45,6 +45,8 @@ import type {
   Migration,
   MigrationRequest,
   NetworkRequest,
+  OverlayRequest,
+  OverlayStatus,
   OpsRequest,
   OpsResult,
   SPICEPrepare,
@@ -729,6 +731,43 @@ export class ApiClient {
     await this.request<void>(
       'DELETE',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/networks/${encodeURIComponent(name)}`,
+    )
+  }
+
+  async listOverlays(cluster: string): Promise<OverlayStatus[]> {
+    const data = await this.request<{ overlays: OverlayStatus[] }>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/overlay`,
+    )
+    return data.overlays ?? []
+  }
+
+  async getOverlay(cluster: string, name: string): Promise<OverlayStatus> {
+    return this.request<OverlayStatus>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/overlay/${encodeURIComponent(name)}`,
+    )
+  }
+
+  async enableOverlay(cluster: string, request: OverlayRequest): Promise<OverlayStatus> {
+    return this.request<OverlayStatus>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/overlay`,
+      request,
+    )
+  }
+
+  async reconcileOverlay(cluster: string, name: string): Promise<OverlayStatus> {
+    return this.request<OverlayStatus>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/overlay/${encodeURIComponent(name)}/reconcile`,
+    )
+  }
+
+  async disableOverlay(cluster: string, name: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/overlay/${encodeURIComponent(name)}`,
     )
   }
 

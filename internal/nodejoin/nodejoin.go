@@ -29,6 +29,7 @@ import (
 
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
+	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/remote"
 )
 
@@ -907,20 +908,7 @@ func (p *provisioner) join(ctx context.Context, payload []byte) error {
 
 // installSudoers installs the node network whitelist for the SSH account.
 func (p *provisioner) installSudoers(ctx context.Context, user string) error {
-	content := strings.Join([]string{
-		"# Managed by incus-fleet node join.",
-		"# Minimal host network operations used by the fleet node page.",
-		user + " ALL=(root) NOPASSWD: \\",
-		"    /usr/bin/ip, /usr/sbin/ip, \\",
-		"    /usr/bin/nft, /usr/sbin/nft, \\",
-		"    /usr/bin/iw, /usr/sbin/iw, \\",
-		"    /usr/bin/dhcpcd, /usr/sbin/dhcpcd, \\",
-		"    /usr/bin/wpa_supplicant, /usr/sbin/wpa_supplicant, \\",
-		"    /usr/bin/hostname, /usr/sbin/hostname, \\",
-		"    /usr/bin/tee /etc/network/interfaces.d/*, \\",
-		"    /usr/bin/tee /etc/wpa_supplicant/fleet.conf",
-		"",
-	}, "\n")
+	content := nodenet.SudoersContent(user)
 
 	path, err := p.upload(ctx, "nodesudoers", content, "0600")
 	if err != nil {

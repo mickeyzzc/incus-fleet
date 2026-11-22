@@ -22,6 +22,17 @@ import (
 // ErrInvalidRequest is returned when instance management input is invalid.
 var ErrInvalidRequest = errors.New("instances: invalid request")
 
+// overlayBridgePrefix marks fleet-managed overlay bridges. The overlay service
+// creates them on every member with this prefix, so instance creation can tell
+// them apart from a physical NIC name and attach a bridged NIC instead of the
+// macvlan device it gives unmanaged physical interfaces.
+const overlayBridgePrefix = "fleetbr"
+
+// isOverlayBridge reports whether network names a fleet overlay bridge.
+func isOverlayBridge(network string) bool {
+	return strings.HasPrefix(network, overlayBridgePrefix)
+}
+
 const (
 	actionTimeout = 5 * time.Minute
 	createTimeout = 15 * time.Minute
@@ -167,8 +178,13 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 		networkManaged = target.Managed
 		// Unmanaged parents are attached as macvlan and take addresses from
 		// the physical LAN; device-level static addresses only apply to
-		// managed bridges.
+		// managed bridges. Fleet's overlay bridge runs its own dnsmasq without
+		// MAC reservations, so it cannot honour a device-level static address
+		// either.
 		if !networkManaged && (req.IPv4 != "" || req.IPv6 != "") {
+			if isOverlayBridge(network) {
+				return Detail{}, fmt.Errorf("%w: overlay network %q hands out DHCP addresses; set a static address inside the instance instead", ErrInvalidRequest, network)
+			}
 			return Detail{}, fmt.Errorf("%w: physical NIC %q takes addresses from the LAN DHCP server; configure a static address inside the instance instead", ErrInvalidRequest, network)
 		}
 	}
@@ -189,7 +205,8 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 
 	if network != "" {
 		nic := map[string]string{"type": "nic"}
-		if networkManaged {
+		switch {
+		case networkManaged:
 			nic["network"] = network
 			if req.IPv4 != "" {
 				nic["ipv4.address"] = req.IPv4
@@ -197,7 +214,14 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 			if req.IPv6 != "" {
 				nic["ipv6.address"] = req.IPv6
 			}
-		} else {
+		case isOverlayBridge(network):
+			// A fleet-managed overlay bridge is a plain host bridge, so Incus
+			// does not list it as a managed network. Attach it as a bridged NIC
+			// so the guest keeps using DHCP from the overlay gateway instead of
+			// landing on the physical LAN the way macvlan would.
+			nic["nictype"] = "bridged"
+			nic["parent"] = network
+		default:
 			nic["nictype"] = "macvlan"
 			nic["parent"] = network
 		}

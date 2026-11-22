@@ -30,6 +30,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
 	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
 	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
+	"github.com/mickeyzzc/incus-fleet/internal/overlay"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/telemetry"
@@ -44,6 +45,7 @@ const (
 
 // Deps are the dependencies of the HTTP API.
 type Deps struct {
+<<<<<<< HEAD
 	Clusters       *clusters.Manager
 	Instances      *instances.Service
 	Assets         *assets.Service
@@ -65,6 +67,29 @@ type Deps struct {
 	StaticFS       fs.FS
 	Logger         *slog.Logger
 	Version        string
+=======
+	Clusters     *clusters.Manager
+	Instances    *instances.Service
+	Assets       *assets.Service
+	Migrations   *migrations.Service
+	Store        *store.SQLStore
+	NodeNet      *nodeaccess.Service
+	NodeJoin     *nodejoin.Service
+	GuestAgent   *guestagent.Service
+	Overlay      OverlayService
+	Agent        AgentDispatcher
+	AgentInstall *agentinstall.Handler
+	Mesh         *mesh.Mesh
+	Bootstrap    BootstrapSigner
+	Telemetry    *telemetry.Store
+	MetricsSD    MetricsSDConfig
+	MetricsQuery *metricsquery.Proxy
+	CertIssuer   CertificateIssuer
+	Auth         *auth.Authenticator
+	StaticFS     fs.FS
+	Logger       *slog.Logger
+	Version      string
+>>>>>>> 4ff0a8e (feat(network): add intra-cluster private interconnect overlay)
 	// DesktopRunner overrides the host-command backend of the graphical
 	// console. Production leaves it nil, which uses the nodeaccess SSH path.
 	DesktopRunner DesktopRunnerFunc
@@ -76,6 +101,7 @@ type DesktopRunnerFunc func(ctx context.Context, cluster, member string) (consol
 
 // API is the complete HTTP handler for incus-fleet.
 type API struct {
+<<<<<<< HEAD
 	clusters       *clusters.Manager
 	instances      *instances.Service
 	assets         *assets.Service
@@ -98,6 +124,30 @@ type API struct {
 	version        string
 	static         fs.FS
 	desktopRun     DesktopRunnerFunc
+=======
+	clusters     *clusters.Manager
+	instances    *instances.Service
+	assets       *assets.Service
+	migrations   *migrations.Service
+	store        *store.SQLStore
+	nodenet      *nodeaccess.Service
+	nodejoin     *nodejoin.Service
+	guestAgent   *guestagent.Service
+	overlay      OverlayService
+	agent        AgentDispatcher
+	agentInstall *agentinstall.Handler
+	mesh         *mesh.Mesh
+	bootstrap    BootstrapSigner
+	telemetry    *telemetry.Store
+	metricsSD    MetricsSDConfig
+	metricsQuery *metricsquery.Proxy
+	certIssuer   CertificateIssuer
+	auth         *auth.Authenticator
+	logger       *slog.Logger
+	version      string
+	static       fs.FS
+	desktopRun   DesktopRunnerFunc
+>>>>>>> 4ff0a8e (feat(network): add intra-cluster private interconnect overlay)
 }
 
 // New builds the HTTP handler.
@@ -108,6 +158,7 @@ func New(deps Deps) *API {
 	}
 
 	api := &API{
+<<<<<<< HEAD
 		clusters:       deps.Clusters,
 		instances:      deps.Instances,
 		assets:         deps.Assets,
@@ -129,6 +180,29 @@ func New(deps Deps) *API {
 		logger:         logger,
 		version:        deps.Version,
 		desktopRun:     deps.DesktopRunner,
+=======
+		clusters:     deps.Clusters,
+		instances:    deps.Instances,
+		assets:       deps.Assets,
+		migrations:   deps.Migrations,
+		store:        deps.Store,
+		nodenet:      deps.NodeNet,
+		nodejoin:     deps.NodeJoin,
+		guestAgent:   deps.GuestAgent,
+		overlay:      deps.Overlay,
+		agent:        deps.Agent,
+		agentInstall: deps.AgentInstall,
+		mesh:         deps.Mesh,
+		bootstrap:    deps.Bootstrap,
+		telemetry:    deps.Telemetry,
+		metricsSD:    deps.MetricsSD,
+		metricsQuery: deps.MetricsQuery,
+		certIssuer:   deps.CertIssuer,
+		auth:         deps.Auth,
+		logger:       logger,
+		version:      deps.Version,
+		desktopRun:   deps.DesktopRunner,
+>>>>>>> 4ff0a8e (feat(network): add intra-cluster private interconnect overlay)
 	}
 
 	if deps.StaticFS != nil {
@@ -268,6 +342,11 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /api/v1/clusters/{cluster}/networks", a.requireWriter(http.HandlerFunc(a.createNetwork)))
 	mux.Handle("PATCH /api/v1/clusters/{cluster}/networks/{network}", a.requireWriter(http.HandlerFunc(a.updateNetwork)))
 	mux.Handle("DELETE /api/v1/clusters/{cluster}/networks/{network}", a.requireWriter(http.HandlerFunc(a.deleteNetwork)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/overlay", a.requireAuth(http.HandlerFunc(a.listOverlay)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/overlay", a.requireWriter(http.HandlerFunc(a.enableOverlay)))
+	mux.Handle("GET /api/v1/clusters/{cluster}/overlay/{overlay}", a.requireAuth(http.HandlerFunc(a.getOverlay)))
+	mux.Handle("DELETE /api/v1/clusters/{cluster}/overlay/{overlay}", a.requireWriter(http.HandlerFunc(a.disableOverlay)))
+	mux.Handle("POST /api/v1/clusters/{cluster}/overlay/{overlay}/reconcile", a.requireWriter(http.HandlerFunc(a.reconcileOverlay)))
 	mux.Handle("PATCH /api/v1/clusters/{cluster}/members/{member}", a.requireWriter(http.HandlerFunc(a.updateMember)))
 	mux.Handle("GET /api/v1/clusters/{cluster}/profiles", a.requireAuth(http.HandlerFunc(a.listProfiles)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/profiles", a.requireWriter(http.HandlerFunc(a.createProfile)))
@@ -1087,6 +1166,7 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 		errors.Is(err, instances.ErrInvalidRequest),
 		errors.Is(err, nodejoin.ErrInvalidRequest),
 		errors.Is(err, guestagent.ErrInvalidRequest),
+		errors.Is(err, overlay.ErrInvalidRequest),
 		errors.Is(err, nodenet.ErrInvalidRequest):
 		status, code = http.StatusBadRequest, "invalid_request"
 	case errors.Is(err, migrations.ErrConflict),
@@ -1094,6 +1174,7 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code = http.StatusConflict, "conflict"
 	case errors.Is(err, migrations.ErrNotFound),
 		errors.Is(err, guestagent.ErrNotFound),
+		errors.Is(err, overlay.ErrNotFound),
 		errors.Is(err, instances.ErrNotFound),
 		errors.Is(err, store.ErrNotFound),
 		errors.Is(err, clusters.ErrUnknownCluster),

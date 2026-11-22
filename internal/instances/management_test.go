@@ -646,6 +646,7 @@ func TestUpdateRootDiskFallsBackToDefaultPool(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 func TestDeleteWithVolumes(t *testing.T) {
 	instance := manageInstance("vm1")
 	instance.Devices["data"] = map[string]string{"type": "disk", "pool": "default", "source": "vm1-data"}
@@ -776,6 +777,36 @@ func TestMemberNames(t *testing.T) {
 	srv.MembersErr = errors.New("cluster offline")
 	if _, err := svc.MemberNames("c1"); err == nil {
 		t.Fatal("MemberNames() expected error")
+=======
+func TestCreateUsesBridgedNICForOverlayBridge(t *testing.T) {
+	srv := &incusfake.Server{Instance: &api.Instance{Name: "vm1"}, Networks: []api.Network{{Name: "fleetbr0", Managed: false}}}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if _, err := svc.Create(context.Background(), "c1", CreateRequest{Name: "vm1", Type: "container", Image: "debian", Network: "fleetbr0"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	args := srv.CreateArgs()
+	if len(args) != 1 {
+		t.Fatalf("create args = %#v", args)
+	}
+	nic := args[0].Devices["eth0"]
+	if nic["nictype"] != "bridged" || nic["parent"] != "fleetbr0" {
+		t.Fatalf("overlay NIC = %#v; want bridged/fleetbr0", nic)
+	}
+}
+
+func TestCreateUsesMacvlanForPhysicalNIC(t *testing.T) {
+	srv := &incusfake.Server{Instance: &api.Instance{Name: "ct1"}, Networks: []api.Network{{Name: "enp1s0", Managed: false}}}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if _, err := svc.Create(context.Background(), "c1", CreateRequest{Name: "ct1", Type: "container", Image: "debian", Network: "enp1s0"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	nic := srv.CreateArgs()[0].Devices["eth0"]
+	if nic["nictype"] != "macvlan" {
+		t.Fatalf("physical NIC = %#v; want macvlan", nic)
+>>>>>>> 4ff0a8e (feat(network): add intra-cluster private interconnect overlay)
 	}
 }
 

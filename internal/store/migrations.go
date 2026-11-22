@@ -110,6 +110,12 @@ var schemaMigrations = []schemaMigration{
 		version:    8,
 		statements: []string{answerProfileSchema()},
 	},
+	{
+		// Cluster private overlay networks: one row per fleet-managed
+		// bridge/VXLAN/DHCP/NAT topology inside a cluster.
+		version:    9,
+		statements: []string{overlaySchema},
+	},
 }
 
 // userSchema holds local accounts. Usernames are compared case-insensitively by

@@ -236,9 +236,15 @@ Still open:
 
 ### Decision
 
-1. **Do not build a custom overlay.** This problem is solved by mature options;
-   self-building means owning key management, MTU/fragmentation, multicast,
-   failover, NAT traversal, and observability forever.
+1. **Ship a fleet-managed host-side VXLAN overlay for intra-cluster traffic**
+   (implemented). Incus requires one identical network definition per member,
+   so a managed bridge cannot hold distinct per-member addresses. Fleet therefore
+   owns a bridge per host, joins members with point-to-point VXLAN tunnels, and
+   runs DHCP/NAT on one gateway member. Guests keep DHCP and never change, no
+   physical router is touched, and the mesh grows from two members to N without a
+   redesign. It does not attempt cross-site NAT traversal or encryption; see 3.
+   OVN stays the opt-in path for ACLs and multi-tenant isolation, hidden behind the
+   same overlay abstraction so the backend can be swapped later.
 2. Keep per-cluster native bridges with **non-overlapping subnets**. Fix
    cross-subnet migration with static/fixed DHCP assignments, optionally a
    DHCP relay and a unified DNS zone, plus shortened leases as mitigation.

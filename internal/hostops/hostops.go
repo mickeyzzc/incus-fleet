@@ -87,6 +87,18 @@ type Operator interface {
 	AddFirewallRule(req nodenet.FirewallRequest) error
 	DeleteFirewallRule(handle string) error
 	WifiConnect(dev, ssid, password string) error
+
+	// Overlay network operations drive the fleet-managed bridge, VXLAN links,
+	// DHCP instance, and NAT rules that make up a cluster private network.
+	AddBridge(cfg nodenet.BridgeConfig) error
+	DeleteBridge(name string) error
+	AddVXLAN(link nodenet.VXLANLink) error
+	DeleteVXLAN(name string) error
+	WriteDHCPConfig(cfg nodenet.DHCPConfig) error
+	StartDHCP(name string) error
+	StopDHCP(name string) error
+	AddNAT(cfg nodenet.NATConfig) error
+	DeleteNAT(name string) error
 }
 
 // Resolver picks one operator and backend for a cluster member.

@@ -144,6 +144,19 @@ message NodenetApplySpec {
   string password = 17;
   string task_id = 18;
   int32 rollback_after_seconds = 19;
+  // Overlay network fields. They carry one fleet-managed bridge/VXLAN/DHCP/NAT
+  // mutation; the helper validates every value again before touching the host.
+  int32 vni = 20;
+  string local_ip = 21;
+  string remote_ip = 22;
+  string bridge = 23;
+  int32 mtu = 24;
+  string range_start = 25;
+  string range_end = 26;
+  string netmask = 27;
+  string dns = 28;
+  string source = 29;
+  string out_device = 30;
 }
 
 message NodenetApplyResult {

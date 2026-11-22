@@ -200,6 +200,47 @@ export interface NetworkRequest {
   config?: Record<string, string>
 }
 
+/** One member's participation in a cluster private overlay network. */
+export interface OverlayMemberStatus {
+  member: string
+  underlay_ip?: string
+  bridge_ip?: string
+  links: number
+  gateway: boolean
+  error?: string
+}
+
+/** A fleet-managed private network that spans every cluster member. */
+export interface OverlayStatus {
+  cluster: string
+  name: string
+  bridge: string
+  vni: number
+  subnet: string
+  gateway_member: string
+  mtu: number
+  dhcp_start?: string
+  dhcp_end?: string
+  enabled: boolean
+  members: OverlayMemberStatus[]
+  tunnels: string[][]
+  steps?: string[]
+}
+
+/** Request used to create or update a private overlay network. */
+export interface OverlayRequest {
+  name?: string
+  bridge?: string
+  vni?: number
+  subnet?: string
+  gateway_member?: string
+  mtu?: number
+  dhcp_start?: string
+  dhcp_end?: string
+  underlay_nic?: string
+  underlay_ips?: Record<string, string>
+}
+
 /** One instance profile. */
 export interface Profile {
   name: string

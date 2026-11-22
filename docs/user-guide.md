@@ -29,7 +29,8 @@ Prerequisites:
 12. [Shared asset library and batch operations](#shared-asset-library-and-batch-operations)
 13. [Resource monitoring](#resource-monitoring)
 14. [Storage pools and networks](#storage-pools-and-networks)
-15. [FAQ](#faq)
+15. [Private interconnect networks](#private-interconnect-networks)
+16. [FAQ](#faq)
 
 ## Sign in and choose a language
 
@@ -597,6 +598,40 @@ The cluster detail page provides:
   network).
 - **Profiles**: create, update, and delete configuration templates; select them when creating
   instances.
+
+## Private interconnect networks
+
+Incus requires every cluster member to share one network definition, so a managed bridge
+(`incusbr0`) has the same subnet and gateway address on all members. To connect instances
+across nodes without touching guest configuration and without any physical router changes,
+fleet manages a private overlay per cluster:
+
+- fleet creates its own host bridge (`fleetbr0` by default) on every member. Because fleet owns
+  it, the cluster-wide network rule does not apply and each member can hold a distinct bridge
+  address.
+- Every pair of members is joined by a point-to-point VXLAN tunnel, so two members get one tunnel
+  and N members form a full mesh. Traffic between members stays on the tunnels; only egress leaves
+  through the gateway.
+- One member acts as the **gateway**: it runs dnsmasq for the overlay subnet and masquerades the
+  subnet towards its physical NIC.
+
+Instances attach with a legacy `nictype=bridged, parent=fleetbr0` NIC, so a guest keeps using DHCP
+and its default gateway exactly as before. Nothing inside the guest changes.
+
+Enable it from the cluster page (**Private interconnect → Enable private network**): choose the
+subnet, a VNI, the gateway member, and optionally the MTU and DHCP range. After adding or removing
+a cluster member, run **Reconcile** to rebuild the tunnel mesh. **Disable** removes the tunnels,
+DHCP, NAT, and bridges from every member.
+
+Notes:
+
+- The gateway member is a single egress point in this release; multi-gateway failover is planned.
+- `MTU` defaults to 1450 to leave room for the VXLAN header on a 1500-byte underlay. Raise it only
+  when the underlay supports jumbo frames.
+- The overlay is plaintext VXLAN on the underlay, like the rest of the cluster network. Add
+  WireGuard underneath if you need encryption between sites.
+- OVN remains a future alternative for ACLs, forwards, and multi-tenant isolation. The overlay
+  abstraction keeps that switch local to the network backend.
 
 ## Node network and operation history
 

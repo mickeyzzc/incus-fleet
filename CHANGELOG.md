@@ -10,6 +10,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Cluster private interconnect networks: fleet creates a host bridge on every
+  member, joins them with point-to-point VXLAN tunnels, and runs DHCP/NAT from
+  one gateway member so instances on all nodes share a private network without
+  touching guest configuration. Includes enable/reconcile/disable endpoints and
+  a cluster page panel.
+
 - Local accounts with roles (`admin`/`operator`/`viewer`), bcrypt passwords, server-side
   sessions shared across centers, lockout, and the shared admin token retiring once the first
   account exists.

@@ -32,6 +32,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
 	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
 	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
+	"github.com/mickeyzzc/incus-fleet/internal/overlay"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/remotewrite"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
@@ -163,6 +164,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	nodeAccess := nodeaccess.New(manager, localNodeNet, cfg.NodeAccess, nodeOptions...)
 	nodeJoin := nodejoin.New(manager, cfg.NodeAccess, logger)
 	guestAgent := guestagent.New(manager, cfg.NodeAccess, logger)
+	overlayService := overlay.New(&overlay.ClusterResolver{Manager: manager}, nodeAccess, st)
 	var authenticator *auth.Authenticator
 	// Local accounts are always backed by the database so a restart does not
 	// lose them. Sessions live in the database whenever more than one instance
@@ -375,6 +377,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	}
 
 	handler := httpapi.New(httpapi.Deps{
+<<<<<<< HEAD
 		Clusters:       manager,
 		Instances:      instancesService,
 		Assets:         assetsService,
@@ -391,6 +394,24 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		CertIssuer:     agentGW,
 		Telemetry:      telemetryStore,
 		MetricsQuery:   queryProxy,
+=======
+		Clusters:     manager,
+		Instances:    instancesService,
+		Assets:       assetsService,
+		Migrations:   migrationsService,
+		Store:        st,
+		NodeNet:      nodeAccess,
+		NodeJoin:     nodeJoin,
+		GuestAgent:   guestAgent,
+		Overlay:      overlayService,
+		Agent:        agentGW,
+		AgentInstall: agentInstall,
+		Mesh:         centerMesh,
+		Bootstrap:    agentGW,
+		CertIssuer:   agentGW,
+		Telemetry:    telemetryStore,
+		MetricsQuery: queryProxy,
+>>>>>>> 4ff0a8e (feat(network): add intra-cluster private interconnect overlay)
 		MetricsSD: httpapi.MetricsSDConfig{
 			Enabled: cfg.Metrics.HTTPSD.Enabled, Token: cfg.Metrics.HTTPSD.Token,
 			PublicURL: cfg.Metrics.HTTPSD.PublicURL, Mode: cfg.Metrics.HTTPSD.Mode,

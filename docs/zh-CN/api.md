@@ -137,6 +137,11 @@ POST /api/v1/auth/logout
 | POST | `/clusters/{cluster}/networks` | 是 | 创建托管网络 |
 | PATCH | `/clusters/{cluster}/networks/{network}` | 是 | 更新托管网络 |
 | DELETE | `/clusters/{cluster}/networks/{network}` | 是 | 删除托管网络 |
+| GET | `/clusters/{cluster}/overlay` | 是 | 列出私有互联网络 |
+| POST | `/clusters/{cluster}/overlay` | 是 | 启用私有互联网络 |
+| GET | `/clusters/{cluster}/overlay/{overlay}` | 是 | 获取单个私有互联网络 |
+| DELETE | `/clusters/{cluster}/overlay/{overlay}` | 是 | 关闭并移除私有互联网络 |
+| POST | `/clusters/{cluster}/overlay/{overlay}/reconcile` | 是 | 按当前成员重新对账 |
 | GET | `/clusters/{cluster}/profiles` | 是 | 列出实例 Profile |
 | POST | `/clusters/{cluster}/profiles` | 是 | 创建 Profile |
 | PATCH | `/clusters/{cluster}/profiles/{profile}` | 是 | 更新 Profile |

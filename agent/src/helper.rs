@@ -30,6 +30,18 @@ pub struct HelperRequest {
     pub password: String,
     pub spec: String,
     pub rollback_after_seconds: i32,
+    // Overlay network fields.
+    pub vni: i32,
+    pub local_ip: String,
+    pub remote_ip: String,
+    pub bridge: String,
+    pub mtu: i32,
+    pub range_start: String,
+    pub range_end: String,
+    pub netmask: String,
+    pub dns: String,
+    pub source: String,
+    pub out_device: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +85,17 @@ impl HelperRequest {
             password: spec.password.clone(),
             spec: String::new(),
             rollback_after_seconds: spec.rollback_after_seconds,
+            vni: spec.vni,
+            local_ip: spec.local_ip.clone(),
+            remote_ip: spec.remote_ip.clone(),
+            bridge: spec.bridge.clone(),
+            mtu: spec.mtu,
+            range_start: spec.range_start.clone(),
+            range_end: spec.range_end.clone(),
+            netmask: spec.netmask.clone(),
+            dns: spec.dns.clone(),
+            source: spec.source.clone(),
+            out_device: spec.out_device.clone(),
         }
     }
 }

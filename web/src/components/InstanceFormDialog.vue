@@ -8,6 +8,7 @@ import type {
   CreateInstanceRequest,
   InstanceDetail,
   InstanceImage,
+  NetworkResource,
   UpdateInstanceRequest,
 } from '@/api/types'
 import { useInstancesStore } from '@/stores/instances'
@@ -69,6 +70,18 @@ const filteredImages = computed(() =>
 )
 const pools = computed(() => instances.resources(form.cluster)?.storage_pools ?? [])
 const networks = computed(() => instances.resources(form.cluster)?.networks ?? [])
+// Fleet overlay bridges are host bridges, so Incus does not report them as
+// networks. Merge them in so instances can be attached to the private network.
+const overlayNetworks = computed<NetworkResource[]>(() =>
+  (instances.overlayCache[form.cluster] ?? []).map((overlay) => ({
+    name: overlay.bridge,
+    type: 'bridge',
+    managed: false,
+    ipv4: overlay.subnet,
+    used_by: [],
+    locations: [],
+  })),
+)
 const isPhysicalNetwork = computed(() => {
   if (nicDevice.value?.device.nictype === 'macvlan') {
     return true
@@ -107,6 +120,14 @@ const networkGroups = computed(() => {
   const physical = [...byLocation.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   for (const [location, options] of physical) {
     groups.push({ label: t('form.physicalNetworksOn', { member: location }), options })
+  }
+
+  // Overlay bridges are fleet-managed host bridges; Incus does not list them as
+  // networks, so add them as a dedicated group.
+  const known = new Set(networks.value.map((network) => network.name))
+  const overlays = overlayNetworks.value.filter((network) => !known.has(network.name))
+  if (overlays.length > 0) {
+    groups.push({ label: t('form.overlayNetworks'), options: overlays })
   }
 
   return groups

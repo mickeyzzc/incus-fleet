@@ -41,6 +41,17 @@ type request struct {
 	Password       string `json:"password,omitempty"`
 	Spec           string `json:"spec,omitempty"`
 	RollbackAfter  int    `json:"rollback_after_seconds,omitempty"`
+	VNI            int    `json:"vni,omitempty"`
+	LocalIP        string `json:"local_ip,omitempty"`
+	RemoteIP       string `json:"remote_ip,omitempty"`
+	Bridge         string `json:"bridge,omitempty"`
+	MTU            int    `json:"mtu,omitempty"`
+	RangeStart     string `json:"range_start,omitempty"`
+	RangeEnd       string `json:"range_end,omitempty"`
+	Netmask        string `json:"netmask,omitempty"`
+	DNS            string `json:"dns,omitempty"`
+	Source         string `json:"source,omitempty"`
+	OutDevice      string `json:"out_device,omitempty"`
 }
 
 type response struct {
@@ -212,6 +223,76 @@ func handleReader(input io.Reader) (response, int) {
 			return failure(req, errors.New("interface and ssid are required")), 1
 		}
 		if err := service.WifiConnect(req.Interface, req.SSID, req.Password); err != nil {
+			return failure(req, err), 1
+		}
+		return success(req, ""), 0
+	case "bridge-add":
+		cfg := nodenet.BridgeConfig{Name: req.Interface, MTU: req.MTU, Address: req.Address}
+		if err := service.AddBridge(cfg); err != nil {
+			return failure(req, err), 1
+		}
+		if req.Persist {
+			manager := managerFor(req)
+			if err := nodenet.PersistBridge(nodenet.DirectRunner{}, "/", manager, cfg); err != nil {
+				return failure(req, err), 1
+			}
+		}
+		return success(req, ""), 0
+	case "bridge-del":
+		if err := service.DeleteBridge(req.Interface); err != nil {
+			return failure(req, err), 1
+		}
+		_ = nodenet.RemoveOverlayPersistence("/", req.Interface)
+		return success(req, ""), 0
+	case "vxlan-add":
+		link := nodenet.VXLANLink{
+			Name: req.Interface, Bridge: req.Bridge, VNI: req.VNI,
+			LocalIP: req.LocalIP, RemoteIP: req.RemoteIP, Underlay: req.Device,
+			Port: req.Port, MTU: req.MTU,
+		}
+		if err := service.AddVXLAN(link); err != nil {
+			return failure(req, err), 1
+		}
+		if req.Persist {
+			manager := managerFor(req)
+			if err := nodenet.PersistVXLAN(nodenet.DirectRunner{}, "/", manager, link); err != nil {
+				return failure(req, err), 1
+			}
+		}
+		return success(req, ""), 0
+	case "vxlan-del":
+		if err := service.DeleteVXLAN(req.Interface); err != nil {
+			return failure(req, err), 1
+		}
+		_ = nodenet.RemoveOverlayPersistence("/", req.Interface)
+		return success(req, ""), 0
+	case "dhcp-config":
+		cfg := nodenet.DHCPConfig{
+			Name: req.Comment, Interface: req.Interface, RangeStart: req.RangeStart,
+			RangeEnd: req.RangeEnd, Gateway: req.Gateway, Netmask: req.Netmask, DNS: req.DNS,
+		}
+		if err := service.WriteDHCPConfig(cfg); err != nil {
+			return failure(req, err), 1
+		}
+		return success(req, ""), 0
+	case "dhcp-start":
+		if err := service.StartDHCP(req.Comment); err != nil {
+			return failure(req, err), 1
+		}
+		return success(req, ""), 0
+	case "dhcp-stop":
+		if err := service.StopDHCP(req.Comment); err != nil {
+			return failure(req, err), 1
+		}
+		return success(req, ""), 0
+	case "nat-add":
+		cfg := nodenet.NATConfig{Source: req.Source, OutDevice: req.OutDevice, Comment: req.Comment}
+		if err := service.AddNAT(cfg); err != nil {
+			return failure(req, err), 1
+		}
+		return success(req, ""), 0
+	case "nat-del":
+		if err := service.DeleteNAT(req.Comment); err != nil {
 			return failure(req, err), 1
 		}
 		return success(req, ""), 0
