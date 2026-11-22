@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import ElementPlus from 'element-plus'
+import ElementPlus, { ElMessageBox } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
@@ -47,6 +47,7 @@ function sampleMigrations(): Migration[] {
 describe('MigrationsView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as never)
   })
 
   it('loads and renders recent migrations', async () => {
@@ -197,5 +198,66 @@ describe('MigrationsView', () => {
     expect(stopPolling).toHaveBeenCalled()
 
     wrapper.unmount()
+  })
+  it('renders cancel for active and retry for terminal migrations', async () => {
+    vi.mocked(api.listMigrations).mockResolvedValue(sampleMigrations())
+    const wrapper = await mountView()
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('Cancel')
+    expect(text).toContain('Retry')
+  })
+
+  it('cancels a running migration after confirmation', async () => {
+    vi.mocked(api.listMigrations).mockResolvedValue(sampleMigrations())
+    vi.mocked(api.cancelMigration).mockResolvedValue(
+      migration({ id: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', status: 'canceled' }),
+    )
+    const wrapper = await mountView()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Cancel').trigger('click')
+    await flushPromises()
+
+    expect(api.cancelMigration).toHaveBeenCalledWith('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
+  })
+
+  it('keeps the migration untouched when the cancel confirmation is dismissed', async () => {
+    vi.mocked(api.listMigrations).mockResolvedValue(sampleMigrations())
+    vi.mocked(ElMessageBox.confirm).mockRejectedValue('dismiss' as never)
+    const wrapper = await mountView()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Cancel').trigger('click')
+    await flushPromises()
+
+    expect(api.cancelMigration).not.toHaveBeenCalled()
+  })
+
+  it('retries a failed migration after confirmation', async () => {
+    vi.mocked(api.listMigrations).mockResolvedValue(sampleMigrations())
+    vi.mocked(api.retryMigration).mockResolvedValue(
+      migration({ id: 'dddddddddddddddddddddddddddddddd', instance: 'db', status: 'pending' }),
+    )
+    const wrapper = await mountView()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Retry').trigger('click')
+    await flushPromises()
+
+    expect(api.retryMigration).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces cancel failures as an error toast', async () => {
+    vi.mocked(api.listMigrations).mockResolvedValue(sampleMigrations())
+    vi.mocked(api.cancelMigration).mockRejectedValue(new Error('running elsewhere'))
+    const wrapper = await mountView()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Cancel').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('running elsewhere')
   })
 })
