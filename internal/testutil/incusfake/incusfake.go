@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	incus "github.com/lxc/incus/v7/client"
@@ -32,6 +33,7 @@ type Server struct {
 	ClusterErr        error
 	Members           []api.ClusterMember
 	MembersErr        error
+	MembersFunc       func() ([]api.ClusterMember, error)
 	Instances         []api.InstanceFull
 	InstancesErr      error
 	Instance          *api.Instance
@@ -71,6 +73,7 @@ type Server struct {
 	DeleteSnapshotErr error
 	Volumes           []api.StorageVolume
 	VolumesErr        error
+	VolumeErr         error
 	CreateVolumeErr   error
 	DeleteVolumeErr   error
 	Pools             []api.StoragePool
@@ -81,6 +84,8 @@ type Server struct {
 	UpdatePoolErr     error
 	DeletePoolErr     error
 	Networks          []api.Network
+	NetworkLeases     []api.NetworkLease
+	NetworkLeasesErr  error
 	NetworksErr       error
 	Network           *api.Network
 	NetworkErr        error
@@ -96,6 +101,9 @@ type Server struct {
 	DeleteProfileErr  error
 	Member            *api.ClusterMember
 	MemberErr         error
+	CreateMemberErr   error
+	JoinToken         *api.ClusterMemberJoinToken
+	JoinTokenMetadata map[string]any
 	UpdateMemberErr   error
 	PoolNames         []string
 	PoolNamesErr      error
@@ -109,9 +117,13 @@ type Server struct {
 	RemoteOperation   *RemoteOperation
 	Operation         *Operation
 	Disconnects       int
+	// ISOExportBytes is served as the raw volume backup payload for
+	// GetStorageVolumeBackupFile (used by the unattended install tests).
+	ISOExportBytes []byte
 
 	mu              sync.Mutex
 	calls           []string
+	backupExports   []BackupExportArgs
 	copyArgs        []*incus.InstanceCopyArgs
 	createArgs      []api.InstancesPost
 	updateArgs      []UpdateInstanceArgs
@@ -127,6 +139,7 @@ type Server struct {
 	updateProfiles  []UpdateProfileArgs
 	deleteProfiles  []string
 	updateMembers   []UpdateMemberArgs
+	createMembers   []api.ClusterMembersPost
 	createSnapshots []SnapshotArgs
 	deleteSnapshots []SnapshotArgs
 	deleteImages    []string
@@ -541,6 +554,9 @@ func (s *Server) GetCluster() (*api.Cluster, string, error) {
 // GetClusterMembers implements clusters.InstanceServer.
 func (s *Server) GetClusterMembers() ([]api.ClusterMember, error) {
 	s.record("GetClusterMembers")
+	if s.MembersFunc != nil {
+		return s.MembersFunc()
+	}
 	if s.MembersErr != nil {
 		return nil, s.MembersErr
 	}
@@ -1049,6 +1065,33 @@ func (s *Server) GetStoragePoolVolumes(pool string) ([]api.StorageVolume, error)
 	return append([]api.StorageVolume(nil), s.Volumes...), nil
 }
 
+// UseTarget returns the fake itself so member-bound calls still record against
+// the same server. The real client returns a client scoped to one member.
+func (s *Server) UseTarget(name string) incus.InstanceServer {
+	s.record("UseTarget:" + name)
+
+	return s
+}
+
+// GetStoragePoolVolume implements clusters.InstanceServer.
+func (s *Server) GetStoragePoolVolume(pool string, volType string, name string) (*api.StorageVolume, string, error) {
+	s.record("GetStoragePoolVolume:" + pool + "/" + volType + "/" + name)
+	if s.VolumeErr != nil {
+		return nil, "", s.VolumeErr
+	}
+
+	for i := range s.Volumes {
+		if s.Volumes[i].Name == name {
+			volume := s.Volumes[i]
+			return &volume, "", nil
+		}
+	}
+
+	// Mirror the real client, which answers with a StatusError so callers can
+	// distinguish "missing" from a transport failure.
+	return nil, "", api.StatusErrorf(http.StatusNotFound, "storage volume %q not found", name)
+}
+
 // CreateStoragePoolVolume implements clusters.InstanceServer.
 func (s *Server) CreateStoragePoolVolume(pool string, volume api.StorageVolumesPost) error {
 	s.record("CreateStoragePoolVolume:" + pool + "/" + volume.Name)
@@ -1067,6 +1110,66 @@ func (s *Server) DeleteStoragePoolVolume(pool string, volType string, name strin
 	s.mu.Unlock()
 
 	return s.DeleteVolumeErr
+}
+
+// BackupExportArgs records one volume backup export request.
+type BackupExportArgs struct {
+	Pool   string
+	Volume string
+}
+
+// CreateStorageVolumeBackup implements clusters.InstanceServer.
+func (s *Server) CreateStorageVolumeBackup(pool string, volName string, _ api.StorageVolumeBackupsPost) (incus.Operation, error) {
+	s.record("CreateStorageVolumeBackup:" + pool + "/" + volName)
+
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// GetStorageVolumeBackupFile implements clusters.InstanceServer. The served
+// bytes come from ISOExportBytes.
+func (s *Server) GetStorageVolumeBackupFile(pool string, volName string, name string, req *incus.BackupFileRequest) (*incus.BackupFileResponse, error) {
+	s.record("GetStorageVolumeBackupFile:" + pool + "/" + volName + "/" + name)
+
+	s.mu.Lock()
+	s.backupExports = append(s.backupExports, BackupExportArgs{Pool: pool, Volume: volName})
+	s.mu.Unlock()
+
+	if req == nil || req.BackupFile == nil {
+		return nil, fmt.Errorf("incusfake: BackupFileRequest.BackupFile is required")
+	}
+
+	size, err := io.Copy(req.BackupFile, bytes.NewReader(s.ISOExportBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	return &incus.BackupFileResponse{Size: size}, nil
+}
+
+// DeleteStorageVolumeBackup implements clusters.InstanceServer.
+func (s *Server) DeleteStorageVolumeBackup(pool string, volName string, name string) (incus.Operation, error) {
+	s.record("DeleteStorageVolumeBackup:" + pool + "/" + volName + "/" + name)
+
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// ExportBackupArgs returns the volume backup export calls recorded so far.
+func (s *Server) ExportBackupArgs() []BackupExportArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]BackupExportArgs, 0, len(s.backupExports))
+	out = append(out, s.backupExports...)
+
+	return out
 }
 
 // GetNetworkNames implements clusters.InstanceServer.
@@ -1093,6 +1196,16 @@ func (s *Server) GetNetworks() ([]api.Network, error) {
 	}
 
 	return []api.Network{{Name: "incusbr0", Type: "bridge", Managed: true, Config: api.ConfigMap{"ipv4.address": "10.0.0.1/24", "ipv6.address": "none"}}}, nil
+}
+
+// GetNetworkLeases implements clusters.InstanceServer.
+func (s *Server) GetNetworkLeases(network string) ([]api.NetworkLease, error) {
+	s.record("GetNetworkLeases:" + network)
+	if s.NetworkLeasesErr != nil {
+		return nil, s.NetworkLeasesErr
+	}
+
+	return s.NetworkLeases, nil
 }
 
 // GetStoragePoolResources implements clusters.InstanceServer.
@@ -1309,6 +1422,59 @@ func (s *Server) GetClusterMember(name string) (*api.ClusterMember, string, erro
 	}
 
 	return nil, "", api.StatusErrorf(http.StatusNotFound, "Cluster member %q not found", name)
+}
+
+// CreateClusterMember implements clusters.InstanceServer.
+func (s *Server) CreateClusterMember(member api.ClusterMembersPost) (incus.Operation, error) {
+	s.record("CreateClusterMember:" + member.ServerName)
+	s.mu.Lock()
+	s.createMembers = append(s.createMembers, member)
+	s.mu.Unlock()
+
+	if s.CreateMemberErr != nil {
+		return nil, s.CreateMemberErr
+	}
+
+	if s.JoinTokenMetadata != nil {
+		return &Operation{Metadata: s.JoinTokenMetadata}, nil
+	}
+
+	token := s.JoinToken
+	if token == nil {
+		token = &api.ClusterMemberJoinToken{
+			ServerName:  member.ServerName,
+			Fingerprint: "fleet-fingerprint",
+			Addresses:   []string{"192.0.2.10:8443"},
+			Secret:      "join-secret",
+			ExpiresAt:   time.Now().Add(time.Hour),
+		}
+	} else {
+		copied := *token
+		copied.ServerName = member.ServerName
+		token = &copied
+	}
+
+	addresses := make([]any, 0, len(token.Addresses))
+	for _, address := range token.Addresses {
+		addresses = append(addresses, address)
+	}
+
+	return &Operation{Metadata: map[string]any{
+		"serverName":  token.ServerName,
+		"secret":      token.Secret,
+		"fingerprint": token.Fingerprint,
+		"addresses":   addresses,
+		"expiresAt":   token.ExpiresAt.Format(time.RFC3339Nano),
+	}}, nil
+}
+
+// CreateMemberArgs returns the join-token requests recorded by
+// CreateClusterMember.
+func (s *Server) CreateMemberArgs() []api.ClusterMembersPost {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]api.ClusterMembersPost(nil), s.createMembers...)
 }
 
 // UpdateClusterMember implements clusters.InstanceServer.

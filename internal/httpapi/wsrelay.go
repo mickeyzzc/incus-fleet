@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -64,13 +65,22 @@ func relayTerminal(ctx context.Context, browser *websocket.Conn, op incus.Operat
 
 	go incusToBrowser(browser, data, done)
 	go browserToIncus(browser, data, controlConn, done)
+	opDone := make(chan error, 1)
 	go func() {
 		waitErr := op.WaitContext(ctx)
 		debugf("relay: operation finished: %v", waitErr)
-		done <- nil
+		opDone <- waitErr
 	}()
 
 	first := <-done
+
+	// Give the operation a moment to report its own failure (missing agent,
+	// stopped instance); that error is the reason the terminal should show.
+	var opErr error
+	select {
+	case opErr = <-opDone:
+	case <-time.After(2 * time.Second):
+	}
 
 	// Best-effort teardown of the remote operation. When a client vanishes
 	// the container-side console session can outlive the websocket and leave
@@ -84,10 +94,26 @@ func relayTerminal(ctx context.Context, browser *websocket.Conn, op incus.Operat
 	// Send websocket close frames before dropping the sockets. A bare TCP
 	// FIN looks like an abnormal closure (1006) to incusd, and its console
 	// handler then leaves the container-side forkconsole process running.
+	// A failed operation closes with its error text (bounded to the close
+	// frame's payload limit, on a rune boundary for UTF-8 safety) so the
+	// browser can show why the session died instead of a bare disconnect.
+	code := websocket.CloseNormalClosure
+	reason := ""
+	if opErr != nil {
+		code = websocket.CloseInternalServerErr
+		reason = opErr.Error()
+		if len(reason) > 120 {
+			runes := []rune(reason)
+			for len(string(runes)) > 120 {
+				runes = runes[:len(runes)-1]
+			}
+			reason = string(runes)
+		}
+	}
 	closeFrame := func(conn *websocket.Conn) {
 		deadline := time.Now().Add(time.Second)
 		_ = conn.WriteControl(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), deadline)
+			websocket.FormatCloseMessage(code, reason), deadline)
 	}
 	closeFrame(data)
 	closeFrame(browser)
@@ -154,25 +180,28 @@ func browserToIncus(browser, data, control *websocket.Conn, done chan<- error) {
 		}
 
 		if msgType == websocket.TextMessage {
-			if control == nil {
+			// Console mode speaks JSON control frames. A frame that looks like
+			// JSON but is malformed or unknown is a client bug and is dropped, as
+			// before. Plain text is exec stdin and must reach the process,
+			// otherwise interactive sessions appear dead.
+			trimmed := bytes.TrimSpace(payload)
+			if control != nil && len(trimmed) > 0 && trimmed[0] == '{' {
+				var ctl terminalControl
+				if json.Unmarshal(payload, &ctl) != nil || ctl.Type == "" {
+					continue
+				}
+
+				forwarded, marshalErr := controlFrame(ctl)
+				if marshalErr != nil {
+					continue
+				}
+				if err := control.WriteMessage(websocket.TextMessage, forwarded); err != nil {
+					done <- err
+					return
+				}
+
 				continue
 			}
-
-			var ctl terminalControl
-			if jsonErr := json.Unmarshal(payload, &ctl); jsonErr != nil {
-				continue
-			}
-
-			forwarded, marshalErr := controlFrame(ctl)
-			if marshalErr != nil {
-				continue
-			}
-			if err := control.WriteMessage(websocket.TextMessage, forwarded); err != nil {
-				done <- err
-				return
-			}
-
-			continue
 		}
 
 		if err := data.WriteMessage(websocket.BinaryMessage, payload); err != nil {

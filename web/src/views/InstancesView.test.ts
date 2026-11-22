@@ -167,7 +167,14 @@ describe('InstancesView', () => {
     await buttonByText(wrapper, 'Delete').trigger('click')
     await flushPromises()
 
-    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true)
+    // The delete dialog carries the volumes option (#13 F5); its footer
+    // button performs the deletion.
+    const dialog = wrapper.findComponent({ name: 'InstanceDeleteDialog' })
+    expect(dialog.exists()).toBe(true)
+    await dialog.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true, false)
     expect(ElMessage.success).toHaveBeenCalledWith('Deleted web.')
   })
 
@@ -193,6 +200,21 @@ describe('InstancesView', () => {
     await wrapper.find('input').setValue('nothing-here')
 
     expect(wrapper.text()).toContain('No instances match the filters')
+  })
+
+  it('configures the table to keep selections across polling refreshes', () => {
+    const wrapper = mountInstances()
+
+    // row-key + reserve-selection survive the 15s refresh instead of
+    // clearing the user's batch picks (#12).
+    const table = wrapper.findComponent({ name: 'ElTable' })
+    expect(typeof table.props('rowKey')).toBe('function')
+    const selectionColumn = wrapper
+      .findAllComponents({ name: 'ElTableColumn' })
+      .find((column) => column.props('type') === 'selection')
+    expect(selectionColumn?.props('reserveSelection')).toBe(true)
+
+    wrapper.unmount()
   })
 
   it('runs batch power on selected instances after confirmation', async () => {
@@ -249,5 +271,101 @@ describe('InstancesView', () => {
 
     // The toolbar is hidden while nothing is selected.
     expect(wrapper.find('.batch-bar').exists()).toBe(false)
+  })
+})
+
+describe('InstancesView dialogs', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockFleet()
+    vi.mocked(api.listKeys).mockResolvedValue([])
+    vi.mocked(api.listScripts).mockResolvedValue([])
+  })
+
+  it('opens the create dialog', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Create instance').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+  })
+
+  it('opens the migrate dialog from a row', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const row = wrapper.findAll('.el-table__row')[0]!
+    const migrate = row.findAll('button').find((b) => b.text().includes('Migrate'))
+    await migrate!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+  })
+
+  it('opens the clone dialog from a row', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const row = wrapper.findAll('.el-table__row')[0]!
+    const clone = row.findAll('button').find((b) => b.text().includes('Clone'))
+    await clone!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+  })
+})
+
+describe('InstancesView helper actions', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockFleet()
+    vi.mocked(api.listKeys).mockResolvedValue([])
+    vi.mocked(api.listScripts).mockResolvedValue([])
+  })
+
+  it('opens the batch dialog only when rows are selected', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openBatch: (mode: 'keys' | 'script') => void
+      batchOpen: boolean
+    }
+
+    // No selection: the dialog must stay closed.
+    vm.openBatch('keys')
+    await flushPromises()
+    expect(vm.batchOpen).toBe(false)
+  })
+
+  it('opens the batch dialog for selected rows', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      handleSelectionChange: (rows: Array<{ cluster: string; name: string }>) => void
+      openBatch: (mode: 'keys' | 'script') => void
+      batchOpen: boolean
+    }
+
+    vm.handleSelectionChange([{ cluster: 'c1', name: 'web' }])
+    vm.openBatch('script')
+    await flushPromises()
+
+    expect(vm.batchOpen).toBe(true)
+  })
+
+  it('resets to the first page when filters change', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { page: number; search: string }
+    vm.page = 3
+    vm.search = 'web'
+    await flushPromises()
+
+    expect(vm.page).toBe(1)
   })
 })

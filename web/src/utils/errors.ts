@@ -8,6 +8,9 @@ const CODE_KEYS: Record<string, string> = {
   conflict: 'errors.conflict',
   cluster_unavailable: 'errors.clusterUnavailable',
   invalid_token: 'login.invalidToken',
+  invalid_credentials: 'login.invalidCredentials',
+  account_locked: 'login.accountLocked',
+  account_disabled: 'login.accountDisabled',
 }
 
 /** Extracts a display message from an unknown thrown value. */

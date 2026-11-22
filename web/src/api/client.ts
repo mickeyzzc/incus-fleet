@@ -1,10 +1,21 @@
 import type {
   BatchItem,
+  ClusterMemberJoinRequest,
+  ClusterMemberJoinResult,
   ClusterRegisterRequest,
   ClusterTraffic,
   NodeAddressRequest,
+  AgentBootstrapRequest,
+  AgentBootstrapResult,
+  AgentEnrollmentToken,
+  AgentSummary,
+  NodeAudit,
   NodeFirewallRequest,
   NodeSnapshot,
+  NodeTask,
+  NodeTaskEvent,
+  TelemetrySeries,
+  PrometheusQueryResponse,
   BatchKeysRequest,
   BatchPowerRequest,
   BatchScriptsRequest,
@@ -14,6 +25,8 @@ import type {
   CloneRequest,
   CreateInstanceRequest,
   DeviceRequest,
+  GuestAgentInstallRequest,
+  GuestAgentStep,
   FileEntry,
   HealthResponse,
   ImportImageRequest,
@@ -32,17 +45,29 @@ import type {
   Migration,
   MigrationRequest,
   NetworkRequest,
+  OverlayRequest,
+  OverlayStatus,
   OpsRequest,
   OpsResult,
   SPICEPrepare,
+  AnswerProfile,
+  UnattendedAnswerPreview,
+  UnattendedLaunchRequest,
+  UnattendedLaunchResult,
+  DesktopPrepare,
+  DesktopInputEvent,
   Profile,
   ProfileRequest,
   Keystone,
   StoredScript,
   SessionResponse,
+  User,
+  CreateUserRequest,
+  UpdateUserRequest,
   SnapshotRequest,
   StoragePoolRequest,
   StorageVolume,
+  FleetVolume,
   UpdateInstanceRequest,
   VersionResponse,
   VolumeRequest,
@@ -99,8 +124,37 @@ export class ApiClient {
     this.bearerToken = token
   }
 
-  async login(token: string): Promise<SessionResponse> {
+  async login(username: string, password: string): Promise<SessionResponse> {
+    return this.request<SessionResponse>('POST', '/api/v1/auth/login', { username, password })
+  }
+
+  /** Exchanges the shared bootstrap token for a session. */
+  async loginWithToken(token: string): Promise<SessionResponse> {
     return this.request<SessionResponse>('POST', '/api/v1/auth/login', { token })
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await this.request<void>('POST', '/api/v1/auth/password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    })
+  }
+
+  async listUsers(): Promise<User[]> {
+    const data = await this.request<{ users: User[] }>('GET', '/api/v1/users')
+    return data.users ?? []
+  }
+
+  async createUser(request: CreateUserRequest): Promise<User> {
+    return this.request<User>('POST', '/api/v1/users', request)
+  }
+
+  async updateUser(id: string, request: UpdateUserRequest): Promise<User> {
+    return this.request<User>('PATCH', `/api/v1/users/${encodeURIComponent(id)}`, request)
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/users/${encodeURIComponent(id)}`)
   }
 
   async logout(): Promise<void> {
@@ -247,6 +301,32 @@ export class ApiClient {
     )
   }
 
+  async previewUnattendedAnswer(
+    cluster: string,
+    pool: string,
+    name: string,
+    request: UnattendedLaunchRequest,
+  ): Promise<UnattendedAnswerPreview> {
+    return this.request<UnattendedAnswerPreview>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/iso/${encodeURIComponent(pool)}/${encodeURIComponent(name)}/launch-unattended/preview`,
+      request,
+    )
+  }
+
+  async launchUnattended(
+    cluster: string,
+    pool: string,
+    name: string,
+    request: UnattendedLaunchRequest,
+  ): Promise<{ instance: InstanceSummary; launch: UnattendedLaunchResult }> {
+    return this.request<{ instance: InstanceSummary; launch: UnattendedLaunchResult }>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/iso/${encodeURIComponent(pool)}/${encodeURIComponent(name)}/launch-unattended`,
+      request,
+    )
+  }
+
   async runOps(cluster: string, instance: string, request: OpsRequest): Promise<OpsResult> {
     return this.request<OpsResult>(
       'POST',
@@ -305,6 +385,23 @@ export class ApiClient {
     await this.request<void>('DELETE', `/api/v1/scripts/${encodeURIComponent(id)}`)
   }
 
+  async listAnswerProfiles(): Promise<AnswerProfile[]> {
+    const data = await this.request<{ answer_profiles: AnswerProfile[] }>('GET', '/api/v1/answer-profiles')
+    return data.answer_profiles ?? []
+  }
+
+  async createAnswerProfile(request: Omit<AnswerProfile, 'id' | 'created_at' | 'updated_at'>): Promise<AnswerProfile> {
+    return this.request<AnswerProfile>('POST', '/api/v1/answer-profiles', request)
+  }
+
+  async updateAnswerProfile(id: string, request: Omit<AnswerProfile, 'id' | 'created_at' | 'updated_at'>): Promise<AnswerProfile> {
+    return this.request<AnswerProfile>('PATCH', `/api/v1/answer-profiles/${encodeURIComponent(id)}`, request)
+  }
+
+  async deleteAnswerProfile(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/answer-profiles/${encodeURIComponent(id)}`)
+  }
+
   async batchKeys(request: BatchKeysRequest): Promise<BatchItem[]> {
     const data = await this.request<{ items: BatchItem[] }>('POST', '/api/v1/batch/keys', request)
     return data.items ?? []
@@ -336,6 +433,45 @@ export class ApiClient {
   vgaURL(cluster: string, instance: string): string {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
     return `${proto}://${window.location.host}/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/vga`
+  }
+
+  /** Arms the QMP graphical console for one VM (installs the monitor socket). */
+  async prepareDesktop(cluster: string, instance: string): Promise<DesktopPrepare> {
+    return this.request<DesktopPrepare>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/desktop/prepare`,
+    )
+  }
+
+  /** Fetches the current framebuffer of a VM as a PNG blob. */
+  async desktopScreenshot(cluster: string, instance: string): Promise<Blob> {
+    const headers: Record<string, string> = { Accept: 'image/png' }
+    if (this.bearerToken) {
+      headers.Authorization = `Bearer ${this.bearerToken}`
+    }
+
+    const response = await this.fetchImpl(
+      `${this.baseURL}/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/desktop/screenshot`,
+      { headers, credentials: 'same-origin' },
+    )
+    if (!response.ok) {
+      if (response.status === 401) {
+        this.onUnauthorized?.()
+      }
+
+      throw await this.toError(response)
+    }
+
+    return await response.blob()
+  }
+
+  /** Injects one keyboard or pointer event into a VM's graphical console. */
+  async sendDesktopInput(cluster: string, instance: string, event: DesktopInputEvent): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/desktop/input`,
+      event,
+    )
   }
 
   async deleteImage(cluster: string, fingerprint: string): Promise<void> {
@@ -373,6 +509,42 @@ export class ApiClient {
       'DELETE',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/snapshots/${encodeURIComponent(snapshot)}`,
     )
+  }
+
+  /**
+   * Lists every custom volume across all clusters, tagged with its cluster and
+   * pool. Pools that fail to answer are skipped so one unreachable cluster does
+   * not blank the whole fleet view.
+   */
+  async listAllVolumes(): Promise<FleetVolume[]> {
+    const clusters = await this.listClusters()
+    const perCluster = await Promise.all(
+      clusters.map(async (cluster) => {
+        try {
+          const resources = await this.getResources(cluster.name)
+          const pools = resources.storage_pools ?? []
+          const perPool = await Promise.all(
+            pools.map(async (pool) => {
+              try {
+                const volumes = await this.listVolumes(cluster.name, pool.name)
+                return volumes.map((volume) => ({
+                  ...volume,
+                  cluster: cluster.name,
+                  pool: pool.name,
+                }))
+              } catch {
+                return []
+              }
+            }),
+          )
+          return perPool.flat()
+        } catch {
+          return []
+        }
+      }),
+    )
+
+    return perCluster.flat()
   }
 
   async listVolumes(cluster: string, pool: string): Promise<StorageVolume[]> {
@@ -414,6 +586,32 @@ export class ApiClient {
     return this.request<InstanceDetail>(
       'DELETE',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/devices/${encodeURIComponent(device)}`,
+    )
+  }
+
+  async updateDevice(
+    cluster: string,
+    instance: string,
+    device: string,
+    request: DeviceRequest,
+  ): Promise<InstanceDetail> {
+    return this.request<InstanceDetail>(
+      'PATCH',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/devices/${encodeURIComponent(device)}`,
+      request,
+    )
+  }
+
+  /** Installs the official incus-agent into a virtual machine over SSH. */
+  async installGuestAgent(
+    cluster: string,
+    instance: string,
+    request: GuestAgentInstallRequest,
+  ): Promise<{ steps: GuestAgentStep[] }> {
+    return this.request<{ steps: GuestAgentStep[] }>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(instance)}/agent/install`,
+      request,
     )
   }
 
@@ -469,8 +667,17 @@ export class ApiClient {
     return data.metrics
   }
 
-  async deleteInstance(cluster: string, name: string, force = false): Promise<void> {
-    const query = force ? '?force=true' : ''
+  async deleteInstance(cluster: string, name: string, force = false, volumes = false): Promise<void> {
+    const params = new URLSearchParams()
+    if (force) {
+      params.set('force', 'true')
+    }
+    // volumes=true also removes attached custom volumes (shared ISO
+    // installer assets are kept server-side).
+    if (volumes) {
+      params.set('volumes', 'true')
+    }
+    const query = params.size > 0 ? `?${params.toString()}` : ''
     await this.request<void>(
       'DELETE',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(name)}${query}`,
@@ -524,6 +731,43 @@ export class ApiClient {
     await this.request<void>(
       'DELETE',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/networks/${encodeURIComponent(name)}`,
+    )
+  }
+
+  async listOverlays(cluster: string): Promise<OverlayStatus[]> {
+    const data = await this.request<{ overlays: OverlayStatus[] }>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/overlay`,
+    )
+    return data.overlays ?? []
+  }
+
+  async getOverlay(cluster: string, name: string): Promise<OverlayStatus> {
+    return this.request<OverlayStatus>(
+      'GET',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/overlay/${encodeURIComponent(name)}`,
+    )
+  }
+
+  async enableOverlay(cluster: string, request: OverlayRequest): Promise<OverlayStatus> {
+    return this.request<OverlayStatus>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/overlay`,
+      request,
+    )
+  }
+
+  async reconcileOverlay(cluster: string, name: string): Promise<OverlayStatus> {
+    return this.request<OverlayStatus>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/overlay/${encodeURIComponent(name)}/reconcile`,
+    )
+  }
+
+  async disableOverlay(cluster: string, name: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/overlay/${encodeURIComponent(name)}`,
     )
   }
 
@@ -807,46 +1051,172 @@ export class ApiClient {
     )
   }
 
-  /** Returns the physical network snapshot of the node fleet runs on. */
-  async nodeSnapshot(wifiDevice?: string): Promise<NodeSnapshot> {
+  /** Returns the physical network snapshot of one cluster member. */
+  async nodeSnapshot(cluster: string, member: string, wifiDevice?: string): Promise<NodeSnapshot> {
     const query = wifiDevice ? `?wifi=${encodeURIComponent(wifiDevice)}` : ''
-    const data = await this.request<NodeSnapshot>('GET', `/api/v1/node${query}`)
-    return data
+    return this.request<NodeSnapshot>('GET', `${this.nodePath(cluster, member)}${query}`)
   }
 
-  /** Brings one NIC of the node up or down. */
-  async nodeNICState(name: string, up: boolean): Promise<void> {
-    await this.request<void>('POST', `/api/v1/node/networks/${encodeURIComponent(name)}/state`, { up })
+  /** Brings one NIC of a cluster member up or down. */
+  async nodeNICState(cluster: string, member: string, name: string, up: boolean): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `${this.nodePath(cluster, member)}/networks/${encodeURIComponent(name)}/state`,
+      { up },
+    )
   }
 
-  /** Configures one NIC with DHCP or a static address. */
-  async nodeApplyAddress(name: string, request: NodeAddressRequest): Promise<void> {
-    await this.request<void>('PATCH', `/api/v1/node/networks/${encodeURIComponent(name)}`, request)
+  /** Configures one NIC of a cluster member with DHCP or a static address. */
+  async nodeApplyAddress(cluster: string, member: string, name: string, request: NodeAddressRequest): Promise<void> {
+    await this.request<void>(
+      'PATCH',
+      `${this.nodePath(cluster, member)}/networks/${encodeURIComponent(name)}`,
+      request,
+    )
   }
 
-  /** Associates one Wi-Fi interface with an access point. */
-  async nodeWifiConnect(name: string, ssid: string, password: string): Promise<void> {
-    await this.request<void>('POST', `/api/v1/node/networks/${encodeURIComponent(name)}/wifi`, { ssid, password })
+  /** Associates one Wi-Fi interface of a cluster member with an access point. */
+  async nodeWifiConnect(cluster: string, member: string, name: string, ssid: string, password: string): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `${this.nodePath(cluster, member)}/networks/${encodeURIComponent(name)}/wifi`,
+      { ssid, password },
+    )
   }
 
-  /** Adds one static route on the node. */
-  async nodeAddRoute(destination: string, gateway: string, device: string): Promise<void> {
-    await this.request<void>('POST', '/api/v1/node/routes', { destination, gateway, device })
+  /** Adds one static route on a cluster member. */
+  async nodeAddRoute(cluster: string, member: string, destination: string, gateway: string, device: string): Promise<void> {
+    await this.request<void>('POST', `${this.nodePath(cluster, member)}/routes`, { destination, gateway, device })
   }
 
-  /** Deletes one static route from the node. */
-  async nodeDeleteRoute(destination: string): Promise<void> {
-    await this.request<void>('DELETE', `/api/v1/node/routes/${encodeURIComponent(destination)}`)
+  /** Deletes one static route from a cluster member. */
+  async nodeDeleteRoute(cluster: string, member: string, destination: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `${this.nodePath(cluster, member)}/routes/${encodeURIComponent(destination)}`,
+    )
   }
 
   /** Adds one firewall input rule to the fleet-managed nftables table. */
-  async nodeAddFirewallRule(request: NodeFirewallRequest): Promise<void> {
-    await this.request<void>('POST', '/api/v1/node/firewall', request)
+  async nodeAddFirewallRule(cluster: string, member: string, request: NodeFirewallRequest): Promise<void> {
+    await this.request<void>('POST', `${this.nodePath(cluster, member)}/firewall`, request)
   }
 
   /** Deletes one firewall rule by handle. */
-  async nodeDeleteFirewallRule(handle: string): Promise<void> {
-    await this.request<void>('DELETE', `/api/v1/node/firewall/${encodeURIComponent(handle)}`)
+  async nodeDeleteFirewallRule(cluster: string, member: string, handle: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `${this.nodePath(cluster, member)}/firewall/${encodeURIComponent(handle)}`,
+    )
+  }
+
+  /** Lists recent host tasks for one cluster member. */
+  async nodeTasks(cluster: string, member: string, limit = 50): Promise<NodeTask[]> {
+    const query = new URLSearchParams({ cluster, member, limit: String(limit) })
+    const data = await this.request<{ tasks: NodeTask[] }>('GET', `/api/v1/tasks?${query.toString()}`)
+    return data.tasks ?? []
+  }
+
+  /** Loads one host task and its event timeline. */
+  async nodeTask(id: string): Promise<{ task: NodeTask; events: NodeTaskEvent[] }> {
+    const data = await this.request<{ task: NodeTask; events: NodeTaskEvent[] }>(
+      'GET',
+      `/api/v1/tasks/${encodeURIComponent(id)}`,
+    )
+    return { task: data.task, events: data.events ?? [] }
+  }
+
+  /** Lists host audit records for one cluster member. */
+  async nodeAudit(cluster: string, member: string, limit = 50): Promise<NodeAudit[]> {
+    const query = new URLSearchParams({ cluster, member, limit: String(limit) })
+    const data = await this.request<{ audit: NodeAudit[] }>('GET', `/api/v1/audit?${query.toString()}`)
+    return data.audit ?? []
+  }
+
+  /** Returns the center's one-hour telemetry buffer for one member. */
+  async hostMetrics(cluster: string, member: string, from = '1h'): Promise<TelemetrySeries[]> {
+    const query = new URLSearchParams({ cluster, member, from })
+    const data = await this.request<{ series: TelemetrySeries[] }>(
+      'GET',
+      `/api/v1/metrics/query?${query.toString()}`,
+    )
+    return data.series ?? []
+  }
+
+  /** Runs a PromQL range query through the center's external TSDB proxy. */
+  async metricQueryRange(query: string, from = '1h', step = '1m', to = ''): Promise<TelemetrySeries[]> {
+    const params = new URLSearchParams({ query, from, step })
+    if (to) {
+      params.set('to', to)
+    }
+    const data = await this.request<PrometheusQueryResponse>(
+      'GET',
+      `/api/v1/metrics/query_range?${params.toString()}`,
+    )
+    return (data.data?.result ?? []).map((result) => {
+      const labels = { ...result.metric }
+      const name = labels.__name__ ?? ''
+      delete labels.__name__
+      return {
+        name,
+        labels,
+        type: 'gauge',
+        points: result.values.map(([timestamp, value]) => ({
+          at: new Date(timestamp * 1000).toISOString(),
+          value: Number(value),
+        })),
+      }
+    })
+  }
+
+  /** Lists enrolled host agents, optionally filtered by cluster or member. */
+  async listAgents(cluster?: string, member?: string): Promise<AgentSummary[]> {
+    const query = new URLSearchParams()
+    if (cluster) {
+      query.set('cluster', cluster)
+    }
+    if (member) {
+      query.set('member', member)
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    const data = await this.request<{ agents: AgentSummary[] }>('GET', `/api/v1/agents${suffix}`)
+    return data.agents ?? []
+  }
+
+  /** Creates a one-time enrollment token bound to one cluster member. */
+  async createAgentEnrollmentToken(
+    cluster: string,
+    member: string,
+    ttlSeconds = 900,
+  ): Promise<AgentEnrollmentToken> {
+    return this.request<AgentEnrollmentToken>('POST', '/api/v1/agents/enrollment-tokens', {
+      cluster,
+      member,
+      ttl_seconds: ttlSeconds,
+    })
+  }
+
+  /** Runs the signed Incus bootstrap for one enrolled agent. */
+  async bootstrapAgent(agentId: string, request: AgentBootstrapRequest): Promise<AgentBootstrapResult> {
+    const data = await this.request<{ result: AgentBootstrapResult }>(
+      'POST',
+      `/api/v1/agents/${encodeURIComponent(agentId)}/bootstrap`,
+      request,
+    )
+    return data.result
+  }
+
+  /** Provisions a new host and joins it to a cluster. */
+  async joinClusterMember(cluster: string, request: ClusterMemberJoinRequest): Promise<ClusterMemberJoinResult> {
+    return this.request<ClusterMemberJoinResult>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/members`,
+      request,
+    )
+  }
+
+  private nodePath(cluster: string, member: string): string {
+    return `/api/v1/clusters/${encodeURIComponent(cluster)}/members/${encodeURIComponent(member)}/node`
   }
 
   /** Aggregates the network counters of every running instance on one cluster. */

@@ -10,7 +10,6 @@
         "@xterm/xterm": "^6.0.0",
         "element-plus": "^2.14.8",
         "pinia": "^4.1.0",
-        "spice-client": "^1.2.0",
         "vue": "^3.5.45",
         "vue-i18n": "^11",
         "vue-router": "^5.5.0",
@@ -528,8 +527,6 @@
     "shebang-regex": ["shebang-regex@3.0.0", "https://registry.npmmirror.com/shebang-regex/-/shebang-regex-3.0.0.tgz", {}, "sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A=="],
 
     "source-map-js": ["source-map-js@1.2.2", "https://registry.npmmirror.com/source-map-js/-/source-map-js-1.2.2.tgz", {}, "sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw=="],
-
-    "spice-client": ["spice-client@1.2.0", "https://registry.npmmirror.com/spice-client/-/spice-client-1.2.0.tgz", {}, "sha512-FOAkyvK0mSZmrzY1ueB9cbQKcgkyReNpyko6nnnpy3sWKtrRJGJkmwm5Hw4DaZAa0EzLfqu4m7tCmWCxorP0GQ=="],
 
     "std-env": ["std-env@4.3.0", "https://registry.npmmirror.com/std-env/-/std-env-4.3.0.tgz", {}, "sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag=="],
 

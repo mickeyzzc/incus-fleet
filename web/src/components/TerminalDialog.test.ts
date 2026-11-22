@@ -39,7 +39,7 @@ class MockWebSocket {
   binaryType = 'blob'
   sent: (string | ArrayBuffer)[] = []
   onopen: (() => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((event?: { code: number; reason: string }) => void) | null = null
   onmessage: ((event: { data: unknown }) => void) | null = null
   onerror: (() => void) | null = null
 
@@ -223,10 +223,34 @@ describe('TerminalDialog', () => {
 
     socket.onmessage?.({ data: 'plain text' })
     socket.onmessage?.({ data: new TextEncoder().encode('bytes').buffer })
-    socket.onclose?.()
+    socket.onclose?.({ code: 1000, reason: '' })
     await flushPromises()
 
     expect(wrapper.text()).toBeTruthy()
+  })
+
+  it('surfaces the backend close reason instead of a bare disconnect', async () => {
+    const wrapper = mountDialog()
+    await settle()
+
+    const socket = MockWebSocket.instances[0]
+    if (!socket) {
+      throw new Error('socket missing')
+    }
+
+    // A failed exec (agent missing) closes with 1011 plus the server reason.
+    socket.onclose?.({ code: 1011, reason: 'Failed to connect to the incus-agent' })
+    await flushPromises()
+
+    const status = wrapper.find('.terminal-toolbar .el-tag')
+    expect(status.text()).toContain('Failed to connect to the incus-agent')
+
+    // A normal close without a reason still reads as a plain disconnect.
+    socket.onclose?.({ code: 1000, reason: '' })
+    await flushPromises()
+    expect(status.text()).toBe('Disconnected.')
+
+    wrapper.unmount()
   })
 
   it('sends resize frames on demand and reports socket errors', async () => {
@@ -260,5 +284,98 @@ describe('TerminalDialog', () => {
     await flushPromises()
 
     expect(socket.readyState).toBe(3)
+  })
+})
+
+describe('TerminalDialog default session', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    document.body.innerHTML = ''
+    MockWebSocket.instances = []
+    vi.mocked(api.terminalURL).mockImplementation(
+      (_cluster, instance, kind) =>
+        `ws://fleet.local/api/v1/clusters/c1/instances/${instance}/${kind}`,
+    )
+    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    document.body.innerHTML = ''
+  })
+
+  it('opens containers in exec mode because Incus has no container console', async () => {
+    document.body.innerHTML = ''
+    MockWebSocket.instances = []
+    const wrapper = mount(TerminalDialog, {
+      attachTo: document.body,
+      props: { modelValue: true, cluster: 'c1', instance: 'web', instanceType: 'container' },
+      global: { plugins: [ElementPlus] },
+    })
+    await settle()
+
+    expect(MockWebSocket.instances[0]?.url).toBe(
+      'ws://fleet.local/api/v1/clusters/c1/instances/web/exec',
+    )
+
+    wrapper.unmount()
+  })
+
+  it('keeps virtual machines on the console', async () => {
+    document.body.innerHTML = ''
+    MockWebSocket.instances = []
+    const wrapper = mount(TerminalDialog, {
+      attachTo: document.body,
+      props: { modelValue: true, cluster: 'c1', instance: 'vm', instanceType: 'virtual-machine' },
+      global: { plugins: [ElementPlus] },
+    })
+    await settle()
+
+    expect(MockWebSocket.instances[0]?.url).toBe(
+      'ws://fleet.local/api/v1/clusters/c1/instances/vm/console',
+    )
+
+    wrapper.unmount()
+  })
+})
+
+describe('TerminalDialog resize', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    document.body.innerHTML = ''
+    MockWebSocket.instances = []
+    vi.mocked(api.terminalURL).mockImplementation(
+      (_cluster, instance, kind) => `ws://fleet.local/api/v1/clusters/c1/instances/${instance}/${kind}`,
+    )
+    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    document.body.innerHTML = ''
+  })
+
+  it('sends a resize frame carrying the terminal geometry', async () => {
+    const wrapper = mount(TerminalDialog, {
+      attachTo: document.body,
+      props: { modelValue: true, cluster: 'c1', instance: 'web' },
+      global: { plugins: [ElementPlus] },
+    })
+    await settle()
+
+    const socket = MockWebSocket.instances[0]!
+    socket.onopen?.()
+    await settle()
+
+    const vm = wrapper.vm as unknown as { onResize: () => void }
+    vm.onResize()
+    await settle()
+
+    const resize = socket.sent
+      .map((item) => (typeof item === 'string' ? item : new TextDecoder().decode(item)))
+      .find((item) => item.includes('"type":"resize"'))
+    expect(resize, `expected a resize frame in ${JSON.stringify(socket.sent)}`).toBeTruthy()
+
+    wrapper.unmount()
   })
 })

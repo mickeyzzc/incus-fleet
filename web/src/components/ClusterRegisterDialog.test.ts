@@ -103,7 +103,7 @@ describe('ClusterRegisterDialog', () => {
     const wrapper = mountDialog()
     expect(wrapper.find('input[placeholder="c64"]').exists()).toBe(true)
     expect(wrapper.find('input[placeholder="Cluster 64"]').exists()).toBe(true)
-    expect(wrapper.find('input[placeholder="https://192.168.64.21:8443"]').exists()).toBe(true)
+    expect(wrapper.find('input[placeholder="https://192.0.2.10:8443"]').exists()).toBe(true)
     expect(wrapper.findAll('input[type="file"]').length).toBe(3)
   })
 
@@ -123,7 +123,7 @@ describe('ClusterRegisterDialog', () => {
     await pickFile(inputs[1]!.element as HTMLInputElement, new File(['key-content'], 'key.pem'))
 
     await wrapper.find('input[placeholder="c64"]').setValue('test-cluster')
-    await wrapper.find('input[placeholder="https://192.168.64.21:8443"]').setValue('https://10.0.0.1:8443')
+    await wrapper.find('input[placeholder="https://192.0.2.10:8443"]').setValue('https://10.0.0.1:8443')
 
     const addButton = wrapper.findAll('button').filter((b) => b.text().includes('Add'))[0]!
     await addButton.trigger('click')
@@ -150,7 +150,7 @@ describe('ClusterRegisterDialog', () => {
 
     await wrapper.find('input[placeholder="c64"]').setValue('c1')
     await wrapper.find('input[placeholder="Cluster 64"]').setValue('Cluster One')
-    await wrapper.find('input[placeholder="https://192.168.64.21:8443"]').setValue('https://10.0.0.1:8443')
+    await wrapper.find('input[placeholder="https://192.0.2.10:8443"]').setValue('https://10.0.0.1:8443')
     await wrapper.find('input[placeholder="default"]').setValue('custom-project')
 
     const addButton = wrapper.findAll('button').filter((b) => b.text().includes('Add'))[0]!
@@ -178,7 +178,7 @@ describe('ClusterRegisterDialog', () => {
     await pickFile(inputs[1]!.element as HTMLInputElement, new File(['key'], 'key.pem'))
 
     await wrapper.find('input[placeholder="c64"]').setValue('fail')
-    await wrapper.find('input[placeholder="https://192.168.64.21:8443"]').setValue('https://x:8443')
+    await wrapper.find('input[placeholder="https://192.0.2.10:8443"]').setValue('https://x:8443')
 
     const addButton = wrapper.findAll('button').filter((b) => b.text().includes('Add'))[0]!
     await addButton.trigger('click')

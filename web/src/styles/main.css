@@ -604,3 +604,12 @@ p {
     padding: 26px 22px;
   }
 }
+
+.topbar-user {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
+}

@@ -200,6 +200,47 @@ export interface NetworkRequest {
   config?: Record<string, string>
 }
 
+/** One member's participation in a cluster private overlay network. */
+export interface OverlayMemberStatus {
+  member: string
+  underlay_ip?: string
+  bridge_ip?: string
+  links: number
+  gateway: boolean
+  error?: string
+}
+
+/** A fleet-managed private network that spans every cluster member. */
+export interface OverlayStatus {
+  cluster: string
+  name: string
+  bridge: string
+  vni: number
+  subnet: string
+  gateway_member: string
+  mtu: number
+  dhcp_start?: string
+  dhcp_end?: string
+  enabled: boolean
+  members: OverlayMemberStatus[]
+  tunnels: string[][]
+  steps?: string[]
+}
+
+/** Request used to create or update a private overlay network. */
+export interface OverlayRequest {
+  name?: string
+  bridge?: string
+  vni?: number
+  subnet?: string
+  gateway_member?: string
+  mtu?: number
+  dhcp_start?: string
+  dhcp_end?: string
+  underlay_nic?: string
+  underlay_ips?: Record<string, string>
+}
+
 /** One instance profile. */
 export interface Profile {
   name: string
@@ -287,6 +328,70 @@ export interface LaunchISORequest {
   start?: boolean
 }
 
+/** Installer families supported by the unattended install pipeline. */
+export type UnattendedProfile = 'debian-preseed' | 'ubuntu-autoinstall' | 'kickstart' | 'nocloud'
+
+export interface UnattendedAnswerSpec {
+  hostname?: string
+  username?: string
+  password?: string
+  timezone?: string
+  disk?: string
+  locale?: string
+  keyboard?: string
+}
+
+export interface UnattendedLaunchRequest {
+  name: string
+  profile: UnattendedProfile
+  /** Overrides the built-in template with operator-provided content. */
+  answer_file?: string
+  /** Selects a stored answer profile; the server resolves it when set. */
+  answer_profile_id?: string
+  spec?: UnattendedAnswerSpec
+  network?: string
+  root_disk?: string
+  start?: boolean
+}
+
+/** A reusable unattended-install answer configuration. */
+export interface AnswerProfile {
+  id: string
+  name: string
+  profile: UnattendedProfile
+  hostname?: string
+  username?: string
+  password?: string
+  timezone?: string
+  disk?: string
+  locale?: string
+  keyboard?: string
+  answer_file?: string
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface UnattendedMedia {
+  device: string
+  volume: string
+  pool: string
+  seed: boolean
+}
+
+export interface UnattendedLaunchResult {
+  name: string
+  media: UnattendedMedia[]
+  profile: UnattendedProfile
+  answer_file_name: string
+}
+
+export interface UnattendedAnswerPreview {
+  content: string
+  file_name: string
+  profile: UnattendedProfile
+}
+
 export interface OpsRequest {
   action: 'run-script' | 'set-password' | 'inject-key'
   script?: string
@@ -368,6 +473,25 @@ export interface SPICEPrepare {
   port: number
   applied: boolean
   restart_required: boolean
+}
+
+/** Result of arming the QMP graphical console for one VM. */
+export interface DesktopPrepare {
+  ready: boolean
+  restarted: boolean
+}
+
+/** One keyboard or absolute-pointer event for the graphical console. */
+export interface DesktopInputEvent {
+  type: 'key' | 'pointer'
+  key?: string
+  modifiers?: string[]
+  repeat?: number
+  x?: number
+  y?: number
+  button?: string
+  down?: boolean
+  move?: boolean
 }
 
 export interface CloneRequest {
@@ -457,6 +581,12 @@ export interface StorageVolume {
   location?: string
 }
 
+/** One custom volume with the cluster and pool it lives in. */
+export interface FleetVolume extends StorageVolume {
+  cluster: string
+  pool: string
+}
+
 /** Request used to create a custom storage volume. */
 export interface VolumeRequest {
   name: string
@@ -479,6 +609,22 @@ export interface DeviceRequest {
   listen?: string
   connect?: string
   boot?: string
+}
+
+/** One stage of the in-guest incus-agent install. */
+export interface GuestAgentStep {
+  name: string
+  status: 'ok' | 'failed' | 'warn'
+  detail?: string
+}
+
+/** Request to install the official incus-agent into a VM over SSH. */
+export interface GuestAgentInstallRequest {
+  address?: string
+  ssh_port?: number
+  ssh_user: string
+  ssh_password?: string
+  sudo_password?: string
 }
 
 /** One file or directory inside an instance. */
@@ -518,6 +664,38 @@ export interface MigrationRequest {
 export interface SessionResponse {
   authenticated: boolean
   expires_at?: string
+  username?: string
+  role?: UserRole
+}
+
+/** Permission level of a signed-in account. */
+export type UserRole = 'admin' | 'operator' | 'viewer'
+
+/** One local account. Password material never leaves the server. */
+export interface User {
+  id: string
+  username: string
+  role: UserRole
+  disabled: boolean
+  must_change_password: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateUserRequest {
+  username: string
+  password: string
+  role: UserRole
+  disabled?: boolean
+  must_change_password?: boolean
+}
+
+export interface UpdateUserRequest {
+  username?: string
+  password?: string
+  role?: UserRole
+  disabled?: boolean
+  must_change_password?: boolean
 }
 
 export interface VersionResponse {
@@ -581,6 +759,44 @@ export interface NodeSnapshot {
   wifi_scan?: NodeWiFiNetwork[]
   wifi_device?: string
   capabilities: string[]
+  backend?: string
+}
+
+export interface NodeTask {
+  id: string
+  cluster: string
+  member: string
+  type: string
+  state: string
+  progress?: string
+  result?: string
+  error?: string
+  plan?: string
+  created_at: string
+  started_at?: string
+  finished_at?: string
+}
+
+export interface NodeTaskEvent {
+  id: string
+  task_id: string
+  at: string
+  state: string
+  message?: string
+}
+
+export interface NodeAudit {
+  id: string
+  at: string
+  actor?: string
+  source_ip?: string
+  backend: string
+  cluster: string
+  member: string
+  action: string
+  task_id?: string
+  result: string
+  detail?: string
 }
 
 export interface NodeAddressRequest {
@@ -595,6 +811,69 @@ export interface NodeFirewallRequest {
   proto: 'tcp' | 'udp'
   action: 'accept' | 'drop'
   comment?: string
+}
+
+/** Provisions a new host and joins it to a cluster. */
+export interface ClusterMemberJoinRequest {
+  name?: string
+  address: string
+  ssh_user?: string
+  ssh_port?: number
+  ssh_password?: string
+  sudo_password?: string
+  install_incus: boolean
+  install_vms: boolean
+  ignore_host_key: boolean
+  storage_source?: string
+  incus_repo?: string
+  incus_repo_key?: string
+}
+
+export interface ClusterMemberJoinStep {
+  name: string
+  status: string
+  detail?: string
+}
+
+export interface ClusterMemberJoinResult {
+  member: ClusterMember
+  steps: ClusterMemberJoinStep[]
+}
+
+export interface AgentSummary {
+  id: string
+  cluster: string
+  member: string
+  hostname?: string
+  status: string
+  version?: string
+  last_seen?: string
+  cert_not_after?: string
+}
+
+export interface AgentEnrollmentToken {
+  token: string
+  cluster: string
+  member: string
+  expires_at: string
+}
+
+export interface AgentBootstrapRequest {
+  mode: 'join' | 'init'
+  address: string
+  storage_source?: string
+  network_cidr?: string
+  install_mode?: 'existing' | 'package'
+  version_pin?: string
+  packages?: string[]
+}
+
+export interface AgentBootstrapResult {
+  ok: boolean
+  task_id: string
+  mode: string
+  message: string
+  steps: string[]
 }
 
 export interface ClusterRegisterRequest {
@@ -623,4 +902,30 @@ export interface ClusterTraffic {
   total_rx_packets: number
   total_tx_packets: number
   instances: TrafficInstance[]
+}
+
+export interface TelemetryPoint {
+  at: string
+  value: number
+}
+
+export interface TelemetrySeries {
+  name: string
+  labels: Record<string, string>
+  type: string
+  points: TelemetryPoint[]
+}
+
+export interface PrometheusMatrixResult {
+  metric: Record<string, string>
+  values: Array<[number, string]>
+}
+
+export interface PrometheusQueryResponse {
+  status: string
+  data?: {
+    resultType: string
+    result: PrometheusMatrixResult[]
+  }
+  error?: string
 }

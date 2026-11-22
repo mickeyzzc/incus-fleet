@@ -38,8 +38,8 @@ func (f *fakeRunner) RunStdin(name string, args []string, stdin string) error {
 func TestListNICsParsesIpdOutput(t *testing.T) {
 	r := &fakeRunner{
 		outputs: map[string]string{
-			"ip -j addr show":  `[{"ifname":"enp1s0","operstate":"UP","mtu":1500,"address":"aa:bb","link_type":"ether","addr_info":[{"family":"inet","local":"10.62.0.1","prefixlen":24}]},{"ifname":"wlo1","operstate":"DOWN","link_type":"wlan","addr_info":[]}]`,
-			"iw dev wlo1 link": "",
+			"ip -j addr show":   `[{"ifname":"eth0","operstate":"UP","mtu":1500,"address":"aa:bb","link_type":"ether","addr_info":[{"family":"inet","local":"10.0.0.1","prefixlen":24}]},{"ifname":"wlan0","operstate":"DOWN","link_type":"wlan","addr_info":[]}]`,
+			"iw dev wlan0 link": "",
 		},
 	}
 	svc := NewService(r)
@@ -51,10 +51,10 @@ func TestListNICsParsesIpdOutput(t *testing.T) {
 	if len(nics) != 2 {
 		t.Fatalf("nics = %#v", nics)
 	}
-	if nics[0].Name != "enp1s0" || nics[0].State != "up" || nics[0].Kind != "ethernet" {
+	if nics[0].Name != "eth0" || nics[0].State != "up" || nics[0].Kind != "ethernet" {
 		t.Fatalf("nic0 = %#v", nics[0])
 	}
-	if len(nics[0].Addresses) != 1 || nics[0].Addresses[0].Address != "10.62.0.1" {
+	if len(nics[0].Addresses) != 1 || nics[0].Addresses[0].Address != "10.0.0.1" {
 		t.Fatalf("addresses = %#v", nics[0].Addresses)
 	}
 	if nics[1].Kind != "wifi" || nics[1].WiFi == nil || nics[1].WiFi.Connected {
@@ -69,10 +69,10 @@ func TestSetNICStateValidatesAndRuns(t *testing.T) {
 	if err := svc.SetNICState("bad name; rm", true); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("expected name validation error, got %v", err)
 	}
-	if err := svc.SetNICState("enp1s0", true); err != nil {
+	if err := svc.SetNICState("eth0", true); err != nil {
 		t.Fatalf("SetNICState() error = %v", err)
 	}
-	if len(r.calls) != 1 || !strings.Contains(r.calls[0], "ip link set dev enp1s0 up") {
+	if len(r.calls) != 1 || !strings.Contains(r.calls[0], "ip link set dev eth0 up") {
 		t.Fatalf("calls = %#v", r.calls)
 	}
 }
@@ -81,9 +81,9 @@ func TestApplyAddressStaticAndPersisted(t *testing.T) {
 	r := &fakeRunner{}
 	svc := NewService(r)
 
-	err := svc.ApplyAddress(context.Background(), "enp1s0", AddressRequest{
-		Address: "10.62.0.50",
-		Gateway: "10.62.0.1",
+	err := svc.ApplyAddress(context.Background(), "eth0", AddressRequest{
+		Address: "10.0.0.50",
+		Gateway: "10.0.0.1",
 		Persist: true,
 	})
 	if err != nil {
@@ -91,13 +91,13 @@ func TestApplyAddressStaticAndPersisted(t *testing.T) {
 	}
 
 	joined := strings.Join(r.calls, "\n")
-	if !strings.Contains(joined, "ip addr add 10.62.0.50/24 dev enp1s0") {
+	if !strings.Contains(joined, "ip addr add 10.0.0.50/24 dev eth0") {
 		t.Fatalf("missing addr add: %s", joined)
 	}
-	if !strings.Contains(joined, "ip route replace default via 10.62.0.1 dev enp1s0") {
+	if !strings.Contains(joined, "ip route replace default via 10.0.0.1 dev eth0") {
 		t.Fatalf("missing gateway: %s", joined)
 	}
-	if len(r.stdinLog) != 1 || !strings.Contains(r.stdinLog[0], "iface enp1s0 inet static") {
+	if len(r.stdinLog) != 1 || !strings.Contains(r.stdinLog[0], "iface eth0 inet static") {
 		t.Fatalf("persisted snippet = %#v", r.stdinLog)
 	}
 }
@@ -105,13 +105,13 @@ func TestApplyAddressStaticAndPersisted(t *testing.T) {
 func TestApplyAddressRejectsInvalidValues(t *testing.T) {
 	svc := NewService(&fakeRunner{})
 
-	if err := svc.ApplyAddress(context.Background(), "enp1s0", AddressRequest{Address: "not-an-ip"}); !errors.Is(err, ErrInvalidRequest) {
+	if err := svc.ApplyAddress(context.Background(), "eth0", AddressRequest{Address: "not-an-ip"}); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("expected address validation error, got %v", err)
 	}
-	if err := svc.ApplyAddress(context.Background(), "enp1s0", AddressRequest{Address: "10.0.0.1", Gateway: "nope"}); !errors.Is(err, ErrInvalidRequest) {
+	if err := svc.ApplyAddress(context.Background(), "eth0", AddressRequest{Address: "10.0.0.1", Gateway: "nope"}); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("expected gateway validation error, got %v", err)
 	}
-	if err := svc.ApplyAddress(context.Background(), "enp1s0", AddressRequest{}); !errors.Is(err, ErrInvalidRequest) {
+	if err := svc.ApplyAddress(context.Background(), "eth0", AddressRequest{}); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("expected empty request error, got %v", err)
 	}
 }
@@ -136,7 +136,7 @@ func TestApplyAddressDHCP(t *testing.T) {
 func TestRoutes(t *testing.T) {
 	r := &fakeRunner{
 		outputs: map[string]string{
-			"ip -j route show": `[{"dst":"default","gateway":"10.62.0.1","dev":"enp1s0"},{"dst":"10.63.0.0/24","dev":"enp2s0","metric":50}]`,
+			"ip -j route show": `[{"dst":"default","gateway":"10.0.0.1","dev":"eth0"},{"dst":"10.0.1.0/24","dev":"enp2s0","metric":50}]`,
 		},
 	}
 	svc := NewService(r)
@@ -145,21 +145,21 @@ func TestRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRoutes() error = %v", err)
 	}
-	if len(routes) != 2 || routes[0].Gateway != "10.62.0.1" || routes[1].Metric != "50" {
+	if len(routes) != 2 || routes[0].Gateway != "10.0.0.1" || routes[1].Metric != "50" {
 		t.Fatalf("routes = %#v", routes)
 	}
 
-	if err := svc.AddRoute("bad_dst", "10.0.0.1", "enp1s0"); !errors.Is(err, ErrInvalidRequest) {
+	if err := svc.AddRoute("bad_dst", "10.0.0.1", "eth0"); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("expected destination validation error, got %v", err)
 	}
-	if err := svc.AddRoute("10.63.0.0/24", "10.62.0.1", "enp2s0"); err != nil {
+	if err := svc.AddRoute("10.0.1.0/24", "10.0.0.1", "enp2s0"); err != nil {
 		t.Fatalf("AddRoute() error = %v", err)
 	}
-	if !strings.Contains(r.calls[len(r.calls)-1], "ip route add 10.63.0.0/24 via 10.62.0.1 dev enp2s0") {
+	if !strings.Contains(r.calls[len(r.calls)-1], "ip route add 10.0.1.0/24 via 10.0.0.1 dev enp2s0") {
 		t.Fatalf("calls = %#v", r.calls)
 	}
 
-	if err := svc.DeleteRoute("10.63.0.0/24"); err != nil {
+	if err := svc.DeleteRoute("10.0.1.0/24"); err != nil {
 		t.Fatalf("DeleteRoute() error = %v", err)
 	}
 }
@@ -205,16 +205,16 @@ func TestFirewallRules(t *testing.T) {
 func TestScanWiFiParsesIwOutput(t *testing.T) {
 	r := &fakeRunner{
 		outputs: map[string]string{
-			"iw dev wlo1 scan": "BSS ab:cd:ef:01:capability: ESS\n\tSSID: Home-Wifi\n\tfreq: 2437\n\tsignal: -42.00 dBm\nBSS ab:cd:ef:02\n\tSSID: Open-Net\n\tfreq: 5180\n\tsignal: -55.00 dBm",
+			"iw dev wlan0 scan": "BSS ab:cd:ef:01:capability: ESS\n\tSSID: Home-Wifi\n\tfreq: 2437\n\tsignal: -42.00 dBm\nBSS ab:cd:ef:02\n\tSSID: Open-Net\n\tfreq: 5180\n\tsignal: -55.00 dBm",
 		},
 	}
 	svc := NewService(r)
 
-	if _, err := svc.ScanWiFi("wlo1; rm"); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := svc.ScanWiFi("wlan0; rm"); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("expected name validation error, got %v", err)
 	}
 
-	networks, err := svc.ScanWiFi("wlo1")
+	networks, err := svc.ScanWiFi("wlan0")
 	if err != nil {
 		t.Fatalf("ScanWiFi() error = %v", err)
 	}
@@ -232,20 +232,20 @@ func TestScanWiFiParsesIwOutput(t *testing.T) {
 func TestSnapshotCollectsEverything(t *testing.T) {
 	r := &fakeRunner{
 		outputs: map[string]string{
-			"ip -j addr show":                     `[{"ifname":"enp1s0","operstate":"UP","link_type":"ether","addr_info":[{"family":"inet","local":"10.62.0.50","prefixlen":24}]}]`,
-			"ip -j route show":                    `[{"dst":"default","gateway":"10.62.0.1","dev":"enp1s0"},{"dst":"10.63.0.0/24","gateway":"10.62.0.1","dev":"enp1s0","metric":100}]`,
+			"ip -j addr show":                     `[{"ifname":"eth0","operstate":"UP","link_type":"ether","addr_info":[{"family":"inet","local":"10.0.0.50","prefixlen":24}]}]`,
+			"ip -j route show":                    `[{"dst":"default","gateway":"10.0.0.1","dev":"eth0"},{"dst":"10.0.1.0/24","gateway":"10.0.0.1","dev":"eth0","metric":100}]`,
 			"nft -a list table inet fleet_filter": "table inet fleet_filter { # handle 3\n\tchain input { # handle 1\n\t\ttype filter hook input priority filter; policy accept;\n\t\ttcp dport 22 accept comment \"fleet_rule\" # handle 7\n\t}\n}",
-			"iw dev wlo1 scan":                    "BSS aa:bb(driver=iwlwifi)\n\tfreq: 2437\n\tsignal: -40.00 dBm\n\tSSID: Office\n\tRSN: IEEE 802.11i\n",
-			"hostname ":                           "n100-server",
+			"iw dev wlan0 scan":                   "BSS aa:bb(driver=iwlwifi)\n\tfreq: 2437\n\tsignal: -40.00 dBm\n\tSSID: Office\n\tRSN: IEEE 802.11i\n",
+			"hostname ":                           "node-a",
 		},
 	}
 	svc := NewService(r)
 
-	snapshot, err := svc.Snapshot(context.Background(), "wlo1")
+	snapshot, err := svc.Snapshot(context.Background(), "wlan0")
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
-	if snapshot.Host != "n100-server" || snapshot.WifiDevice != "wlo1" {
+	if snapshot.Host != "node-a" || snapshot.WifiDevice != "wlan0" {
 		t.Fatalf("snapshot identity = %+v", snapshot)
 	}
 	if len(snapshot.NICs) != 1 || len(snapshot.Routes) != 2 {
@@ -265,13 +265,13 @@ func TestSnapshotCollectsEverything(t *testing.T) {
 func TestSnapshotToleratesOptionalFailures(t *testing.T) {
 	r := &fakeRunner{
 		outputs: map[string]string{
-			"ip -j addr show": `[{"ifname":"enp1s0","operstate":"UP","link_type":"ether","addr_info":[]}]`,
+			"ip -j addr show": `[{"ifname":"eth0","operstate":"UP","link_type":"ether","addr_info":[]}]`,
 		},
 		failOn: "route show",
 	}
 	svc := NewService(r)
 
-	snapshot, err := svc.Snapshot(context.Background(), "wlo1")
+	snapshot, err := svc.Snapshot(context.Background(), "wlan0")
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
@@ -297,7 +297,7 @@ func TestWifiConnectWritesConfigAndLeases(t *testing.T) {
 	}
 	svc := NewService(r)
 
-	if err := svc.WifiConnect("wlo1", "OfficeWiFi", "secret"); err != nil {
+	if err := svc.WifiConnect("wlan0", "OfficeWiFi", "secret"); err != nil {
 		t.Fatalf("WifiConnect() error = %v", err)
 	}
 
@@ -306,9 +306,9 @@ func TestWifiConnectWritesConfigAndLeases(t *testing.T) {
 	}
 	joined := strings.Join(r.calls, "\n")
 	for _, want := range []string{
-		"wpa_supplicant -B -i wlo1 -c /etc/wpa_supplicant/fleet.conf",
-		"ip link set dev wlo1 up",
-		"dhcpcd -1 --nohook resolv.conf wlo1",
+		"wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/fleet.conf",
+		"ip link set dev wlan0 up",
+		"dhcpcd -1 --nohook resolv.conf wlan0",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("calls missing %q: %s", want, joined)
@@ -322,10 +322,10 @@ func TestWifiConnectValidation(t *testing.T) {
 	if err := svc.WifiConnect("bad name", "ssid", ""); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("bad device error = %v", err)
 	}
-	if err := svc.WifiConnect("wlo1", " ", ""); !errors.Is(err, ErrInvalidRequest) {
+	if err := svc.WifiConnect("wlan0", " ", ""); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("empty ssid error = %v", err)
 	}
-	if err := svc.WifiConnect("wlo1", "ssid\"", ""); !errors.Is(err, ErrInvalidRequest) {
+	if err := svc.WifiConnect("wlan0", "ssid\"", ""); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("quote injection error = %v", err)
 	}
 }
@@ -333,7 +333,7 @@ func TestWifiConnectValidation(t *testing.T) {
 func TestWifiConnectRequiresSupplicant(t *testing.T) {
 	svc := NewService(&fakeRunner{failOn: "wpa_supplicant -v"})
 
-	if err := svc.WifiConnect("wlo1", "ssid", ""); !errors.Is(err, ErrUnavailable) {
+	if err := svc.WifiConnect("wlan0", "ssid", ""); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("WifiConnect() error = %v, want ErrUnavailable", err)
 	}
 }
@@ -343,7 +343,7 @@ func TestWifiConnectPropagatesRunFailures(t *testing.T) {
 		outputs: map[string]string{"wpa_supplicant -v": "ok"},
 		failOn:  "wpa_supplicant -B",
 	})
-	if err := svc.WifiConnect("wlo1", "ssid", ""); err == nil {
+	if err := svc.WifiConnect("wlan0", "ssid", ""); err == nil {
 		t.Fatalf("WifiConnect() wpa failure error = nil")
 	}
 
@@ -351,7 +351,7 @@ func TestWifiConnectPropagatesRunFailures(t *testing.T) {
 		outputs: map[string]string{"wpa_supplicant -v": "ok"},
 		failOn:  "ip link set",
 	})
-	if err := svc.WifiConnect("wlo1", "ssid", ""); err == nil {
+	if err := svc.WifiConnect("wlan0", "ssid", ""); err == nil {
 		t.Fatalf("WifiConnect() link failure error = nil")
 	}
 
@@ -359,7 +359,7 @@ func TestWifiConnectPropagatesRunFailures(t *testing.T) {
 		outputs: map[string]string{"wpa_supplicant -v": "ok"},
 		failOn:  "dhcpcd",
 	})
-	if err := svc.WifiConnect("wlo1", "ssid", ""); err == nil {
+	if err := svc.WifiConnect("wlan0", "ssid", ""); err == nil {
 		t.Fatalf("WifiConnect() dhcp failure error = nil")
 	}
 }
@@ -367,22 +367,22 @@ func TestWifiConnectPropagatesRunFailures(t *testing.T) {
 func TestWifiLinkReadsAssociation(t *testing.T) {
 	r := &fakeRunner{
 		outputs: map[string]string{
-			"iw dev wlo1 link": "Connected to aa:bb (on wlo1)\n\tSSID: Office\n\tfreq: 5180.0\n\tsignal: -55.00 dBm\n",
-			"iw dev wlo1 info": "Interface wlo1\n\tssid Office\n\ttype managed\n",
+			"iw dev wlan0 link": "Connected to aa:bb (on wlan0)\n\tSSID: Office\n\tfreq: 5180.0\n\tsignal: -55.00 dBm\n",
+			"iw dev wlan0 info": "Interface wlan0\n\tssid Office\n\ttype managed\n",
 		},
 	}
 	svc := NewService(r)
 
-	link := svc.wifiLink("wlo1")
+	link := svc.wifiLink("wlan0")
 	if link == nil || !link.Connected || link.SSID != "Office" || link.Signal != -55 || link.Frequency != 5180 {
 		t.Fatalf("wifiLink() = %#v", link)
 	}
 }
 
 func TestWifiLinkDown(t *testing.T) {
-	svc := NewService(&fakeRunner{failOn: "iw dev wlo1 link"})
+	svc := NewService(&fakeRunner{failOn: "iw dev wlan0 link"})
 
-	link := svc.wifiLink("wlo1")
+	link := svc.wifiLink("wlan0")
 	if link == nil || link.Connected {
 		t.Fatalf("wifiLink() down = %#v", link)
 	}
@@ -450,9 +450,9 @@ func TestDedupeWiFiNetworksKeepsStrongest(t *testing.T) {
 func TestListNICsUsesAdminStateFlags(t *testing.T) {
 	r := &fakeRunner{
 		outputs: map[string]string{
-			// wlo1 is administratively up but unassociated: operstate down.
-			"ip -j addr show":  `[{"ifname":"wlo1","operstate":"DOWN","flags":["BROADCAST","MULTICAST","UP"],"link_type":"wlan","addr_info":[]}]`,
-			"iw dev wlo1 link": "Not connected.",
+			// wlan0 is administratively up but unassociated: operstate down.
+			"ip -j addr show":   `[{"ifname":"wlan0","operstate":"DOWN","flags":["BROADCAST","MULTICAST","UP"],"link_type":"wlan","addr_info":[]}]`,
+			"iw dev wlan0 link": "Not connected.",
 		},
 	}
 	svc := NewService(r)
@@ -471,23 +471,76 @@ func TestListNICsUsesAdminStateFlags(t *testing.T) {
 
 func TestRouteRunnerFailures(t *testing.T) {
 	svc := NewService(&fakeRunner{failOn: "ip route add"})
-	if err := svc.AddRoute("10.63.0.0/24", "10.62.0.1", "enp1s0"); err == nil {
+	if err := svc.AddRoute("10.0.1.0/24", "10.0.0.1", "eth0"); err == nil {
 		t.Fatal("AddRoute() failure error = nil")
 	}
 
 	svc = NewService(&fakeRunner{failOn: "ip route del"})
-	if err := svc.DeleteRoute("10.63.0.0/24"); err == nil {
+	if err := svc.DeleteRoute("10.0.1.0/24"); err == nil {
 		t.Fatal("DeleteRoute() failure error = nil")
 	}
 
 	svc = NewService(&fakeRunner{})
-	if err := svc.AddRoute("10.63.0.0/24", "10.62.0.1", "bad name"); !errors.Is(err, ErrInvalidRequest) {
+	if err := svc.AddRoute("10.0.1.0/24", "10.0.0.1", "bad name"); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("AddRoute() bad device error = %v", err)
 	}
-	if err := svc.AddRoute("bad", "10.62.0.1", "enp1s0"); !errors.Is(err, ErrInvalidRequest) {
+	if err := svc.AddRoute("bad", "10.0.0.1", "eth0"); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("AddRoute() bad destination error = %v", err)
 	}
 	if err := svc.DeleteRoute("bad"); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("DeleteRoute() bad destination error = %v", err)
+	}
+}
+
+func TestFleetRouteOwnership(t *testing.T) {
+	runner := &fakeRunner{outputs: map[string]string{"ip -j route show": "[]"}}
+	service := NewService(runner)
+	if err := service.AddFleetRoute("10.0.1.0/24", "10.0.0.1", "eth0"); err != nil {
+		t.Fatalf("AddFleetRoute() error = %v", err)
+	}
+	if len(runner.calls) < 1 || !strings.Contains(runner.calls[len(runner.calls)-1], "proto 99") {
+		t.Fatalf("AddFleetRoute calls = %#v", runner.calls)
+	}
+	if err := service.DeleteFleetRoute("10.0.1.0/24"); err != nil {
+		t.Fatalf("DeleteFleetRoute() error = %v", err)
+	}
+	if !strings.Contains(runner.calls[len(runner.calls)-1], "proto 99") {
+		t.Fatalf("DeleteFleetRoute calls = %#v", runner.calls)
+	}
+	if err := service.AddFleetRoute("bad", "", "eth0"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("AddFleetRoute(bad) error = %v", err)
+	}
+}
+
+func TestDirectRunner(t *testing.T) {
+	out, err := (DirectRunner{}).Run("echo", "hello")
+	if err != nil || strings.TrimSpace(out) != "hello" {
+		t.Fatalf("DirectRunner.Run() = %q, %v", out, err)
+	}
+	if err := (DirectRunner{}).RunStdin("cat", nil, "stdin"); err != nil {
+		t.Fatalf("DirectRunner.RunStdin() error = %v", err)
+	}
+	if _, err := (DirectRunner{}).Run("false"); err == nil {
+		t.Fatal("DirectRunner.Run(false) expected error")
+	}
+}
+
+func TestResolveBinaryFallbackAndDeleteRouteValidation(t *testing.T) {
+	if got := resolveBinary("definitely-not-an-incus-fleet-binary"); got != "definitely-not-an-incus-fleet-binary" {
+		t.Fatalf("resolveBinary() = %q", got)
+	}
+	service := NewService(&fakeRunner{})
+	if err := service.DeleteFleetRoute("not-a-destination"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("DeleteFleetRoute(bad) error = %v", err)
+	}
+}
+
+func TestFleetRouteRejectsForeignOwnership(t *testing.T) {
+	runner := &fakeRunner{outputs: map[string]string{
+		"ip -j route show": `[{"dst":"10.0.1.0/24","dev":"eth0","protocol":"16"}]`,
+	}}
+	service := NewService(runner)
+	if err := service.AddFleetRoute("10.0.1.0/24", "10.0.0.1", "eth0"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("AddFleetRoute(foreign) error = %v", err)
 	}
 }

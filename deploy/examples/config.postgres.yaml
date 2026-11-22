@@ -12,10 +12,102 @@ database:
   driver: postgres
   dsn: ""
 
+# Optional: SSH identity for node network management and adding members.
+# The account must have passwordless sudo on every member (see nodesudoers).
+# node_access:
+#   mode: auto                 # auto | agent | ssh | local
+#   ssh_write_fallback: true   # false once every member runs an agent
+#   ssh_user: node-admin
+#   ssh_key: /home/incus/.ssh/id_ed25519
+#   ssh_port: 22
+#   ssh_known_hosts: /home/incus/.ssh/known_hosts
+#   ssh_insecure_ignore_host_key: false
+#
+# Optional: local Incus member name when it differs from the hostname.
+# local_member: app-a
+
+# Reserved for the host agent gateway (disabled until Phase 1).
+# agent:
+#   enabled: false
+#   listen: 0.0.0.0:8444
+#   tls_cert: /home/incus/certs/agent-server.crt
+#   tls_key: /home/incus/certs/agent-server.key
+#   client_ca: /home/incus/certs/agent-ca.crt
+#   ca_key: /home/incus/certs/agent-ca.key
+#   install:
+#     enabled: true
+#     gateway_url: https://fleet.example:8444
+#     asset_url: https://fleet.example
+#     agent_binary: /home/incus/bin/incus-fleet-agent
+#     helper_binary: /home/incus/bin/incus-fleet-helper
+#     # Optional multi-arch selection instead of the two paths above:
+#     # agent_binaries:
+#     #   amd64: /home/incus/bin/incus-fleet-agent-linux-amd64
+#     #   arm64: /home/incus/bin/incus-fleet-agent-linux-arm64
+#     # helper_binaries:
+#     #   amd64: /home/incus/bin/incus-fleet-helper-linux-amd64
+#     #   arm64: /home/incus/bin/incus-fleet-helper-linux-arm64
+
+# Center-side telemetry buffer (Phase 4).
+# metrics:
+#   enabled: true
+#   retention: 1h
+#   interval: 10s
+#   remote_write:
+#     enabled: false
+#     url: https://prometheus.example/api/v1/write
+#     bearer_token_file: /etc/incus-fleet/prom.token
+#     spool_dir: /home/incus/data/remote-write   # durable replay after restart
+#     spool_partition: app-a                     # optional; defaults to ha.worker_id or hostname-pid
+#     max_bytes: 67108864
+#   query:
+#     enabled: false
+#     url: https://prometheus.example
+#     type: prometheus
+#   http_sd:
+#     enabled: false
+#     mode: proxy             # proxy | direct (direct needs agent --metrics-listen)
+#     token: replace-with-a-random-token
+#     public_url: https://fleet.example
+
+# Optional HA dispatcher for queued async host tasks. Use a shared database
+# (rqlite or PostgreSQL) when more than one center instance runs the dispatcher.
+# ha:
+#   enabled: false
+#   worker_id: app-a
+#   lease: 30s
+#   interval: 2s
+
+# Optional Raft center mesh (3 voters: app-a, app-b, witness).
+# Set INCUS_FLEET_MESH_SECRET in the service environment; do not commit it.
+# mesh:
+#   enabled: true
+#   node_id: app-a
+#   address: 192.0.2.20:9400
+#   control_address: 192.0.2.20:9401
+#   data_dir: /home/incus/data/mesh
+#   peers:
+#     - id: app-a
+#       address: 192.0.2.20:9400
+#       control_address: 192.0.2.20:9401
+#     - id: app-b
+#       address: 192.0.2.21:9400
+#       control_address: 192.0.2.21:9401
+#     - id: witness
+#       address: 192.0.2.22:9400
+#       control_address: 192.0.2.22:9401
+#   witness: false
+#   force_single: false
+
 clusters:
   - name: c1
     display_name: Primary site
     endpoint: https://192.0.2.10:8443
+    # Optional failover endpoints, tried in order, then re-tried in the
+    # background every 10s while the cluster is offline.
+    # endpoints:
+    #   - https://192.0.2.10:8443
+    #   - https://192.0.2.11:8443
     project: default
     tls_cert: /home/incus/certs/app-a.crt
     tls_key: /home/incus/certs/app-a.key

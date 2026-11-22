@@ -277,3 +277,53 @@ func TestServiceLoadErrorsSurface(t *testing.T) {
 		t.Fatalf("missing script error = %v", err)
 	}
 }
+
+func TestUpdateScriptRequiresBody(t *testing.T) {
+	ctx := context.Background()
+	svc, st := newFixture(t, map[string]*incusfake.Server{"c1": {}})
+
+	script := &Script{Name: "s", Body: "echo hi"}
+	if err := svc.CreateScript(ctx, script); err != nil {
+		t.Fatalf("CreateScript() = %v", err)
+	}
+
+	script.Body = "   "
+	if err := svc.UpdateScript(ctx, script); !errors.Is(err, instances.ErrInvalidRequest) {
+		t.Fatalf("UpdateScript(empty body) = %v, want ErrInvalidRequest", err)
+	}
+
+	script.Body = "echo updated"
+	if err := svc.UpdateScript(ctx, script); err != nil {
+		t.Fatalf("UpdateScript() = %v", err)
+	}
+
+	got, err := st.GetScript(ctx, script.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Body != "echo updated" {
+		t.Fatalf("body = %q", got.Body)
+	}
+}
+
+func TestBatchPowerReportsPerTargetFailures(t *testing.T) {
+	// A target that cannot be acted on is reported in its own item; the batch
+	// must not panic or abort the remaining targets.
+	web := &incusfake.Server{Instance: &api.Instance{Name: "web", Type: "container", Status: "Running", StatusCode: api.Running}}
+	svc, _ := newFixture(t, map[string]*incusfake.Server{"c1": web})
+	ctx := context.Background()
+
+	items := svc.BatchPower(ctx, []Target{
+		{Cluster: "c1", Instance: "web"},
+		{Cluster: "gone", Instance: "web"},
+	}, "start", false)
+	if len(items) != 2 {
+		t.Fatalf("items = %#v", items)
+	}
+	if !items[0].OK || items[0].Error != "" {
+		t.Fatalf("healthy target item = %#v", items[0])
+	}
+	if items[1].OK || items[1].Error == "" {
+		t.Fatalf("unknown-cluster item = %#v", items[1])
+	}
+}

@@ -4,6 +4,7 @@ GO ?= go
 BUN ?= bun
 GOLANGCI_LINT ?= golangci-lint
 CONFIG ?= config.local.yaml
+MODULE ?= github.com/mickeyzzc/incus-fleet
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -17,11 +18,12 @@ LDFLAGS := -s -w \
 GO_PACKAGES := ./cmd/... ./internal/... ./web
 # main() calls os.Exit and web only embeds assets, so the coverage gate applies
 # to the internal packages that hold product behavior.
-COVERPKG := $(shell $(GO) list ./internal/... 2>/dev/null | grep -v '/internal/testutil' | paste -sd, -)
+COVERPKG := $(shell $(GO) list ./internal/... 2>/dev/null | grep -v -E '/internal/(testutil|agentpb|prompb)' | paste -sd, -)
 GO_FILES := $(shell find cmd internal web -name '*.go' -not -path '*/node_modules/*')
 
 .PHONY: help deps frontend backend build run test test-go test-web coverage coverage-go coverage-web \
-	lint lint-go lint-web fmt fmt-check vet tidy check release clean
+	lint lint-go lint-web fmt fmt-check vet tidy check release clean proto agent-test agent-lint agent-build agent-ebpf \
+	hooks secret-scan secret-scan-all secret-scan-history
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -33,9 +35,10 @@ deps: ## Install Go modules and frontend dependencies
 frontend: ## Build the Vue frontend into web/dist
 	cd web && $(BUN) run build
 
-backend: ## Build the Go binary (requires web/dist)
+backend: ## Build the Go binaries (requires web/dist)
 	mkdir -p bin
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/incus-fleet ./cmd/incus-fleet
+	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/incus-fleet-helper ./cmd/incus-fleet-helper
 
 build: frontend backend ## Build the frontend and backend
 
@@ -49,6 +52,22 @@ test-go: ## Run Go tests
 
 test-web: ## Run frontend tests
 	cd web && $(BUN) run test
+
+agent-test: ## Run Rust agent tests
+	cargo test --manifest-path agent/Cargo.toml
+
+agent-lint: ## Run Rust formatting and clippy
+	cargo fmt --manifest-path agent/Cargo.toml -- --check
+	cargo clippy --manifest-path agent/Cargo.toml -- -D warnings
+
+agent-build: ## Build the Rust agent in release mode
+	cargo build --manifest-path agent/Cargo.toml --release
+
+agent-ebpf: ## Build the optional eBPF object (Linux clang/libbpf required)
+	$(MAKE) -C agent/bpf
+
+proto: ## Regenerate Go protobuf bindings
+	protoc -I api --go_out=. --go_opt=module=$(MODULE) api/agent/v1/agent.proto
 
 coverage: coverage-go coverage-web ## Run both coverage suites
 
@@ -83,12 +102,26 @@ vet: ## Run go vet
 tidy: ## Tidy Go modules
 	$(GO) mod tidy
 
-check: fmt-check vet lint test ## Full local verification
+hooks: ## Install the repository git hooks (run once after cloning)
+	./scripts/install-hooks.sh
+
+secret-scan: ## Scan staged changes for secrets and real infrastructure
+	./scripts/secret-scan.sh --staged
+
+secret-scan-all: ## Scan every tracked file
+	./scripts/secret-scan.sh --all
+
+secret-scan-history: ## Scan every reachable commit for private keys
+	./scripts/secret-scan.sh --history
+
+check: fmt-check vet lint test secret-scan-all ## Full local verification
 
 release: frontend ## Cross-compile Linux binaries into dist/
 	mkdir -p dist
 	GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o dist/incus-fleet-linux-amd64 ./cmd/incus-fleet
 	GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o dist/incus-fleet-linux-arm64 ./cmd/incus-fleet
+	GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o dist/incus-fleet-helper-linux-amd64 ./cmd/incus-fleet-helper
+	GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o dist/incus-fleet-helper-linux-arm64 ./cmd/incus-fleet-helper
 
 clean: ## Remove build outputs but keep web/dist/.gitkeep
 	rm -rf bin dist coverage.out coverage.html

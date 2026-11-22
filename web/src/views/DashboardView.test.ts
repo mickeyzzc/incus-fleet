@@ -196,6 +196,29 @@ describe('DashboardView traffic polling and registered clusters', () => {
     vi.useRealTimers()
   })
 
+  it('refreshes fleet status on the visible-page loop and stops on unmount', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.mocked(api.listClusters).mockResolvedValue([clusterSummary({ online: true })])
+    vi.mocked(api.listInstances).mockResolvedValue([])
+    vi.mocked(api.listMigrations).mockResolvedValue([])
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+    expect(api.listClusters).toHaveBeenCalledTimes(1)
+
+    // The status loop re-runs the full refresh every 15s (#12).
+    await vi.advanceTimersByTimeAsync(15500)
+    await flushPromises()
+    expect(api.listClusters).toHaveBeenCalledTimes(2)
+
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(20000)
+    await flushPromises()
+    expect(api.listClusters).toHaveBeenCalledTimes(2)
+
+    vi.useRealTimers()
+  })
+
   it('skips offline clusters and tolerates traffic errors', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     vi.mocked(api.listClusters).mockResolvedValue([

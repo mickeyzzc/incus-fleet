@@ -7,14 +7,44 @@ also serves the Vue SPA at `/`.
 
 ## Authentication
 
-The server has one shared admin token. There are two ways to authenticate:
+The server supports local accounts with role-based access control. There are three ways to
+authenticate:
 
-1. **Browser session.** `POST /api/v1/auth/login` with the token; the response sets an
-   `HttpOnly`, `SameSite=Lax` cookie named `incus_fleet_session`. The cookie is valid for 12
-   hours. It is marked `Secure` when the request is TLS or carries
+1. **Browser session.** `POST /api/v1/auth/login` with a username and password; the response
+   sets an `HttpOnly`, `SameSite=Lax` cookie named `incus_fleet_session`. The cookie is valid
+   for 12 hours. It is marked `Secure` when the request is TLS or carries
    `X-Forwarded-Proto: https` (as sent by Caddy).
 2. **Bearer token.** Send `Authorization: Bearer <admin token>` on protected endpoints. This is
-   intended for automation and does not need a login step.
+   the shared bootstrap credential: it is accepted **only while no local account exists**, and
+   is retired automatically once the first account is created.
+3. **Bootstrap environment variables.** `INCUS_FLEET_BOOTSTRAP_ADMIN_USERNAME` and
+   `INCUS_FLEET_BOOTSTRAP_ADMIN_PASSWORD` create the first administrator on startup. They are
+   ignored on later starts once an account exists.
+
+### Roles
+
+| Role | Read | Mutate fleet | Manage users |
+| --- | --- | --- | --- |
+| `admin` | yes | yes | yes |
+| `operator` | yes | yes | no |
+| `viewer` | yes | no (403) | no |
+
+Mutating endpoints enforce the role server-side; a read-only account receives
+`403 {"error":{"code":"forbidden"}}` even if it calls the API directly.
+
+### User management
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/users` | admin | List accounts |
+| POST | `/users` | admin (or bootstrap token for the first account) | Create an account |
+| PATCH | `/users/{id}` | admin | Update role, password, or disabled state |
+| DELETE | `/users/{id}` | admin | Delete an account (the last admin is refused) |
+| POST | `/auth/password` | any signed-in account | Change your own password |
+| GET | `/auth/sessions` | any signed-in account | Describe the current session |
+
+The last enabled administrator can neither be deleted nor demoted: both operations return
+`409 conflict`.
 
 `GET /api/v1/healthz`, `GET /api/v1/version`, `POST /auth/login`, and `POST /auth/logout` are
 public. Everything under `/clusters`, `/instances`, `/migrations`, `/keys`, `/scripts`, and
@@ -31,17 +61,23 @@ curl -sS https://fleet.example/api/v1/clusters \
 POST /api/v1/auth/login
 Content-Type: application/json
 
-{"token": "<admin token>"}
+{"username": "admin", "password": "<password>"}
 ```
 
 ```json
 {
   "authenticated": true,
-  "expires_at": "2026-11-12T09:30:00Z"
+  "expires_at": "2026-11-12T09:30:00Z",
+  "username": "admin",
+  "role": "admin"
 }
 ```
 
-Invalid tokens return `401` with code `invalid_token`.
+Wrong credentials return `401` with code `invalid_credentials`; a locked account returns `429`
+`account_locked`; a disabled account returns `403` `account_disabled`.
+
+For the bootstrap path, send `{"token": "<admin token>"}` instead. It returns `401` once any
+local account exists.
 
 ### Session
 
@@ -85,6 +121,7 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | POST | `/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore` | yes | Restore a snapshot |
 | DELETE | `/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}` | yes | Delete a snapshot |
 | POST | `/clusters/{cluster}/instances/{instance}/devices` | yes | Attach a disk or NIC device |
+| PATCH | `/clusters/{cluster}/instances/{instance}/devices/{device}` | yes | Edit one device (merged into the existing config; empty NIC addresses fall back to DHCP) |
 | DELETE | `/clusters/{cluster}/instances/{instance}/devices/{device}` | yes | Detach a device |
 | GET | `/clusters/{cluster}/instances/{instance}/console` | yes | Interactive console (WebSocket) |
 | GET | `/clusters/{cluster}/instances/{instance}/exec` | yes | Interactive exec session (WebSocket) |
@@ -105,6 +142,11 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | POST | `/clusters/{cluster}/networks` | yes | Create a managed network |
 | PATCH | `/clusters/{cluster}/networks/{network}` | yes | Update a managed network |
 | DELETE | `/clusters/{cluster}/networks/{network}` | yes | Delete a managed network |
+| GET | `/clusters/{cluster}/overlay` | yes | List private overlay networks |
+| POST | `/clusters/{cluster}/overlay` | yes | Enable a private overlay network |
+| GET | `/clusters/{cluster}/overlay/{overlay}` | yes | Get one private overlay network |
+| DELETE | `/clusters/{cluster}/overlay/{overlay}` | yes | Disable and remove a private overlay network |
+| POST | `/clusters/{cluster}/overlay/{overlay}/reconcile` | yes | Re-apply an overlay against current members |
 | GET | `/clusters/{cluster}/profiles` | yes | List instance profiles |
 | POST | `/clusters/{cluster}/profiles` | yes | Create a profile |
 | PATCH | `/clusters/{cluster}/profiles/{profile}` | yes | Update a profile |
@@ -124,9 +166,13 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | POST | `/clusters/{cluster}/instances/{instance}/clone` | yes | Clone an instance within its cluster |
 | POST | `/clusters/{cluster}/instances/{instance}/rebuild` | yes | Rebuild the root disk from another image |
 | POST | `/clusters/{cluster}/instances/{instance}/ops` | yes | Run a script, set a password, or inject a key |
+| POST | `/clusters/{cluster}/instances/{instance}/agent/install` | yes | Install the official incus-agent into a VM over SSH (guest credentials in the body, never stored) |
 | GET | `/clusters/{cluster}/instances/{instance}/vga` | yes | Graphical console (WebSocket) |
-| GET | `/clusters/{cluster}/instances/{instance}/spice?port=` | yes | SPICE channel bridge (WebSocket) |
-| POST | `/clusters/{cluster}/instances/{instance}/spice/prepare` | yes | Configure the VM SPICE listener |
+| POST | `/clusters/{cluster}/instances/{instance}/desktop/prepare` | yes | Arm the QMP graphical console (installs the monitor socket) |
+| GET | `/clusters/{cluster}/instances/{instance}/desktop/screenshot` | yes | Current framebuffer as PNG |
+| POST | `/clusters/{cluster}/instances/{instance}/desktop/input` | yes | Inject one keyboard or pointer event |
+| GET | `/clusters/{cluster}/instances/{instance}/spice?port=` | yes | SPICE channel bridge (WebSocket, legacy) |
+| POST | `/clusters/{cluster}/instances/{instance}/spice/prepare` | yes | Configure the VM SPICE listener (legacy) |
 | GET | `/keys` | yes | List shared SSH public keys |
 | POST | `/keys` | yes | Store a public key |
 | PATCH | `/keys/{id}` | yes | Update a stored public key |
@@ -202,7 +248,7 @@ instance counts may be zero when the cluster cannot be inspected.
 {
   "name": "c64",
   "display_name": "Cluster 64",
-  "endpoint": "https://192.168.64.21:8443",
+  "endpoint": "https://192.0.2.10:8443",
   "project": "default",
   "tls_cert": "-----BEGIN CERTIFICATE-----\n...",
   "tls_key": "-----BEGIN EC PRIVATE KEY-----\n...",
@@ -239,25 +285,86 @@ manager also returns `404`.
 Counters are cumulative since instance boot and only include running instances; the dashboard
 polls every 3 seconds and derives per-second rates from consecutive samples.
 
-## Node network (the host running the fleet app)
+## Adding a cluster member
 
-These endpoints manage the physical node itself (not Instances inside clusters). They require the
-sudo whitelist and unit changes described in `docs/deployment.md`.
+`POST /api/v1/clusters/{cluster}/members` provisions a new host and joins it to the cluster. The
+fleet server connects to the host over SSH, optionally installs Incus from an apt repository,
+submits the Incus join request through the host's local socket, and waits for the member to report
+`Online`.
 
 ```json
-// GET /api/v1/node?wifi=wlo1
 {
-  "host": "n100-server",
+  "name": "node-c",
+  "address": "198.51.100.11",
+  "ssh_user": "node-admin",
+  "ssh_port": 22,
+  "ssh_password": "optional-ssh-password",
+  "sudo_password": "optional-sudo-password",
+  "install_incus": true,
+  "install_vms": true,
+  "ignore_host_key": true,
+  "storage_source": "/srv/incus",
+  "incus_repo": "https://pkgs.zabbly.com/incus/lts-7.0",
+  "incus_repo_key": "https://pkgs.zabbly.com/key.asc"
+}
+```
+
+- `name` is optional; the node hostname is used when omitted.
+- `ssh_user` defaults to `node_access.ssh_user`; the fleet SSH key is used unless
+  `ssh_password` is supplied.
+- `sudo_password` is used once when the SSH account needs a password for sudo. After a successful
+  join the fleet installs a passwordless whitelist for the account.
+- `install_incus` adds the apt source (`incus_repo`/`incus_repo_key`) and installs the package.
+  The installed version must match the cluster's Incus version.
+- `ignore_host_key` skips SSH host key verification for a node that is not in `known_hosts` yet.
+- `storage_source` fills the per-member `storage-pool/default/source` value; it defaults to
+  `/srv/incus`.
+
+`201` returns the joined member and the provisioning steps:
+
+```json
+{
+  "member": {"name": "node-c", "status": "Online", "roles": [], "url": "https://198.51.100.11:8443"},
+  "steps": [
+    {"name": "connect", "status": "ok", "detail": "SSH connection established to 198.51.100.11"},
+    {"name": "install", "status": "ok", "detail": "Incus installed from https://pkgs.zabbly.com/incus/lts-7.0"},
+    {"name": "token", "status": "ok", "detail": "Join token generated for node-c"},
+    {"name": "join", "status": "ok", "detail": "Join request accepted by cluster c2"},
+    {"name": "online", "status": "ok", "detail": "Member node-c is online"},
+    {"name": "sudoers", "status": "ok", "detail": "Passwordless node network sudo rules installed"},
+    {"name": "fleet_key", "status": "ok", "detail": "Fleet SSH key authorized for node-admin"}
+  ]
+}
+```
+
+Post-join setup steps report `warning`/`skipped` without failing the request because the member is
+already part of the cluster. Errors map to `400 invalid_request`, `404 not_found`, `409 conflict`
+(member name already present), `503 cluster_unavailable`, or `500 internal_error`.
+
+The request can take several minutes; the handler extends its write deadline and the server's
+global timeout still applies to the request context. Passwords are used only in memory and are
+never persisted or logged.
+
+## Node network (per cluster member)
+
+These endpoints manage host networking on one cluster member. The fleet host's own member is
+served locally through `sudo -n`; every other member is reached over SSH with the identity from
+`node_access`. Both paths require the sudo whitelist described in `docs/deployment.md`.
+
+```json
+// GET /api/v1/clusters/c2/members/node-b/node?wifi=wlan0
+{
+  "host": "node-b",
   "nics": [
-    {"name": "enp1s0", "state": "up", "kind": "ethernet", "mac": "aa:bb:cc:dd:ee:ff", "mtu": 1500,
-     "addresses": [{"family": "inet", "address": "192.168.62.21", "prefixlen": 24}]},
-    {"name": "wlo1", "state": "up", "kind": "wifi", "addresses": [],
+    {"name": "eth0", "state": "up", "kind": "ethernet", "mac": "aa:bb:cc:dd:ee:ff", "mtu": 1500,
+     "addresses": [{"family": "inet", "address": "198.51.100.10", "prefixlen": 24}]},
+    {"name": "wlan0", "state": "up", "kind": "wifi", "addresses": [],
      "wifi": {"connected": true, "ssid": "Office", "signal": -55, "frequency": 2437}}
   ],
-  "routes": [{"destination": "default", "gateway": "192.168.62.1", "device": "enp1s0", "metric": "100"}],
+  "routes": [{"destination": "default", "gateway": "198.51.100.1", "device": "eth0", "metric": "100"}],
   "firewall": [{"handle": "7", "rule": "tcp dport 22 accept comment \"fleet_rule\""}],
   "wifi_scan": [{"ssid": "Office", "signal": -45, "frequency": 2437, "secure": true}],
-  "wifi_device": "wlo1",
+  "wifi_device": "wlan0",
   "capabilities": ["nics", "routes", "firewall"]
 }
 ```
@@ -266,16 +373,323 @@ The `wifi` query parameter selects the interface to scan; without it the first w
 is used. Scan results are deduplicated by SSID (strongest BSS kept) and require the interface to
 be up.
 
+All paths below are relative to `/api/v1/clusters/{cluster}/members/{member}/node`:
+
 | Method & path | Purpose |
 |---|---|
-| `POST /node/networks/{name}/state` `{"up": bool}` | bring a NIC up/down |
-| `PATCH /node/networks/{name}` `{"dhcp": bool, "address": "10.62.0.50/24", "gateway": "...", "persist": bool}` | static address or DHCP; `persist` writes `/etc/network/interfaces.d/<name>` |
-| `POST /node/networks/{name}/wifi` `{"ssid": "...", "password": "..."}` | associate + DHCP lease via wpa_supplicant |
-| `GET/POST /node/routes`, `DELETE /node/routes/{destination}` | routing table and static routes |
-| `GET/POST /node/firewall`, `DELETE /node/firewall/{handle}` | fleet_filter nftables table rules |
+| `POST /networks/{name}/state` `{"up": bool}` | bring a NIC up/down |
+| `PATCH /networks/{name}` `{"dhcp": bool, "address": "10.0.0.50/24", "gateway": "...", "persist": bool}` | static address or DHCP; `persist` writes `/etc/network/interfaces.d/<name>` |
+| `POST /networks/{name}/wifi` `{"ssid": "...", "password": "..."}` | associate + DHCP lease via wpa_supplicant |
+| `GET/POST /routes`, `DELETE /routes/{destination}` | routing table and static routes |
+| `GET/POST /firewall`, `DELETE /firewall/{handle}` | fleet_filter nftables table rules |
 
-Handler errors map to `400 invalid_request` (bad input) and `503 node_unavailable` (missing sudo
-rules, binaries, or host failure).
+Handler errors map to `400 invalid_request` (bad input), `404 not_found` (unknown cluster or
+member), and `503 node_unavailable` (missing SSH access, sudo rules, binaries, or host failure).
+
+The snapshot includes `backend` (`local`, `ssh`, or, when the agent is enabled, `agent`). Mutating
+responses set `X-Incus-Fleet-Backend` and, when the operation was recorded, `X-Incus-Fleet-Task`.
+The backend choice comes from `node_access.mode` (`auto`, `agent`, `ssh`, or `local`). With the
+default `auto`, reads may fall back to SSH; mutating operations fall back only when
+`node_access.ssh_write_fallback` is true (the default for deployments that predate the agent).
+
+## Agents
+
+The host agent is optional. Enrollment tokens are single-use and bound to one cluster member. The
+agent gateway itself listens on the separate `agent.listen` TLS port (`:8444` by default) and is
+not part of the browser API; only the admin endpoints below are exposed on the normal HTTP port.
+
+| Method & path | Purpose |
+|---|---|
+| `POST /api/v1/agents/enrollment-tokens` | create a one-time token; requires an existing cluster |
+| `GET /api/v1/agents?cluster=&member=` | list enrolled agents, optionally filtered by cluster/member |
+| `GET /api/v1/agents/{id}/snapshot` | dispatch a read-only `nodenet.snapshot` to a connected agent |
+| `GET /api/v1/agent/install.sh` | public one-command installer; enabled by `agent.install` |
+| `GET /api/v1/agent/install/agent` | agent binary with `X-Checksum-Sha256` |
+| `GET /api/v1/agent/install/helper` | privileged helper binary with `X-Checksum-Sha256` |
+| `GET /api/v1/agent/install/ca.crt` | agent gateway CA certificate |
+
+```json
+// POST /api/v1/agents/enrollment-tokens
+{"cluster": "c1", "member": "node-a", "ttl_seconds": 900}
+// 201
+{"token": "one-time-value", "cluster": "c1", "member": "node-a",
+ "expires_at": "2026-11-18T00:15:00Z"}
+```
+
+The installer routes are unauthenticated because the one-time enrollment token is the credential;
+they return `503` when `agent.install.enabled` is false. The generated script embeds the gateway URL,
+the asset base URL, both SHA-256 checksums, the CA certificate, the sudoers whitelist, and the systemd
+unit. It creates the service user, installs the binaries, enrolls, and starts the service.
+
+The token value is returned only once; the database stores its SHA-256 hash. Enrollment itself is
+`POST /api/v1/agent/enroll` on the agent gateway with a PKIX public key, cluster, member, and token.
+The gateway returns the agent ID, client certificate, and CA certificate. The agent then connects
+to `GET /api/v1/agent/connect` with mTLS and sends protobuf `Envelope` frames over the WebSocket.
+Certificates are renewed automatically: the agent calls `POST /api/v1/agent/renew` with its current
+mTLS identity when the certificate is within 30 days of expiry. The gateway verifies the current
+fingerprint, signs a certificate for the submitted PKIX public key, and returns the new PEM and CA.
+
+`GET /api/v1/agents/{id}/snapshot` returns:
+
+```json
+{
+  "snapshot": {
+    "host": "node-a",
+    "nics": [{"name": "eth0", "state": "up", "kind": "ethernet",
+              "addresses": [{"family": "inet", "address": "192.0.2.10", "prefixlen": 24}]}],
+    "routes": [{"destination": "default", "gateway": "192.0.2.1", "device": "eth0"}],
+    "capabilities": ["nics", "routes"]
+  }
+}
+```
+
+`503 agent_offline` means the agent has no live WebSocket; `504 agent_timeout` means it did not
+answer before the dispatch timeout; `502 agent_error` means the agent rejected or failed the task.
+
+`POST /api/v1/agents/{id}/bootstrap` builds, signs, and dispatches an Incus install/init/join
+spec to the agent's privileged helper. The spec is signed with the agent CA key; the helper
+verifies it against the CA certificate in the agent identity directory before executing anything.
+`mode=join` requests a single-use token from the existing cluster and renders a join preseed;
+`mode=init` renders a new-cluster preseed with a directory pool and `incusbr0` bridge.
+
+```json
+// join an existing cluster; install Incus only if the repository is preconfigured
+{"mode": "join", "address": "198.51.100.11", "storage_source": "/srv/incus",
+ "install_mode": "package", "version_pin": "7.0", "packages": ["incus"]}
+// initialize a new cluster
+{"mode": "init", "address": "192.0.2.10", "network_cidr": "10.0.0.1/24",
+ "install_mode": "existing"}
+// 200
+{"result": {"ok": true, "task_id": "...", "mode": "bootstrap",
+            "message": "Incus bootstrap complete", "steps": ["install", "service", "preseed", "ready"]}}
+```
+
+The helper is idempotent per task ID: completed install/service/preseed/ready steps are recorded in
+`/var/lib/incus-fleet-helper/bootstrap-<task_id>.json` and skipped on retry. `install_mode=package`
+uses the distribution's configured repositories and supports apt, dnf, zypper, apk, and pacman;
+the current helper rejects `repo_url` rather than adding an unverified repository. Incus version
+pins are checked after installation. `confirm`/`rollback` do not undo package installation.
+
+`POST /api/v1/agents/{id}/network` dispatches one allowlisted network mutation through the
+privileged helper. Supported actions are `link-state`, `address`, `route-add`, `route-delete`,
+`firewall-add`, `firewall-delete`, `wifi-connect`, `confirm`, and `rollback`.
+
+```json
+// bring eth0 down
+{"action": "link-state", "interface": "eth0", "up": false}
+// apply a static address and persist through the detected manager;
+// rollback_after_seconds is optional and starts a detached rollback timer
+{"action": "address", "interface": "eth0", "address": "10.0.0.50/24",
+ "gateway": "10.0.0.1", "persist": true, "task_id": "task-1",
+ "rollback_after_seconds": 120}
+// confirm or roll back a previous operation
+{"action": "confirm", "task_id": "task-1"}
+```
+
+The response is `{"result": {"ok": true, "action": "...", "task_id": "...", "backend": "helper",
+"persistence": "ifupdown"}}`. `confirm` removes the rollback snapshot; `rollback` restores the
+captured addresses, routes, link state, and persistence file for that interface. Tasks are
+allowlisted; the helper rejects unknown actions, interface names, addresses, and task IDs. Wi-Fi
+passwords are passed only to the helper and are never stored in task/audit records.
+
+## Metrics
+
+The center keeps a **one-hour in-memory ring buffer** of agent telemetry (`fleet_` prefix,
+10-second interval). It does not persist metrics to the database. `cluster`, `member`, and
+`agent_id` labels are injected by the center and cannot be overridden by an agent.
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/v1/metrics/query?cluster=&member=&agent=&metric=&from=&to=` | series with points in range |
+| `GET /api/v1/metrics/snapshot` | latest point per matching series |
+| `GET /api/v1/metrics/export?format=prometheus\|json\|csv` | stream the current buffer |
+
+`from`/`to` accept RFC3339, a duration such as `1h` (relative to now), or Unix seconds. The default
+range is the last hour. Metrics are exposed as:
+
+```json
+{
+  "series": [
+    {
+      "name": "fleet_host_cpu_usage_ratio",
+      "labels": {"cluster": "c1", "member": "node-a", "agent_id": "..."},
+      "type": "gauge",
+      "points": [{"at": "2026-11-18T00:00:00Z", "value": 0.25}]
+    }
+  ]
+}
+```
+
+Prometheus export includes `# TYPE` lines and millisecond timestamps. CSV is long-form:
+`timestamp,metric,cluster,member,agent_id,value`. If `metrics.enabled` is false, all three endpoints
+return `503 unavailable`. Restarting the center resets the one-hour history; this is intentional.
+
+The agent exports host series (`fleet_host_cpu_usage_ratio`, `fleet_host_memory_bytes`,
+`fleet_host_load`, `fleet_host_uptime_seconds`, `fleet_host_network_bytes_total`) and, from the
+cgroup v2 fallback, per-instance series (`fleet_instance_cpu_seconds_total`,
+`fleet_instance_memory_bytes`, `fleet_instance_processes`, `fleet_instance_io_bytes_total`). The
+optional eBPF object adds host counters (`fleet_host_tcp_retransmits_total`,
+`fleet_host_oom_kills_total`) and cgroup-attributed instance series
+(`fleet_instance_tcp_retransmits_total`, `fleet_instance_oom_kills_total`, and
+`fleet_instance_block_latency_seconds_bucket|_sum|_count`). `fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}`
+reports the active path. Block-latency buckets use powers of two nanoseconds (roughly 2ns through
+1s) plus `+Inf`. TCP retransmits are attributed through a sockops-populated IPv4/IPv6 flow→cgroup
+map, so retransmit timers that run in softirq context still resolve the owning container. OOM kills
+are resolved from the victim pid with `bpf_task_from_pid` plus a CO-RE cgroup-id read, so both memcg
+OOM and root-context global OOM are attributed to the killed instance and aggregated across nested
+cgroups. Kernels without the kfuncs fall back to the current cgroup and a ring-buffer `/proc` path.
+
+## External metrics
+
+The center can forward the same telemetry to Prometheus or VictoriaMetrics and proxy PromQL
+queries back for the UI. External integration is disabled by default; see
+[Deployment](deployment.md#prometheusvictoriametrics).
+
+| Method & path | Auth | Purpose |
+|---|---|---|
+| `GET /api/v1/metrics/query_range?query=&from=&to=&step=` | admin session/bearer | PromQL range query proxy |
+| `GET /api/v1/sd/agents` | HTTP SD token | Prometheus HTTP service discovery |
+| `GET /api/v1/agents/{id}/metrics/prometheus` | HTTP SD token | center-proxied agent metrics scrape |
+
+Remote write uses the Prometheus 1.0 wire format (snappy-compressed protobuf) at the configured
+`metrics.remote_write.url`. Prometheus requires `--web.enable-remote-write-receiver`; VictoriaMetrics
+accepts `/api/v1/write` (single-node) or `/insert/<accountID>/prometheus/api/v1/write` (cluster).
+
+`query_range` accepts `from`/`to` in RFC3339, relative duration (`1h`), or Unix seconds; `step` is a
+duration such as `1m`. The center forwards to Prometheus `/api/v1/query_range` or
+VictoriaMetrics `/prometheus/api/v1/query_range` and returns the upstream JSON. Queries are
+admin-only and bounded by the configured timeout.
+
+The HTTP SD response follows the Prometheus format:
+
+```json
+[
+  {
+    "targets": ["fleet.example"],
+    "labels": {
+      "__scheme__": "https",
+      "__metrics_path__": "/api/v1/agents/AGENT_ID/metrics/prometheus",
+      "cluster": "c1",
+      "member": "node-a",
+      "agent_id": "AGENT_ID"
+    }
+  }
+]
+```
+
+The SD token is configured separately from the admin token and is sent as
+`Authorization: Bearer <token>`. Only online agents are returned. `mode=proxy` (default) has Prometheus scrape the center, which returns the latest in-memory sample
+plus `fleet_agent_up`. `mode=direct` returns the agent's own metrics listener from the
+`metrics_address` fact; the agent must run with `--metrics-listen` and the same bearer token used by
+the scrape configuration. Agents without an advertised address are skipped.
+
+```yaml
+# Prometheus scrape config for direct mode
+scrape_configs:
+  - job_name: incus-fleet
+    authorization:
+      credentials_file: /etc/prometheus/fleet-metrics.token
+    http_sd_configs:
+      - url: https://fleet.example/api/v1/sd/agents
+        authorization:
+          credentials_file: /etc/prometheus/fleet-sd.token
+```
+
+Agent identity lifecycle:
+
+| Method & path | Purpose |
+|---|---|
+| `POST /api/v1/agents/{id}/certificate` | sign a new certificate for the agent's PKIX public key |
+| `POST /api/v1/agents/{id}/revoke` | revoke an agent; the gateway rejects future connections |
+| `POST /api/v1/tasks` | enqueue an async `agent.network` task for the HA dispatcher |
+
+```json
+// rotate
+{"public_key": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"}
+// 200
+{"certificate": "-----BEGIN CERTIFICATE-----\n...\n", "fingerprint": "...",
+ "expires_at": "2027-02-16T00:00:00Z"}
+// revoke
+POST /api/v1/agents/AGENT_ID/revoke -> 204
+```
+
+## Host tasks and audit
+
+Every mutating node operation is recorded as a host task plus an immutable audit entry. Tasks and
+audit records live in the same SQLite/PostgreSQL database as migration history; the schema is
+created or upgraded automatically at startup.
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/v1/tasks?cluster=&member=&limit=` | recent tasks, newest first; `limit` 1-200, default 50 |
+| `POST /api/v1/tasks` | enqueue `{cluster,member,type,plan}`; `202` with the queued task |
+| `GET /api/v1/tasks/{id}` | one task and its state-transition events |
+| `GET /api/v1/audit?cluster=&member=&limit=` | host audit records, newest first |
+| `GET /api/v1/audit/export?format=jsonl\|csv` | full audit export, no UI limit |
+
+```json
+// GET /api/v1/tasks/{id}
+{
+  "task": {
+    "id": "b4f0...",
+    "cluster": "c1",
+    "member": "node-a",
+    "type": "node.route.add",
+    "state": "succeeded",
+    "plan": "destination=10.0.1.0/24 gateway=192.0.2.1 device=eth0",
+    "plan_hash": "...",
+    "result": "succeeded",
+    "created_by": "admin",
+    "created_at": "2026-11-18T00:00:00Z",
+    "started_at": "2026-11-18T00:00:00Z",
+    "finished_at": "2026-11-18T00:00:01Z",
+    "updated_at": "2026-11-18T00:00:01Z"
+  },
+  "events": [
+    {"state": "running", "message": "started", "at": "2026-11-18T00:00:00Z"},
+    {"state": "succeeded", "message": "succeeded", "at": "2026-11-18T00:00:01Z"}
+  ]
+}
+```
+
+The dispatcher supports `agent.network` (a `NodenetApplySpec` plan), `agent.snapshot` (no plan),
+and `agent.bootstrap` (a signed `bootstrap.Spec` plan with `task_id` and `signature`). Network
+example:
+
+```json
+POST /api/v1/tasks
+{"cluster":"c1","member":"node-a","type":"agent.network",
+ "plan":{"action":"route-add","destination":"10.0.1.0/24","gateway":"192.0.2.1","device":"eth0"}}
+// 202
+{"task":{"id":"...","state":"queued","lease_owner":""}}
+```
+
+The task is claimed by a center instance running the dispatcher (`ha.enabled=true`) and executed
+through the member's online agent. Leases prevent two instances from running the same task.
+`agent.bootstrap` requires a pre-signed spec; the handler dispatches it unchanged to the agent and
+records the step count. `agent.snapshot` is a connectivity probe that reports NIC/route counts.
+
+Task states are `queued`, `dispatched`, `accepted`, `running`, `succeeded`, `failed`, `canceled`,
+and `unknown`. `unknown` means the control plane lost contact with the executor while the
+operation may have completed; it is not treated as a failure. Audit records include actor, source
+IP, backend, action, task ID, result, and a redacted plan. Wi-Fi passwords, SSH passwords, sudo
+passwords, Incus join tokens, and private keys are never stored in tasks or audit records.
+
+## Center mesh
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/v1/mesh/status` | leader, term, local state, and voter set |
+| `POST /api/v1/mesh/force-single` | destructive recovery: `{"confirm":true}` resets to one voter |
+| `POST /api/v1/mesh/join` | add a recovered node as voter or non-voter |
+| `POST /api/v1/mesh/promote` | promote a caught-up non-voter to voter |
+| `POST /api/v1/mesh/remove` | remove a node from the voter set |
+| `POST /internal/mesh/dispatch` | internal authenticated relay; guarded by `X-Fleet-Mesh-Secret` |
+| `POST /internal/mesh/owner` | internal forwarded owner registration; same secret guard |
+| `POST /internal/mesh/admin` | internal leader-forwarded join/promote/remove; same secret guard |
+
+`clusters[].endpoints` can list additional Incus API endpoints for failover; the manager retries
+offline clusters in the background.
 
 ## Instances
 
@@ -555,23 +969,38 @@ The response is `{"exit_code": 0, "stdout": "...", "stderr": "..."}`. Scripts ru
 `sh -s`; passwords go to `chpasswd`; keys are appended to `~/.ssh/authorized_keys`. Payloads
 are written to stdin and never appear in process arguments.
 
-### Graphical console
+### Graphical console (desktop)
 
-`POST .../instances/{instance}/spice/prepare` with `{"port": 0, "apply": true}` configures the
-VM's QEMU SPICE TCP listener. A zero port derives a stable port from the instance name in the
-range 5910-5989. The response is:
+The desktop endpoints drive a second QEMU monitor that the fleet attaches to the VM. Writers
+call `POST .../desktop/prepare` first: it writes `raw.qemu.conf` (a QMP control-mode monitor
+on a unix socket) and the matching AppArmor rules, restarting a running VM once when the
+configuration changes. Repeated calls are idempotent — the response tells what happened:
 
 ```json
-{"port": 5931, "applied": true, "restart_required": false}
+{"ready": true, "restarted": false}
 ```
 
-`apply: true` restarts a running VM so the QEMU arguments take effect; the first session may
-therefore require a restart. `GET .../spice?port=5931` upgrades to a WebSocket and bridges one
-SPICE channel to the VM's TCP listener. `GET .../vga` upgrades to the Incus graphical console
-WebSocket.
+Readers then poll `GET .../desktop/screenshot`, which returns the current framebuffer as
+`image/png`. QEMU 7.1+ dumps PNG directly; older builds fall back to PPM which the member
+converts inline, so only the compressed frame crosses SSH.
 
-The SPICE listener uses `disable-ticketing=on` and binds on all interfaces of the cluster
-member. Restrict the 5910-5989 range with a firewall; do not expose it to untrusted networks.
+Input goes through `POST .../desktop/input` (204 on success):
+
+```json
+{"type": "key", "key": "ArrowDown"}
+{"type": "key", "key": "F1", "modifiers": ["Control", "Alt"], "repeat": 2}
+{"type": "pointer", "x": 0.5, "y": 0.25, "button": "left", "down": true}
+{"type": "pointer", "x": 0.5, "y": 0.25, "move": true}
+```
+
+`key` uses browser `KeyboardEvent.key` values plus optional modifiers (`Control`, `Alt`,
+`Shift`, `Meta`); a press is translated to QMP qcode events with the shift chord for symbols.
+`pointer` takes coordinates normalised to 0..1 (mapped onto the emulated tablet's 0..0x7fff
+axis), optional `button` (`left`, `middle`, `right`, `wheel-up`, `wheel-down`, ...) and
+`move: true` for drag motion without a button.
+
+The legacy SPICE endpoints above remain for setups that prefer a native SPICE client; the
+bundled web UI now uses the desktop endpoints, which involve no extra TCP listener.
 
 ## Shared assets
 

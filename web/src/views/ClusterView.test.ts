@@ -1,11 +1,12 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import ElementPlus, { ElMessage } from 'element-plus'
+import ElementPlus, { ElMessage, ElMessageBox } from 'element-plus'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
 import { setLocale } from '@/i18n'
+import AddClusterMemberDialog from '@/components/AddClusterMemberDialog.vue'
 import MemberDialog from '@/components/MemberDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
@@ -36,6 +37,7 @@ function createTestRouter() {
     routes: [
       { path: '/', name: 'dashboard', component: Blank },
       { path: '/clusters/:cluster', name: 'cluster', component: Blank },
+      { path: '/clusters/:cluster/members/:member', name: 'node-detail', component: Blank },
     ],
   })
 }
@@ -58,6 +60,7 @@ function mockFleet() {
     instanceImage({ fingerprint: 'fedcba098765', aliases: ['ubuntu'], os: 'Ubuntu', cached: false }),
   ])
   vi.mocked(api.deleteImage).mockResolvedValue(undefined)
+  vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as never)
   vi.mocked(api.listISOs).mockResolvedValue([{ name: 'alpine', pool: 'default', description: 'installer' }])
   vi.mocked(api.deleteISO).mockResolvedValue(undefined)
   vi.mocked(api.refreshImage).mockResolvedValue(undefined)
@@ -71,6 +74,47 @@ function mockFleet() {
   vi.mocked(api.updateStoragePool).mockResolvedValue(undefined)
   vi.mocked(api.deleteStoragePool).mockResolvedValue(undefined)
   vi.mocked(api.updateNetwork).mockResolvedValue(undefined)
+  vi.mocked(api.listOverlays).mockResolvedValue([
+    {
+      cluster: 'c1',
+      name: 'c1',
+      bridge: 'fleetbr0',
+      vni: 6200,
+      subnet: '198.51.100.0/24',
+      gateway_member: 'node-1',
+      mtu: 1450,
+      enabled: true,
+      members: [
+        { member: 'node-1', underlay_ip: '192.0.2.10', bridge_ip: '198.51.100.1/24', links: 1, gateway: true },
+      ],
+      tunnels: [['node-1', 'node-2']],
+    },
+  ])
+  vi.mocked(api.enableOverlay).mockResolvedValue({
+    cluster: 'c1',
+    name: 'c1',
+    bridge: 'fleetbr0',
+    vni: 6200,
+    subnet: '198.51.100.0/24',
+    gateway_member: 'node-1',
+    mtu: 1450,
+    enabled: true,
+    members: [],
+    tunnels: [],
+  })
+  vi.mocked(api.reconcileOverlay).mockResolvedValue({
+    cluster: 'c1',
+    name: 'c1',
+    bridge: 'fleetbr0',
+    vni: 6200,
+    subnet: '198.51.100.0/24',
+    gateway_member: 'node-1',
+    mtu: 1450,
+    enabled: true,
+    members: [],
+    tunnels: [],
+  })
+  vi.mocked(api.disableOverlay).mockResolvedValue(undefined)
   vi.mocked(api.deleteNetwork).mockResolvedValue(undefined)
   vi.mocked(api.createProfile).mockResolvedValue(undefined)
   vi.mocked(api.deleteProfile).mockResolvedValue(undefined)
@@ -121,7 +165,8 @@ describe('ClusterView', () => {
     setLocale('zh-CN')
     const { wrapper } = await mountCluster()
 
-    expect(wrapper.text()).toContain('node-1 · 在线')
+    expect(wrapper.text()).toContain('node-1')
+    expect(wrapper.text()).toContain('在线')
   })
 
   it('filters by instance type', async () => {
@@ -186,7 +231,10 @@ describe('ClusterView', () => {
       force: false,
     })
 
-    await buttonByText(wrapper, 'Edit').trigger('click')
+    const webRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('web') && row.text().includes('10.0.0.51'))
+    await webRow?.findAll('button').find((b) => b.text().includes('Edit'))?.trigger('click')
     await flushPromises()
     expect(api.getInstance).toHaveBeenCalledWith('c1', 'web')
     expect(wrapper.findComponent(InstanceFormDialog).props('mode')).toBe('edit')
@@ -198,11 +246,20 @@ describe('ClusterView', () => {
     await buttonByText(wrapper, 'Delete').trigger('click')
     await flushPromises()
 
-    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true)
+    const dialog = wrapper.findComponent({ name: 'InstanceDeleteDialog' })
+    expect(dialog.exists()).toBe(true)
+    await dialog.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true, false)
     expect(ElMessage.success).toHaveBeenCalledWith('Deleted web.')
   })
 
-  it('refreshes, reconnects, and reports reconnect errors', async () => {    const { wrapper } = await mountCluster()
+  it('refreshes, reconnects, and reports reconnect errors', async () => {
+    // Freeze timers: the real 15s status loop would fire during slow
+    // coverage-mode runs and shift the call counts.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { wrapper } = await mountCluster()
     expect(api.listClusters).toHaveBeenCalledTimes(1)
 
     await buttonByText(wrapper, 'Refresh').trigger('click')
@@ -218,6 +275,9 @@ describe('ClusterView', () => {
     await buttonByText(wrapper, 'Reconnect').trigger('click')
     await flushPromises()
     expect(ElMessage.error).toHaveBeenCalledWith('still down')
+
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('reloads when the route cluster changes', async () => {
@@ -333,10 +393,37 @@ describe('ClusterView', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('Profile default deleted.')
   })
 
-  it('opens the member dialog from a member tag and saves changes', async () => {
+  it('navigates from a member row to the node detail page', async () => {
+    const { wrapper, router } = await mountCluster()
+
+    const memberRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('database-leader'))
+    await memberRow?.findAll('button').find((b) => b.text().includes('Manage node'))?.trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.name).toBe('node-detail')
+    expect(router.currentRoute.value.params).toMatchObject({ cluster: 'c1', member: 'node-1' })
+  })
+
+  it('opens the add-node dialog', async () => {
     const { wrapper } = await mountCluster()
 
-    await wrapper.find('.member-tag').trigger('click')
+    await buttonByText(wrapper, 'Add node').trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(AddClusterMemberDialog)
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('cluster')).toBe('c1')
+  })
+
+  it('opens the member dialog from the nodes table and saves changes', async () => {
+    const { wrapper } = await mountCluster()
+
+    const memberRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('database-leader'))
+    await memberRow?.findAll('button').find((b) => b.text().includes('Edit'))?.trigger('click')
     await flushPromises()
 
     const dialog = wrapper.findComponent(MemberDialog)
@@ -386,6 +473,9 @@ describe('ClusterView', () => {
     await imageRow?.findAll('button').find((b) => b.text().includes('Delete'))?.trigger('click')
     await flushPromises()
 
+    // Image deletion confirms before firing — it is instant and
+    // unrecoverable, unlike every other destructive action here (#12).
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
     expect(api.deleteImage).toHaveBeenCalledWith('c1', '053059ea4e28')
     expect(ElMessage.success).toHaveBeenCalledWith('Image deleted.')
   })
@@ -480,5 +570,72 @@ describe('ClusterView', () => {
     const dialog = wrapper.findComponent(ImageDistributeDialog)
     expect(dialog.props('modelValue')).toBe(true)
     expect(dialog.props('fingerprint')).toBe('053059ea4e28')
+  })
+})
+describe('ClusterView navigation and helpers', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('routes to the node detail page for a member', async () => {
+    const { wrapper, router } = await mountCluster()
+    const vm = wrapper.vm as unknown as { openNodeDetail: (member: { name: string }) => void }
+    vm.openNodeDetail({ name: 'node-a' })
+    await flushPromises()
+    // The route change is the observable effect of the click handler.
+    expect(router.currentRoute.value.name).toBe('node-detail')
+    expect(router.currentRoute.value.params.member).toBe('node-a')
+  })
+
+  it('labels member statuses through the translation table', async () => {
+    const { wrapper } = await mountCluster()
+    const vm = wrapper.vm as unknown as { memberStatusLabel: (s: string) => string }
+    expect(vm.memberStatusLabel('Online')).toBeTruthy()
+    expect(vm.memberStatusLabel('UnknownState')).toBe('UnknownState')
+  })
+
+  it('renders the private overlay network panel', async () => {
+    const { wrapper } = await mountCluster()
+
+    expect(wrapper.text()).toContain('Private interconnect')
+    expect(wrapper.text()).toContain('fleetbr0')
+    expect(wrapper.text()).toContain('198.51.100.0/24')
+    expect(wrapper.text()).toContain('Gateway')
+  })
+
+  it('opens the overlay dialog', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Enable private network').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Enable private interconnect')
+  })
+
+  it('reconciles an overlay', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Reconcile').trigger('click')
+    await flushPromises()
+
+    expect(api.reconcileOverlay).toHaveBeenCalledWith('c1', 'c1')
+    expect(ElMessage.success).toHaveBeenCalled()
+  })
+
+  it('disables an overlay after confirmation', async () => {
+    const { wrapper } = await mountCluster()
+
+    await buttonByText(wrapper, 'Disable').trigger('click')
+    await flushPromises()
+
+    expect(api.disableOverlay).toHaveBeenCalledWith('c1', 'c1')
+    expect(ElMessage.success).toHaveBeenCalled()
+  })
+
+  it('surfaces overlay loading errors', async () => {
+    vi.mocked(api.listOverlays).mockRejectedValue(new Error('overlay offline'))
+    await mountCluster()
+
+    expect(ElMessage.error).toHaveBeenCalledWith('overlay offline')
   })
 })

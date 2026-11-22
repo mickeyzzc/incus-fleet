@@ -33,8 +33,8 @@ flowchart LR
 
     subgraph apps["App tier · independent instances"]
         direction TB
-        appA["incus-fleet<br/>@ host A<br/>HTTP :8080<br/>SQLite / PostgreSQL"]
-        appB["incus-fleet<br/>@ host B<br/>HTTP :8080<br/>SQLite / PostgreSQL"]
+        appA["incus-fleet<br/>@ host A<br/>HTTP :8080<br/>SQLite / rqlite / PostgreSQL"]
+        appB["incus-fleet<br/>@ host B<br/>HTTP :8080<br/>SQLite / rqlite / PostgreSQL"]
     end
 
     subgraph clusters["Incus clusters"]
@@ -59,11 +59,16 @@ other. Caddy load-balances browsers and pins each browser to one app instance (s
 | `cmd/incus-fleet` | Flags, config loading, structured logging, signal handling |
 | `internal/config` | YAML parsing, environment overrides, defaults, validation, cert file checks |
 | `internal/clusters` | Dials Incus endpoints, holds pinned-cert clients, builds health summaries, reconnect |
+| `internal/bootstrap` | Signed Incus bootstrap spec and signature verification |
+| `internal/incusbootstrap` | Join/init Incus preseed rendering |
+| `internal/hostops` | Typed host operation interface and backend selection |
+| `internal/nodeaccess` | Resolves the local or SSH host operator for a cluster member |
+| `internal/nodejoin` | SSH-based Incus installation and cluster join for new members |
 | `internal/instances` | Inventory, lifecycle, images, ISO, SPICE, files, snapshots, and guest operations |
 | `internal/assets` | Shared SSH key/script library and per-instance batch execution |
 | `internal/migrations` | Validates migration requests, persists tasks, runs copy/move, rollback |
 | `internal/store` | SQLite/PostgreSQL schema for migrations, keys, and scripts |
-| `internal/auth` | Constant-time admin token check and in-memory session table |
+| `internal/auth` | Constant-time admin token check; sessions in memory for a single SQLite node, in the database for rqlite/PostgreSQL |
 | `internal/httpapi` | REST routes, auth middleware, error mapping, security headers, SPA fallback |
 | `internal/app` | Dependency wiring, HTTP server timeouts, graceful shutdown |
 | `web` | Embedded Vue 3 SPA |
@@ -131,8 +136,103 @@ All lifecycle work is synchronous from the HTTP caller's perspective and bounded
 
 Host CPU, memory, storage, and instance counts come from the Incus cluster resources API.
 Per-instance metrics come from the live instance state API: CPU time, memory usage and peak,
-per-mountpoint disk usage, and per-interface network counters. No agent is installed for the
-core metrics; the frontend samples every 3 seconds and derives rates from counter deltas.
+per-mountpoint disk usage, and per-interface network counters. The frontend samples instances every
+3 seconds and derives rates from counter deltas.
+
+The optional host agent adds host telemetry every 10 seconds. The center stores it in a bounded
+in-memory ring buffer (360 points, one hour) with center-injected `cluster`, `member`, and
+`agent_id` labels. `GET /api/v1/metrics/query|snapshot|export` exposes JSON, Prometheus text, and
+CSV; metrics are not written to the control-plane database.
+
+The agent collects cgroup v2 metrics for containers (and host-side cgroup metrics for VMs) without
+extra privileges. Optional eBPF adds host TCP retransmit/OOM counters, cgroup-attributed retransmit
+and OOM counters, and a per-cgroup block-latency histogram. A sockops program maps IPv4/IPv6
+flow→cgroup in process context so retransmit tracepoints resolve the owning container even when the
+timer runs in softirq context. Sockops is attached with `BPF_F_ALLOW_MULTI` and never replaces an
+existing program. The OOM tracepoint resolves the victim task's cgroup with `bpf_task_from_pid` and a
+CO-RE read of the task/cgroup path, so root-context global OOM is attributed exactly; kernels without
+these kfuncs keep the ring-buffer `/proc` fallback. Cgroup ids are resolved through each
+cgroup directory's kernel file handle, including nested systemd cgroups. When the object, BTF, or
+capabilities are missing it logs the reason and falls back to procfs/cgroup.
+
+When external metrics are enabled, the center also forwards normalized series to a Prometheus or
+VictoriaMetrics remote-write endpoint through a bounded retry queue, and proxies PromQL range
+queries for the UI. `GET /api/v1/sd/agents` provides HTTP service discovery using a separate token;
+in this release Prometheus scrapes a center-proxied endpoint for each online agent. Direct agent
+listeners are a later phase.
+
+## Host operations
+
+Host network and node provisioning operations go through a typed
+`hostops.Operator` selected by a resolver. `node_access.mode` is `auto` (default), `agent`, `ssh`,
+or `local`. The fleet app host is always local; remote members use an online agent when available,
+otherwise SSH when configured. Reads may fall back to SSH; mutating operations fall back only when
+`node_access.ssh_write_fallback` is true (the default for deployments that predate the agent).
+
+On Linux the helper applies link state, static addresses, and fleet routes through native netlink;
+the command backend remains for non-Linux development/tests, and persistence still goes through
+the detected manager. The resolver prefers an online agent for remote members, so the node network
+page uses the agent automatically and falls back to SSH only when configured.
+
+Every mutation is persisted as a `host_task` with state transitions and a `host_audit` entry
+containing actor, source IP, backend, action, plan hash, result, and timestamps. `unknown` means
+the executor disconnected while the operation may have completed; it is not treated as a failure.
+Wi-Fi passwords, SSH/sudo passwords, Incus join tokens, and private keys are never stored. The
+current implementation executes synchronously and records the task; the agent phase adds queued,
+dispatched, and leased tasks.
+
+`GET /api/v1/tasks`, `GET /api/v1/tasks/{id}`, and `GET /api/v1/audit` expose the records.
+
+## Host agent
+
+The optional Rust agent is a typed host actuator, not an Incus proxy. It enrolls with a one-time
+token, receives a client certificate from the center CA, and opens an outbound mTLS WebSocket to
+the separate agent gateway (`agent.listen`, default `:8444`). The browser API creates enrollment
+tokens and dispatches read-only `nodenet.snapshot` tasks through `GET /api/v1/agents/{id}/snapshot`.
+
+The protocol is protobuf `incusfleet.agent.v1` (`api/agent/v1/agent.proto`), with generated Go and
+Rust types. The agent sends Hello, Facts, and Heartbeat frames; the center sends task dispatches
+and heartbeat acknowledgements. The agent reports facts and `ip -j` based network snapshots, and
+can apply allowlisted link/address/route/firewall/Wi-Fi changes through a short-lived privileged
+helper. The helper validates the JSON contract, records a rollback snapshot keyed by task ID, and
+persists addresses through the detected manager (ifupdown, systemd-networkd, netplan, wicked, or
+NetworkManager). Incus provisioning is a signed declarative spec: the center builds a join or init
+preseed and signs it with the agent CA key; the helper verifies the signature, installs through the
+host package manager when requested, runs `incus admin init --preseed`, waits for the local API,
+and records idempotent steps under `/var/lib/incus-fleet-helper`. Telemetry and eBPF remain later
+phases.
+
+## Center mesh
+
+The optional Raft mesh gives centers leader election, a fencing term, and replicated agent-connection
+ownership. Any center can claim a durable host task, then relay it to the center holding the agent
+WebSocket through the operator-configured `control_address`. Browser sessions live in the shared
+PostgreSQL database, so leader failover does not log users out. Use three voters (two centers plus
+one witness is supported); losing quorum stops writes until an operator performs the documented
+forced-single recovery and rejoins the other nodes as learners. Cluster connections also support an
+ordered `endpoints` list with background failover.
+
+## High availability and lifecycle
+
+Host tasks carry `lease_owner`/`lease_until` and can be claimed by a worker with PostgreSQL
+`FOR UPDATE SKIP LOCKED` or a SQLite transaction. This is the coordination primitive for multiple
+center instances; the current synchronous HTTP path does not yet run a background dispatcher.
+
+The center can serve a self-contained Linux installer (`agent.install`) that downloads the agent and
+helper, verifies their checksums, writes the CA/sudoers/systemd assets, enrolls with a one-time token,
+and starts the service. This makes the agent-first Add node flow work on a fresh host without a manual
+binary copy.
+
+Agent certificates are issued by the center CA. Admins can sign a replacement certificate for an
+existing agent public key or revoke an agent; the gateway checks revocation on connect and verifies
+the stored certificate fingerprint. The agent renews itself over mTLS within 30 days of expiry.
+Agent upgrades use a detached Ed25519 signature, a `.prev` backup, a `--version` health check that
+restores the previous binary on failure, and an optional systemd restart. Audit records can be
+exported as JSONL or CSV.
+
+A background dispatcher (`ha.enabled`) claims queued `agent.network` tasks with database leases,
+renews the lease while the agent runs the task, and records success/failure. This lets multiple
+center instances share one PostgreSQL database without executing the same task twice.
 
 ## Shared assets and batch operations
 

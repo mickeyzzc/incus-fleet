@@ -12,6 +12,7 @@ import { api } from '@/api'
 import { useClustersStore } from '@/stores/clusters'
 import { useInstancesStore } from '@/stores/instances'
 import { useMigrationsStore } from '@/stores/migrations'
+import { useVisiblePolling } from '@/composables/useInstanceActions'
 import { errorMessage } from '@/utils/errors'
 import { formatBytes, formatDateTime } from '@/utils/format'
 
@@ -161,13 +162,14 @@ const trafficTotals = computed(() => {
 })
 
 onMounted(async () => {
-  await Promise.all([
-    clusters.fetchAll(),
-    instances.fetchAll('any'),
-    migrations.fetchAll(20),
-  ])
+  await refresh()
   startTrafficPolling()
 })
+
+// Cluster cards used to freeze between manual refreshes while the traffic
+// chart had its own timer; poll the fleet status on the shared
+// visible-page loop so offline members come back on their own (#12).
+useVisiblePolling(() => refresh(), 15000)
 
 async function refresh(): Promise<void> {
   await Promise.all([

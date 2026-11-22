@@ -22,6 +22,17 @@ import (
 // ErrInvalidRequest is returned when instance management input is invalid.
 var ErrInvalidRequest = errors.New("instances: invalid request")
 
+// overlayBridgePrefix marks fleet-managed overlay bridges. The overlay service
+// creates them on every member with this prefix, so instance creation can tell
+// them apart from a physical NIC name and attach a bridged NIC instead of the
+// macvlan device it gives unmanaged physical interfaces.
+const overlayBridgePrefix = "fleetbr"
+
+// isOverlayBridge reports whether network names a fleet overlay bridge.
+func isOverlayBridge(network string) bool {
+	return strings.HasPrefix(network, overlayBridgePrefix)
+}
+
 const (
 	actionTimeout = 5 * time.Minute
 	createTimeout = 15 * time.Minute
@@ -167,8 +178,13 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 		networkManaged = target.Managed
 		// Unmanaged parents are attached as macvlan and take addresses from
 		// the physical LAN; device-level static addresses only apply to
-		// managed bridges.
+		// managed bridges. Fleet's overlay bridge runs its own dnsmasq without
+		// MAC reservations, so it cannot honour a device-level static address
+		// either.
 		if !networkManaged && (req.IPv4 != "" || req.IPv6 != "") {
+			if isOverlayBridge(network) {
+				return Detail{}, fmt.Errorf("%w: overlay network %q hands out DHCP addresses; set a static address inside the instance instead", ErrInvalidRequest, network)
+			}
 			return Detail{}, fmt.Errorf("%w: physical NIC %q takes addresses from the LAN DHCP server; configure a static address inside the instance instead", ErrInvalidRequest, network)
 		}
 	}
@@ -189,7 +205,8 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 
 	if network != "" {
 		nic := map[string]string{"type": "nic"}
-		if networkManaged {
+		switch {
+		case networkManaged:
 			nic["network"] = network
 			if req.IPv4 != "" {
 				nic["ipv4.address"] = req.IPv4
@@ -197,7 +214,14 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 			if req.IPv6 != "" {
 				nic["ipv6.address"] = req.IPv6
 			}
-		} else {
+		case isOverlayBridge(network):
+			// A fleet-managed overlay bridge is a plain host bridge, so Incus
+			// does not list it as a managed network. Attach it as a bridged NIC
+			// so the guest keeps using DHCP from the overlay gateway instead of
+			// landing on the physical LAN the way macvlan would.
+			nic["nictype"] = "bridged"
+			nic["parent"] = network
+		default:
 			nic["nictype"] = "macvlan"
 			nic["parent"] = network
 		}
@@ -301,14 +325,25 @@ func (s *Service) Update(ctx context.Context, clusterName, name string, req Upda
 			if network == "" {
 				return Detail{}, fmt.Errorf("%w: network is required", ErrInvalidRequest)
 			}
-			networks, err := client.GetNetworkNames()
+			networks, err := client.GetNetworks()
 			if err != nil {
 				return Detail{}, fmt.Errorf("instances: list networks for %s: %w", clusterName, err)
 			}
-			if !containsString(networks, network) {
-				return Detail{}, fmt.Errorf("%w: network %q does not exist on %s", ErrInvalidRequest, network, clusterName)
+			target, err := findNetwork(networks, network, clusterName)
+			if err != nil {
+				return Detail{}, err
 			}
-			nic["network"] = network
+			staticIPv4 := ""
+			if req.IPv4 != nil {
+				staticIPv4 = strings.TrimSpace(*req.IPv4)
+			}
+			staticIPv6 := ""
+			if req.IPv6 != nil {
+				staticIPv6 = strings.TrimSpace(*req.IPv6)
+			}
+			if err := applyNICNetwork(nic, target, network, staticIPv4, staticIPv6); err != nil {
+				return Detail{}, err
+			}
 		}
 
 		if req.IPv4 != nil {
@@ -336,6 +371,12 @@ func (s *Service) Update(ctx context.Context, clusterName, name string, req Upda
 }
 
 // Action starts, stops, or restarts an instance.
+//
+// A guest without the incus agent (an ISO-booted installer, for example)
+// cannot answer an elegant stop/restart, so Incus would block until the full
+// graceful timeout before failing — the console buttons then appear dead for
+// minutes. When the state reports no agent activity, stop/restart skip the
+// wait and force immediately.
 func (s *Service) Action(ctx context.Context, clusterName, name string, req ActionRequest) error {
 	action := strings.TrimSpace(req.Action)
 	switch action {
@@ -349,13 +390,22 @@ func (s *Service) Action(ctx context.Context, clusterName, name string, req Acti
 		return err
 	}
 
+	force := req.Force
+	timeout := 300
+	if action != "start" && !force {
+		if state, _, err := client.GetInstanceState(name); err == nil && state != nil && state.Processes < 0 {
+			force = true
+			timeout = 0
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, actionTimeout)
 	defer cancel()
 
 	op, err := client.UpdateInstanceState(name, api.InstanceStatePut{
 		Action:  action,
-		Timeout: 300,
-		Force:   req.Force,
+		Timeout: timeout,
+		Force:   force,
 	}, "")
 	if err != nil {
 		return fmt.Errorf("instances: %s %s:%s: %w", action, clusterName, name, err)
@@ -364,8 +414,10 @@ func (s *Service) Action(ctx context.Context, clusterName, name string, req Acti
 	return waitOperation(ctx, op, action+" "+name)
 }
 
-// Delete stops a running instance before deleting it.
-func (s *Service) Delete(ctx context.Context, clusterName, name string, force bool) error {
+// Delete stops a running instance before deleting it. When deleteVolumes is
+// set, attached custom volumes (disk devices with pool+source) are removed
+// afterwards; shared ISO installer assets are kept.
+func (s *Service) Delete(ctx context.Context, clusterName, name string, force, deleteVolumes bool) error {
 	client, err := s.client(clusterName)
 	if err != nil {
 		return err
@@ -380,14 +432,28 @@ func (s *Service) Delete(ctx context.Context, clusterName, name string, force bo
 		return fmt.Errorf("instances: state %s:%s: %w", clusterName, name, err)
 	}
 
+	var attached []attachedVolume
+	if deleteVolumes {
+		attached = attachedCustomVolumes(client, name)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, deleteTimeout)
 	defer cancel()
 
 	if state != nil && (state.StatusCode == api.Running || strings.EqualFold(state.Status, "running")) {
+		// Same agent-less shortcut as Action: an ISO-booted installer cannot
+		// answer an elegant stop, so deleting it would otherwise stall on the
+		// graceful wait first.
+		stopForce := force
+		stopTimeout := 300
+		if !stopForce && state.Processes < 0 {
+			stopForce = true
+			stopTimeout = 0
+		}
 		op, err := client.UpdateInstanceState(name, api.InstanceStatePut{
 			Action:  "stop",
-			Timeout: 300,
-			Force:   force,
+			Timeout: stopTimeout,
+			Force:   stopForce,
 		}, "")
 		if err != nil {
 			return fmt.Errorf("instances: stop %s:%s before delete: %w", clusterName, name, err)
@@ -401,8 +467,63 @@ func (s *Service) Delete(ctx context.Context, clusterName, name string, force bo
 	if err != nil {
 		return fmt.Errorf("instances: delete %s:%s: %w", clusterName, name, err)
 	}
+	if err := waitOperation(ctx, op, "delete "+name); err != nil {
+		return err
+	}
 
-	return waitOperation(ctx, op, "delete "+name)
+	if len(attached) > 0 {
+		s.deleteAttachedVolumes(client, clusterName, name, attached)
+	}
+
+	return nil
+}
+
+// attachedVolume is one custom volume referenced by a disk device.
+type attachedVolume struct {
+	pool   string
+	volume string
+}
+
+// attachedCustomVolumes collects the pool+source pairs of the instance's
+// disk devices. Missing configs degrade to an empty list: the option then
+// simply has nothing to remove.
+func attachedCustomVolumes(client clusters.InstanceServer, name string) []attachedVolume {
+	inst, _, err := client.GetInstance(name)
+	if err != nil || inst == nil {
+		return nil
+	}
+
+	var out []attachedVolume
+	for _, device := range inst.Devices {
+		if device["type"] != "disk" || device["pool"] == "" || device["source"] == "" {
+			continue
+		}
+
+		out = append(out, attachedVolume{pool: device["pool"], volume: device["source"]})
+	}
+
+	return out
+}
+
+// deleteAttachedVolumes removes the instance's custom volumes, best effort.
+// ISO volumes are shared installer assets and are never deleted; anything
+// else that fails is logged so the deletion itself still counts as done.
+func (s *Service) deleteAttachedVolumes(client clusters.InstanceServer, clusterName, name string, attached []attachedVolume) {
+	for _, vol := range attached {
+		v, _, err := client.GetStoragePoolVolume(vol.pool, "custom", vol.volume)
+		if err != nil {
+			continue // volume already gone or inaccessible; nothing to clean
+		}
+		if v != nil && v.ContentType == "iso" {
+			continue // shared installer asset, not instance-owned storage
+		}
+
+		if err := client.DeleteStoragePoolVolume(vol.pool, "custom", vol.volume); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("failed to delete attached volume", "cluster", clusterName, "instance", name, "pool", vol.pool, "volume", vol.volume, "error", err)
+			}
+		}
+	}
 }
 
 // Images lists the local images available on a cluster.
@@ -448,6 +569,29 @@ func (s *Service) Images(clusterName string) ([]Image, error) {
 	})
 
 	return list, nil
+}
+
+// MemberNames lists the cluster member names; used by callers that must
+// contact every member (bond-slave detection on unmanaged NICs whose Incus
+// listing carries no locations).
+func (s *Service) MemberNames(clusterName string) ([]string, error) {
+	client, err := s.client(clusterName)
+	if err != nil {
+		return nil, err
+	}
+
+	members, err := client.GetClusterMembers()
+	if err != nil {
+		return nil, fmt.Errorf("instances: list members %s: %w", clusterName, err)
+	}
+
+	names := make([]string, 0, len(members))
+	for _, member := range members {
+		names = append(names, member.ServerName)
+	}
+	sort.Strings(names)
+
+	return names, nil
 }
 
 // Resources returns storage pools and networks with usage details.
@@ -516,6 +660,46 @@ func (s *Service) Resources(clusterName string) (Resources, error) {
 	})
 
 	return out, nil
+}
+
+// findNetwork locates one network by name in a listing.
+func findNetwork(networks []api.Network, name, clusterName string) (*api.Network, error) {
+	for i := range networks {
+		if networks[i].Name == name {
+			return &networks[i], nil
+		}
+	}
+
+	return nil, fmt.Errorf("%w: network %q does not exist on %s", ErrInvalidRequest, name, clusterName)
+}
+
+// applyNICNetwork translates a selected network into the right NIC device
+// shape: managed networks attach through the "network" key, unmanaged
+// physical parents through nictype=macvlan + parent — matching the create
+// path, so Incus never receives an unmanaged name in "network" ("Network not
+// found"). Static device addresses only apply to managed bridges.
+func applyNICNetwork(nic map[string]string, target *api.Network, network, staticIPv4, staticIPv6 string) error {
+	if target.Managed {
+		nic["network"] = network
+		// "network" and "nictype"/"parent" are mutually exclusive in Incus;
+		// a legacy NIC (nictype+parent) must drop those keys on switch or
+		// the update is rejected outright.
+		delete(nic, "nictype")
+		delete(nic, "parent")
+		return nil
+	}
+
+	if staticIPv4 != "" || staticIPv6 != "" {
+		return fmt.Errorf("%w: physical NIC %q takes addresses from the LAN DHCP server; configure a static address inside the instance instead", ErrInvalidRequest, network)
+	}
+
+	delete(nic, "network")
+	delete(nic, "ipv4.address")
+	delete(nic, "ipv6.address")
+	nic["nictype"] = "macvlan"
+	nic["parent"] = network
+
+	return nil
 }
 
 func (s *Service) client(clusterName string) (clusters.InstanceServer, error) {

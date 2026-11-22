@@ -7,14 +7,40 @@
 
 ## 认证
 
-服务器只有一个共享的管理员 token。有两种认证方式：
+服务器支持本地账号与基于角色的访问控制。有三种认证方式：
 
-1. **浏览器会话。** 用 token 调用 `POST /api/v1/auth/login`；响应会设置一个名为
+1. **浏览器会话。** 用用户名和密码调用 `POST /api/v1/auth/login`；响应会设置一个名为
    `incus_fleet_session` 的 `HttpOnly`、`SameSite=Lax` cookie。该 cookie 的有效期为
    12 小时。当请求本身走 TLS，或携带 `X-Forwarded-Proto: https`（由 Caddy 发送）
    时，cookie 会被标记为 `Secure`。
 2. **Bearer token。** 在受保护的端点上发送 `Authorization: Bearer <admin token>`。
-   该方式面向自动化场景，无需登录步骤。
+   这是共享引导凭证：**仅在尚无本地账号时有效**，创建第一个账号后自动退役。
+3. **引导环境变量。** `INCUS_FLEET_BOOTSTRAP_ADMIN_USERNAME` 与
+   `INCUS_FLEET_BOOTSTRAP_ADMIN_PASSWORD` 在启动时创建第一个管理员；已有账号后忽略。
+
+### 角色
+
+| 角色 | 读取 | 变更集群资源 | 管理用户 |
+| --- | --- | --- | --- |
+| `admin` | 是 | 是 | 是 |
+| `operator` | 是 | 是 | 否 |
+| `viewer` | 是 | 否（403） | 否 |
+
+变更类端点在服务端校验角色；只读账号即使直接调用 API 也会收到
+`403 {"error":{"code":"forbidden"}}`。
+
+### 用户管理
+
+| 方法 | 路径 | 认证 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/users` | admin | 列出账号 |
+| POST | `/users` | admin（首个账号可用引导 token） | 创建账号 |
+| PATCH | `/users/{id}` | admin | 修改角色、密码或禁用状态 |
+| DELETE | `/users/{id}` | admin | 删除账号（拒绝删除最后一个管理员） |
+| POST | `/auth/password` | 任意已登录账号 | 修改自己的密码 |
+| GET | `/auth/sessions` | 任意已登录账号 | 查看当前会话 |
+
+最后一个启用的管理员既不能被删除也不能被降级：两种操作都返回 `409 conflict`。
 
 `GET /api/v1/healthz`、`GET /api/v1/version`、`POST /auth/login` 和
 `POST /auth/logout` 是公开的。`/clusters`、`/instances`、`/migrations`、`/keys`、
@@ -31,17 +57,22 @@ curl -sS https://fleet.example/api/v1/clusters \
 POST /api/v1/auth/login
 Content-Type: application/json
 
-{"token": "<admin token>"}
+{"username": "admin", "password": "<password>"}
 ```
 
 ```json
 {
   "authenticated": true,
-  "expires_at": "2026-11-12T09:30:00Z"
+  "expires_at": "2026-11-12T09:30:00Z",
+  "username": "admin",
+  "role": "admin"
 }
 ```
 
-token 无效时返回 `401`，错误码为 `invalid_token`。
+凭据错误返回 `401` `invalid_credentials`；账号锁定返回 `429` `account_locked`；
+账号禁用返回 `403` `account_disabled`。
+
+引导路径改为发送 `{"token": "<admin token>"}`；一旦存在本地账号即返回 `401`。
 
 ### 会话
 
@@ -50,7 +81,7 @@ GET /api/v1/auth/session
 ```
 
 ```json
-{"authenticated": true}
+{"authenticated": true, "username": "admin", "role": "admin", "expires_at": "..."}
 ```
 
 ### 登出
@@ -85,6 +116,7 @@ POST /api/v1/auth/logout
 | POST | `/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}/restore` | 是 | 恢复快照 |
 | DELETE | `/clusters/{cluster}/instances/{instance}/snapshots/{snapshot}` | 是 | 删除快照 |
 | POST | `/clusters/{cluster}/instances/{instance}/devices` | 是 | 挂载磁盘或 NIC 设备 |
+| PATCH | `/clusters/{cluster}/instances/{instance}/devices/{device}` | 是 | 编辑单个设备(合并进现有配置;网卡地址留空回退 DHCP) |
 | DELETE | `/clusters/{cluster}/instances/{instance}/devices/{device}` | 是 | 卸载设备 |
 | GET | `/clusters/{cluster}/instances/{instance}/console` | 是 | 交互式控制台（WebSocket） |
 | GET | `/clusters/{cluster}/instances/{instance}/exec` | 是 | 交互式 exec 会话（WebSocket） |
@@ -105,6 +137,11 @@ POST /api/v1/auth/logout
 | POST | `/clusters/{cluster}/networks` | 是 | 创建托管网络 |
 | PATCH | `/clusters/{cluster}/networks/{network}` | 是 | 更新托管网络 |
 | DELETE | `/clusters/{cluster}/networks/{network}` | 是 | 删除托管网络 |
+| GET | `/clusters/{cluster}/overlay` | 是 | 列出私有互联网络 |
+| POST | `/clusters/{cluster}/overlay` | 是 | 启用私有互联网络 |
+| GET | `/clusters/{cluster}/overlay/{overlay}` | 是 | 获取单个私有互联网络 |
+| DELETE | `/clusters/{cluster}/overlay/{overlay}` | 是 | 关闭并移除私有互联网络 |
+| POST | `/clusters/{cluster}/overlay/{overlay}/reconcile` | 是 | 按当前成员重新对账 |
 | GET | `/clusters/{cluster}/profiles` | 是 | 列出实例 Profile |
 | POST | `/clusters/{cluster}/profiles` | 是 | 创建 Profile |
 | PATCH | `/clusters/{cluster}/profiles/{profile}` | 是 | 更新 Profile |
@@ -124,9 +161,13 @@ POST /api/v1/auth/logout
 | POST | `/clusters/{cluster}/instances/{instance}/clone` | 是 | 在所属集群内克隆实例 |
 | POST | `/clusters/{cluster}/instances/{instance}/rebuild` | 是 | 用另一个镜像重建根磁盘 |
 | POST | `/clusters/{cluster}/instances/{instance}/ops` | 是 | 运行脚本、设置密码或注入密钥 |
+| POST | `/clusters/{cluster}/instances/{instance}/agent/install` | 是 | 通过 SSH 在虚拟机内安装官方 incus-agent（客户机凭据仅在请求体内，不落库） |
 | GET | `/clusters/{cluster}/instances/{instance}/vga` | 是 | 图形控制台（WebSocket） |
-| GET | `/clusters/{cluster}/instances/{instance}/spice?port=` | 是 | SPICE 通道桥接（WebSocket） |
-| POST | `/clusters/{cluster}/instances/{instance}/spice/prepare` | 是 | 配置虚拟机的 SPICE 监听器 |
+| POST | `/clusters/{cluster}/instances/{instance}/desktop/prepare` | 是 | 启用 QMP 图形控制台（安装监视器 socket） |
+| GET | `/clusters/{cluster}/instances/{instance}/desktop/screenshot` | 是 | 当前帧缓冲（PNG） |
+| POST | `/clusters/{cluster}/instances/{instance}/desktop/input` | 是 | 注入一个键盘或指针事件 |
+| GET | `/clusters/{cluster}/instances/{instance}/spice?port=` | 是 | SPICE 通道桥接（WebSocket，旧版） |
+| POST | `/clusters/{cluster}/instances/{instance}/spice/prepare` | 是 | 配置虚拟机的 SPICE 监听器（旧版） |
 | GET | `/keys` | 是 | 列出共享 SSH 公钥 |
 | POST | `/keys` | 是 | 存储公钥 |
 | PATCH | `/keys/{id}` | 是 | 更新已存储的公钥 |
@@ -194,6 +235,387 @@ POST /api/v1/auth/logout
 无法检查时，存储和实例计数可能为零。
 
 `POST /clusters/{cluster}/reconnect` 直接返回更新后的摘要对象（不做外层包装）。
+
+## 添加集群成员
+
+`POST /api/v1/clusters/{cluster}/members` 会准备一台新主机并加入集群。fleet 服务通过 SSH
+连接主机，可选地从 apt 仓库安装 Incus，通过主机本地 socket 提交加入请求，并等待成员上报
+`Online`。
+
+```json
+{
+  "name": "node-c",
+  "address": "198.51.100.11",
+  "ssh_user": "node-admin",
+  "ssh_port": 22,
+  "ssh_password": "optional-ssh-password",
+  "sudo_password": "optional-sudo-password",
+  "install_incus": true,
+  "install_vms": true,
+  "ignore_host_key": true,
+  "storage_source": "/srv/incus",
+  "incus_repo": "https://pkgs.zabbly.com/incus/lts-7.0",
+  "incus_repo_key": "https://pkgs.zabbly.com/key.asc"
+}
+```
+
+- `name` 可选；省略时使用节点 hostname。
+- `ssh_user` 默认取 `node_access.ssh_user`；除非提供 `ssh_password`，否则使用 fleet SSH 密钥。
+- `sudo_password` 仅在 SSH 账户需要密码执行 sudo 时使用一次。加入成功后，fleet 会为该账户安装免密白名单。
+- `install_incus` 会添加 apt 源（`incus_repo`/`incus_repo_key`）并安装软件包。安装的版本必须与集群的 Incus 版本一致。
+- `ignore_host_key` 跳过 SSH 主机密钥校验，适用于尚未加入 `known_hosts` 的节点。
+- `storage_source` 填充每个成员的 `storage-pool/default/source`；默认 `/srv/incus`。
+
+`201` 返回加入的成员和准备步骤：
+
+```json
+{
+  "member": {"name": "node-c", "status": "Online", "roles": [], "url": "https://198.51.100.11:8443"},
+  "steps": [
+    {"name": "connect", "status": "ok", "detail": "SSH connection established to 198.51.100.11"},
+    {"name": "install", "status": "ok", "detail": "Incus installed from https://pkgs.zabbly.com/incus/lts-7.0"},
+    {"name": "token", "status": "ok", "detail": "Join token generated for node-c"},
+    {"name": "join", "status": "ok", "detail": "Join request accepted by cluster c2"},
+    {"name": "online", "status": "ok", "detail": "Member node-c is online"},
+    {"name": "sudoers", "status": "ok", "detail": "Passwordless node network sudo rules installed"},
+    {"name": "fleet_key", "status": "ok", "detail": "Fleet SSH key authorized for node-admin"}
+  ]
+}
+```
+
+加入后的配置步骤（`sudoers`、`fleet_key` 等）如果返回 `warning`/`skipped`，不会让请求失败，
+因为成员已经加入集群。错误映射为 `400 invalid_request`、`404 not_found`、`409 conflict`
+（成员名已存在）、`503 cluster_unavailable` 或 `500 internal_error`。
+
+请求可能需要数分钟；handler 会延长写超时，服务器的全局超时仍作用于请求上下文。密码只在
+内存中使用，不会持久化或记录到日志。
+
+## 节点网络（按集群成员）
+
+这些端点管理某个集群成员的主机网络。fleet 所在主机通过 `sudo -n` 本地执行；其他成员通过
+`node_access` 的 SSH 身份访问。两条路径都需要 `docs/deployment.md` 中的 sudo 白名单。
+
+```json
+// GET /api/v1/clusters/c2/members/node-b/node?wifi=wlan0
+{
+  "host": "node-b",
+  "nics": [
+    {"name": "eth0", "state": "up", "kind": "ethernet", "mac": "aa:bb:cc:dd:ee:ff", "mtu": 1500,
+     "addresses": [{"family": "inet", "address": "198.51.100.10", "prefixlen": 24}]},
+    {"name": "wlan0", "state": "up", "kind": "wifi", "addresses": [],
+     "wifi": {"connected": true, "ssid": "Office", "signal": -55, "frequency": 2437}}
+  ],
+  "routes": [{"destination": "default", "gateway": "198.51.100.1", "device": "eth0", "metric": "100"}],
+  "firewall": [{"handle": "7", "rule": "tcp dport 22 accept comment \"fleet_rule\""}],
+  "wifi_scan": [{"ssid": "Office", "signal": -45, "frequency": 2437, "secure": true}],
+  "wifi_device": "wlan0",
+  "capabilities": ["nics", "routes", "firewall"]
+}
+```
+
+`wifi` 查询参数选择要扫描的接口；省略时使用第一个无线接口。扫描结果按 SSID 去重（保留信号
+最强的 BSS），并要求接口处于 up 状态。
+
+以下路径都相对于 `/api/v1/clusters/{cluster}/members/{member}/node`：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /networks/{name}/state` `{"up": bool}` | 启用/禁用网卡 |
+| `PATCH /networks/{name}` `{"dhcp": bool, "address": "10.0.0.50/24", "gateway": "...", "persist": bool}` | 静态地址或 DHCP；`persist` 写入 `/etc/network/interfaces.d/<name>` |
+| `POST /networks/{name}/wifi` `{"ssid": "...", "password": "..."}` | 通过 wpa_supplicant 关联并获取 DHCP 租约 |
+| `GET/POST /routes`、`DELETE /routes/{destination}` | 路由表和静态路由 |
+| `GET/POST /firewall`、`DELETE /firewall/{handle}` | fleet_filter nftables 表规则 |
+
+Handler 错误映射为 `400 invalid_request`（输入错误）、`404 not_found`（未知集群或成员）和
+`503 node_unavailable`（缺少 SSH 访问、sudo 规则、二进制，或主机故障）。
+
+快照包含 `backend`（`local`、`ssh`，启用 agent 后为 `agent`）。变更型响应会设置
+`X-Incus-Fleet-Backend`，如果操作被记录还会设置 `X-Incus-Fleet-Task`。后端由
+`node_access.mode`（`auto`、`agent`、`ssh` 或 `local`）决定。默认 `auto` 下，读操作可以回退
+SSH；写操作只有在 `node_access.ssh_write_fallback=true` 时才回退（对于尚未部署 agent 的旧
+部署，默认是 true）。
+
+## Agent
+
+主机 agent 是可选的。注册 token 一次性使用，并绑定到一个集群成员。agent gateway 监听独立的
+`agent.listen` TLS 端口（默认 `:8444`），不属于浏览器 API；普通 HTTP 端口只暴露下面的管理
+端点。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/agents/enrollment-tokens` | 创建一次性 token；要求集群已存在 |
+| `GET /api/v1/agents?cluster=&member=` | 列出已注册 agent，可按 cluster/member 过滤 |
+| `GET /api/v1/agents/{id}/snapshot` | 向在线 agent 派发只读 `nodenet.snapshot` |
+| `GET /api/v1/agent/install.sh` | 公开的一键安装脚本；由 `agent.install` 启用 |
+| `GET /api/v1/agent/install/agent` | agent 二进制，带 `X-Checksum-Sha256` |
+| `GET /api/v1/agent/install/helper` | 特权 helper 二进制，带 `X-Checksum-Sha256` |
+| `GET /api/v1/agent/install/ca.crt` | agent gateway CA 证书 |
+
+```json
+// POST /api/v1/agents/enrollment-tokens
+{"cluster": "c1", "member": "node-a", "ttl_seconds": 900}
+// 201
+{"token": "one-time-value", "cluster": "c1", "member": "node-a",
+ "expires_at": "2026-11-18T00:15:00Z"}
+```
+
+安装器端点不需要登录，因为一次性注册 token 本身就是凭据；`agent.install.enabled=false` 时返回
+`503`。生成的脚本内嵌 gateway URL、资源基地址、两个 SHA-256 校验值、CA 证书、sudoers 白名单和
+systemd unit；它会创建服务用户、安装二进制、完成注册并启动服务。
+
+token 只返回一次；数据库只存它的 SHA-256。注册请求本身是 agent gateway 上的
+`POST /api/v1/agent/enroll`，携带 PKIX 公钥、cluster、member 和 token。gateway 返回 agent ID、
+客户端证书和 CA 证书。agent 随后用 mTLS 连接 `GET /api/v1/agent/connect`，通过 WebSocket
+发送 protobuf `Envelope` 帧。证书会自动续期：离过期 30 天内时，agent 用当前 mTLS 身份调用
+`POST /api/v1/agent/renew`；gateway 校验当前指纹，为提交的 PKIX 公钥签发新证书并返回新 PEM 和 CA。
+
+`GET /api/v1/agents/{id}/snapshot` 返回：
+
+```json
+{
+  "snapshot": {
+    "host": "node-a",
+    "nics": [{"name": "eth0", "state": "up", "kind": "ethernet",
+              "addresses": [{"family": "inet", "address": "192.0.2.10", "prefixlen": 24}]}],
+    "routes": [{"destination": "default", "gateway": "192.0.2.1", "device": "eth0"}],
+    "capabilities": ["nics", "routes"]
+  }
+}
+```
+
+`503 agent_offline` 表示 agent 没有在线 WebSocket；`504 agent_timeout` 表示派发超时前没有响应；
+`502 agent_error` 表示 agent 拒绝或执行任务失败。
+
+`POST /api/v1/agents/{id}/bootstrap` 构建、签名并向 agent 的特权 helper 派发 Incus
+安装/初始化/加入 spec。spec 使用 agent CA 私钥签名，helper 执行前用 agent identity 目录中的
+CA 证书验证。`mode=join` 会从现有集群申请一次性 token 并渲染 join preseed；`mode=init` 会
+渲染新集群 preseed（dir 存储池和 `incusbr0` 网桥）。
+
+```json
+// 加入现有集群；只有仓库已预配置时才安装 Incus
+{"mode": "join", "address": "198.51.100.11", "storage_source": "/srv/incus",
+ "install_mode": "package", "version_pin": "7.0", "packages": ["incus"]}
+// 初始化新集群
+{"mode": "init", "address": "192.0.2.10", "network_cidr": "10.0.0.1/24",
+ "install_mode": "existing"}
+// 200
+{"result": {"ok": true, "task_id": "...", "mode": "bootstrap",
+            "message": "Incus bootstrap complete", "steps": ["install", "service", "preseed", "ready"]}}
+```
+
+helper 按 task ID 幂等：已完成的 install/service/preseed/ready 步骤记录在
+`/var/lib/incus-fleet-helper/bootstrap-<task_id>.json`，重试时跳过。`install_mode=package` 使用
+发行版已配置的仓库，支持 apt、dnf、zypper、apk 和 pacman；当前 helper 会拒绝 `repo_url`，不会
+添加未验证仓库。安装后会校验 Incus 版本 pin。`confirm`/`rollback` 不会卸载软件包。
+
+`POST /api/v1/agents/{id}/network` 通过特权 helper 派发一个允许列表内的网络变更。支持的 action
+为 `link-state`、`address`、`route-add`、`route-delete`、`firewall-add`、`firewall-delete`、
+`wifi-connect`、`confirm` 和 `rollback`。
+
+```json
+// 关闭 eth0
+{"action": "link-state", "interface": "eth0", "up": false}
+// 配置静态地址并按检测到的管理器持久化；rollback_after_seconds 可选，启动独立回滚计时器
+{"action": "address", "interface": "eth0", "address": "10.0.0.50/24",
+ "gateway": "10.0.0.1", "persist": true, "task_id": "task-1",
+ "rollback_after_seconds": 120}
+// 确认或回滚之前的操作
+{"action": "confirm", "task_id": "task-1"}
+```
+
+响应为 `{"result": {"ok": true, "action": "...", "task_id": "...", "backend": "helper",
+"persistence": "ifupdown"}}`。`confirm` 删除回滚快照；`rollback` 恢复该接口捕获的地址、路由、
+链路状态和持久化文件。任务走允许列表；helper 会拒绝未知 action、接口名、地址和 task ID。
+Wi-Fi 密码只传给 helper，不会写入任务/审计记录。
+
+## 指标
+
+中心在**内存中保留最近 1 小时**的 agent 遥测（`fleet_` 前缀，10 秒间隔），不会写入数据库。
+`cluster`、`member`、`agent_id` 标签由中心注入，agent 不能覆盖。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/metrics/query?cluster=&member=&agent=&metric=&from=&to=` | 返回时间范围内的 series |
+| `GET /api/v1/metrics/snapshot` | 返回每个匹配 series 的最新点 |
+| `GET /api/v1/metrics/export?format=prometheus\|json\|csv` | 导出当前缓冲 |
+
+`from`/`to` 支持 RFC3339、`1h` 这类相对时长（相对当前时间）或 Unix 秒；默认最近 1 小时。
+指标形状如下：
+
+```json
+{
+  "series": [
+    {
+      "name": "fleet_host_cpu_usage_ratio",
+      "labels": {"cluster": "c1", "member": "node-a", "agent_id": "..."},
+      "type": "gauge",
+      "points": [{"at": "2026-11-18T00:00:00Z", "value": 0.25}]
+    }
+  ]
+}
+```
+
+Prometheus 导出带 `# TYPE` 行和毫秒时间戳。CSV 为长表：
+`timestamp,metric,cluster,member,agent_id,value`。如果 `metrics.enabled=false`，三个端点都返回
+`503 unavailable`。重启中心会清空 1 小时历史，这是有意的设计。
+
+agent 导出主机指标（`fleet_host_cpu_usage_ratio`、`fleet_host_memory_bytes`、
+`fleet_host_load`、`fleet_host_uptime_seconds`、`fleet_host_network_bytes_total`），以及 cgroup v2
+回退的实例指标（`fleet_instance_cpu_seconds_total`、`fleet_instance_memory_bytes`、
+`fleet_instance_processes`、`fleet_instance_io_bytes_total`）。可选 eBPF 对象增加主机计数器
+（`fleet_host_tcp_retransmits_total`、`fleet_host_oom_kills_total`）和按 cgroup 归因的实例
+series（`fleet_instance_tcp_retransmits_total`、`fleet_instance_oom_kills_total`、
+`fleet_instance_block_latency_seconds_bucket|_sum|_count`）。
+`fleet_agent_telemetry_mode{mode="ebpf"|"procfs"}` 表示当前路径。block 延迟 bucket 使用 2 的幂
+纳秒（约 2ns 到 1s）加 `+Inf`。TCP 重传通过 sockops 维护的 IPv4/IPv6 flow→cgroup 映射归因，
+因此即使重传定时器在 softirq 上下文运行也能找到所属容器。OOM kill 通过 `bpf_task_from_pid` 和
+CO-RE cgroup-id 读取从 victim pid 归因，memcg OOM 和 root 上下文的全局 OOM 都会落到被杀的实例，
+并按实例聚合嵌套 cgroup。没有这些 kfunc 的内核回退当前 cgroup 和 ring-buffer `/proc` 路径。
+
+## 外部指标
+
+中心可以把同一份遥测转发到 Prometheus 或 VictoriaMetrics，并代理 PromQL 查询供 UI 使用。
+外部集成默认关闭；参见[部署文档](deployment.md#prometheusvictoriametrics)。
+
+| 方法与路径 | 认证 | 用途 |
+|---|---|---|
+| `GET /api/v1/metrics/query_range?query=&from=&to=&step=` | 管理员会话/Bearer | PromQL range 查询代理 |
+| `GET /api/v1/sd/agents` | HTTP SD token | Prometheus HTTP 服务发现 |
+| `GET /api/v1/agents/{id}/metrics/prometheus` | HTTP SD token | 中心代理的 agent 指标抓取 |
+
+remote write 使用 Prometheus 1.0 线格式（snappy 压缩 protobuf），地址为
+`metrics.remote_write.url`。Prometheus 需要 `--web.enable-remote-write-receiver`；
+VictoriaMetrics 单机使用 `/api/v1/write`，集群使用
+`/insert/<accountID>/prometheus/api/v1/write`。
+
+`query_range` 的 `from`/`to` 支持 RFC3339、相对时长（`1h`）或 Unix 秒；`step` 是 `1m` 这样的
+时长。中心转发到 Prometheus `/api/v1/query_range` 或 VictoriaMetrics
+`/prometheus/api/v1/query_range` 并返回上游 JSON。查询仅限管理员，受配置超时限制。
+
+HTTP SD 响应遵循 Prometheus 格式：
+
+```json
+[
+  {
+    "targets": ["fleet.example"],
+    "labels": {
+      "__scheme__": "https",
+      "__metrics_path__": "/api/v1/agents/AGENT_ID/metrics/prometheus",
+      "cluster": "c1",
+      "member": "node-a",
+      "agent_id": "AGENT_ID"
+    }
+  }
+]
+```
+
+SD token 与管理员 token 分离，通过 `Authorization: Bearer <token>` 发送。只返回在线 agent。当前
+`mode=proxy`（默认）由 Prometheus 抓取中心，中心返回最新内存样本和 `fleet_agent_up`。
+`mode=direct` 返回 agent 自己的监听地址（来自 `metrics_address` fact）；agent 必须用
+`--metrics-listen` 启动，并使用与抓取配置相同的 bearer token。没有上报地址的 agent 会被跳过。
+
+```yaml
+# direct 模式的 Prometheus 抓取配置
+scrape_configs:
+  - job_name: incus-fleet
+    authorization:
+      credentials_file: /etc/prometheus/fleet-metrics.token
+    http_sd_configs:
+      - url: https://fleet.example/api/v1/sd/agents
+        authorization:
+          credentials_file: /etc/prometheus/fleet-sd.token
+```
+
+agent 身份生命周期：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/agents/{id}/certificate` | 为 agent 的 PKIX 公钥签发新证书 |
+| `POST /api/v1/agents/{id}/revoke` | 吊销 agent；gateway 拒绝后续连接 |
+| `POST /api/v1/tasks` | 为 HA dispatcher 入队异步 `agent.network` 任务 |
+
+```json
+// 轮换
+{"public_key": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"}
+// 200
+{"certificate": "-----BEGIN CERTIFICATE-----\n...\n", "fingerprint": "...",
+ "expires_at": "2027-02-16T00:00:00Z"}
+// 吊销
+POST /api/v1/agents/AGENT_ID/revoke -> 204
+```
+
+## 主机任务与审计
+
+每个变更型节点操作都会记录为一个 host task 和一条不可变审计记录。任务和审计与迁移历史
+存放在同一个 SQLite/PostgreSQL 数据库；schema 在启动时自动创建或升级。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/tasks?cluster=&member=&limit=` | 最近的任务，按时间倒序；`limit` 1-200，默认 50 |
+| `POST /api/v1/tasks` | 入队 `{cluster,member,type,plan}`；返回 `202` 和 queued 任务 |
+| `GET /api/v1/tasks/{id}` | 一个任务及其状态事件 |
+| `GET /api/v1/audit?cluster=&member=&limit=` | 主机审计记录，按时间倒序 |
+| `GET /api/v1/audit/export?format=jsonl\|csv` | 完整审计导出，不受 UI 上限 |
+
+```json
+// GET /api/v1/tasks/{id}
+{
+  "task": {
+    "id": "b4f0...",
+    "cluster": "c1",
+    "member": "node-a",
+    "type": "node.route.add",
+    "state": "succeeded",
+    "plan": "destination=10.0.1.0/24 gateway=192.0.2.1 device=eth0",
+    "plan_hash": "...",
+    "result": "succeeded",
+    "created_by": "admin",
+    "created_at": "2026-11-18T00:00:00Z",
+    "started_at": "2026-11-18T00:00:00Z",
+    "finished_at": "2026-11-18T00:00:01Z",
+    "updated_at": "2026-11-18T00:00:01Z"
+  },
+  "events": [
+    {"state": "running", "message": "started", "at": "2026-11-18T00:00:00Z"},
+    {"state": "succeeded", "message": "succeeded", "at": "2026-11-18T00:00:01Z"}
+  ]
+}
+```
+
+dispatcher 支持 `agent.network`（`NodenetApplySpec` plan）、`agent.snapshot`（无 plan）和
+`agent.bootstrap`（带 `task_id`、`signature` 的签名 `bootstrap.Spec` plan）。网络示例：
+
+```json
+POST /api/v1/tasks
+{"cluster":"c1","member":"node-a","type":"agent.network",
+ "plan":{"action":"route-add","destination":"10.0.1.0/24","gateway":"192.0.2.1","device":"eth0"}}
+// 202
+{"task":{"id":"...","state":"queued","lease_owner":""}}
+```
+
+任务由运行 dispatcher（`ha.enabled=true`）的中心实例领取，并通过成员的在线 agent 执行。lease
+防止两个实例重复执行。`agent.bootstrap` 要求预签名 spec，handler 原样派发给 agent 并记录步骤数；
+`agent.snapshot` 是连通性探测，返回网卡/路由数量。
+
+任务状态为 `queued`、`dispatched`、`accepted`、`running`、`succeeded`、`failed`、`canceled`
+和 `unknown`。`unknown` 表示控制面与执行器失联，但操作可能已经完成；它不会被当作失败。审计
+记录包含 actor、来源 IP、backend、action、task ID、result 和脱敏后的 plan。Wi-Fi 密码、SSH
+密码、sudo 密码、Incus join token 和私钥永远不会写入任务或审计。
+
+## 中心 mesh
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/mesh/status` | leader、term、本地状态和 voter 集合 |
+| `POST /api/v1/mesh/force-single` | 破坏性恢复：`{"confirm":true}` 重置为单 voter |
+| `POST /api/v1/mesh/join` | 添加恢复的节点为 voter 或非 voter |
+| `POST /api/v1/mesh/promote` | 将追平的非 voter 提升为 voter |
+| `POST /api/v1/mesh/remove` | 从 voter 集合移除节点 |
+| `POST /internal/mesh/dispatch` | 内部认证中继；由 `X-Fleet-Mesh-Secret` 保护 |
+| `POST /internal/mesh/owner` | 内部转发的 owner 注册；同样由该密钥保护 |
+| `POST /internal/mesh/admin` | 内部转发给 leader 的 join/promote/remove；同样由该密钥保护 |
+
+`clusters[].endpoints` 可配置额外的 Incus API 地址用于故障切换；manager 会在后台重连离线集群。
 
 ## 实例
 
@@ -295,158 +717,7 @@ bearer）。exec 的第一帧是 JSON：
 
 任意一端关闭或 Incus 操作结束时，会话结束。
 
-### 实例指标
-
-`GET .../metrics` 返回 `{"metrics": {...}}`，其中包含单个实例的实时状态：
-`status`、`pid`、`processes`、`cpu.usage`（累计纳秒）、`memory`（用量/峰值/总量/
-交换，单位为字节）、`disk`（每个挂载点的用量/总量）以及 `network`（每个接口的
-累计计数器，不含回环）。计数器自实例启动起累计；客户端通过对相邻采样做差来推算
-速率。
-
-### 文件
-
-所有路径必须是绝对路径。`GET .../files?action=list&path=/var/log` 返回
-`{"files": [{"name", "size", "mode", "is_dir", "modtime"}]}`（目录在前）。下载会以
-附件形式流式返回文件。上传使用 `multipart/form-data`，包含一个 `file` 字段
-（请求体上限 32 MiB，权限 0644）。`action=mkdir` 创建目录。删除操作移除一个文件。
-
-### 集群资源与管理
-
-`GET .../resources` 返回存储池（含 `config`、用量、`used_by`）和网络（含 `config`、
-托管标志、地址）。创建存储池接受 `name` + `driver`，以及可选的 `description`/
-`config`；更新会合并 config，并删除被设为空字符串的键。网络遵循相同的合并规则；
-只有托管网络可以更新或删除。
-
-Profile 支持完整的 CRUD；当请求中提供 `devices` 时，更新会整体替换设备映射。
-
-`PATCH .../members/{member}` 接受 `description`、`failure_domain` 和 `groups`
-（为 nil 时保留当前分组）。
-
-### 卷与镜像
-
-`GET .../storage-pools/{pool}/volumes` 只列出自定义卷。创建接受 `name`、
-`description`、`size`（会校验的字节字符串）以及额外的 `config`。`DELETE` 删除
-一个自定义卷。`DELETE .../images/{fingerprint}` 删除本地镜像；UI 的清理操作会
-删除所有 `cached=true` 的镜像。
-
-## 迁移
-
-### 提交
-
-```http
-POST /api/v1/migrations
-Content-Type: application/json
-
-{
-  "source_cluster": "c1",
-  "target_cluster": "c2",
-  "instance": "web",
-  "mode": "move",
-  "live": false,
-  "include_snapshots": false,
-  "auto_start": true
-}
-```
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `source_cluster` | 是 | 必须存在且已连接 |
-| `target_cluster` | 是 | 必须与源集群不同 |
-| `instance` | 是 | 必须存在于源集群，且不存在于目标集群 |
-| `mode` | 否 | `move`（默认）或 `copy` |
-| `live` | 否 | 仅用于 `move`；要求虚拟机正在运行且 `migration.stateful=true` |
-| `include_snapshots` | 否 | 默认 `false`；为 `false` 时仅复制实例本身（不含快照） |
-| `auto_start` | 否 | 默认 `true`；当源实例此前在运行时启动目标实例 |
-
-返回 `202 Accepted` 及迁移对象。任务异步执行。
-
-### 迁移对象
-
-```json
-{
-  "id": "8f14e45fceea167a5a36dedd4bea2543",
-  "source_cluster": "c1",
-  "target_cluster": "c2",
-  "instance": "web",
-  "instance_type": "container",
-  "mode": "move",
-  "live": false,
-  "status": "transferring",
-  "progress": "transferring instance",
-  "error": "",
-  "created_at": "2026-11-11T09:30:00Z",
-  "updated_at": "2026-11-11T09:30:04Z"
-}
-```
-
-状态推进顺序：
-
-```mermaid
-flowchart LR
-    pending --> preflight --> stopping --> transferring --> verifying --> starting --> done
-```
-
-并非每个阶段都会出现。对于 `auto_start=false` 的已停止实例，会跳过 `starting`；
-在线迁移以及源实例本来就已停止时，会跳过 `stopping`。失败时停在 `failed`，
-`progress` 指明失败的阶段，`error` 包含详细信息。
-
-`GET /api/v1/migrations?limit=20` 返回 `{"migrations": [...]}`。`limit` 必须是
-正整数。`GET /api/v1/migrations/{id}` 返回单个对象。
-
-## 镜像
-
-### 导入
-
-```http
-POST /api/v1/clusters/{cluster}/images/import?type=container&alias=debian/13
-Content-Type: multipart/form-data
-```
-
-Multipart 字段：
-
-- `image` —— 镜像元数据 tar 包，或统一镜像 tar 包（必填）；
-- `rootfs` —— `.root` 根文件系统，仅用于拆分导出。
-
-`type` 接受 `container`（默认）或 `virtual-machine`；`alias` 可选。请求体上限为
-8 GiB。导入成功返回 `{"fingerprint": "<sha256>"}`；如果 Incus 守护进程未上报
-指纹，响应为 `204 No Content`。
-
-### 分发
-
-`POST /clusters/{cluster}/images/{fingerprint}/copy`，请求体为
-`{"target_cluster": "c2", "alias": "debian/13"}`，会把镜像直接流式传输到另一个
-集群，并返回 `204 No Content`。目标必须与源不同且处于已连接状态。
-
-### 刷新
-
-`POST /clusters/{cluster}/images/{fingerprint}/refresh` 让 Incus 从镜像来源重新
-拉取该缓存镜像，然后返回 `204 No Content`。别名会保留。
-
-## ISO 安装镜像
-
-| 方法 | 路径 | 结果 |
-| --- | --- | --- |
-| GET | `.../iso` | `{"isos": [{"name", "pool", "description", "size"}]}` |
-| POST | `.../iso?pool=default` | 上传（`image` multipart 字段，上限 12 GiB）→ `201 {"name","pool"}` |
-| DELETE | `.../iso/{pool}/{name}` | `204 No Content` |
-| POST | `.../iso/{pool}/{name}/launch` | 用该 ISO 创建虚拟机 → `201` 实例详情 |
-
-启动请求体：
-
-```json
-{
-  "name": "db-installer",
-  "storage_pool": "default",
-  "network": "incusbr0",
-  "root_disk": "20GiB",
-  "start": true
-}
-```
-
-`iso_name` 来自 URL 路径，无需在请求体中重复。为兼容安装程序，fleet 会放宽
-Secure Boot，并自动配置 SPICE。
-
-## 实例操作
+### 实例操作
 
 ### 克隆
 
@@ -474,22 +745,37 @@ Secure Boot，并自动配置 SPICE。
 执行；密码交给 `chpasswd`；密钥追加到 `~/.ssh/authorized_keys`。载荷写入 stdin，
 绝不会出现在进程参数中。
 
-### 图形控制台
+### 图形控制台（desktop）
 
-`POST .../instances/{instance}/spice/prepare`，请求体为 `{"port": 0, "apply": true}`，
-用于配置虚拟机的 QEMU SPICE TCP 监听器。端口为 0 时会根据实例名在 5910-5989
-范围内派生一个稳定端口。响应为：
+desktop 端点驱动 fleet 为虚拟机追加的第二个 QEMU 监视器。写操作先调
+`POST .../desktop/prepare`：写入 `raw.qemu.conf`（QMP control 模式的 unix socket
+监视器）与对应的 AppArmor 规则，配置变化时运行中的虚拟机会重启一次。重复调用是
+幂等的，响应会说明发生了什么：
 
 ```json
-{"port": 5931, "applied": true, "restart_required": false}
+{"ready": true, "restarted": false}
 ```
 
-`apply: true` 会重启正在运行的虚拟机，使 QEMU 参数生效；因此第一个会话可能需要
-一次重启。`GET .../spice?port=5931` 会升级为 WebSocket，并把一个 SPICE 通道桥接
-到虚拟机的 TCP 监听器。`GET .../vga` 会升级为 Incus 图形控制台 WebSocket。
+读操作轮询 `GET .../desktop/screenshot`，返回当前帧缓冲的 `image/png`。QEMU 7.1+
+直接输出 PNG；更旧的版本回退为 PPM 并在成员主机上内联转换，跨 SSH 的只有压缩后
+的画面。
 
-SPICE 监听器使用 `disable-ticketing=on`，并绑定在集群成员的所有网络接口上。请
-用防火墙限制 5910-5989 端口范围；不要将其暴露到不可信网络。
+输入经 `POST .../desktop/input` 注入（成功返回 204）：
+
+```json
+{"type": "key", "key": "ArrowDown"}
+{"type": "key", "key": "F1", "modifiers": ["Control", "Alt"], "repeat": 2}
+{"type": "pointer", "x": 0.5, "y": 0.25, "button": "left", "down": true}
+{"type": "pointer", "x": 0.5, "y": 0.25, "move": true}
+```
+
+`key` 使用浏览器 `KeyboardEvent.key` 取值加可选修饰键（`Control`、`Alt`、`Shift`、
+`Meta`）；按键会被翻译为 QMP qcode 事件,符号键自动带 shift 和弦。`pointer` 接受
+归一化到 0..1 的坐标（映射到仿真平板的 0..0x7fff 轴），可选 `button`（`left`、
+`middle`、`right`、`wheel-up`、`wheel-down` 等）与 `move: true` 表示无按键的拖动。
+
+上面的旧版 SPICE 端点保留给偏好原生 SPICE 客户端的场景；内置 Web UI 现在使用
+desktop 端点，不涉及任何额外 TCP 监听。
 
 ## 共享资产
 

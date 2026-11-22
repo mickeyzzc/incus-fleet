@@ -15,7 +15,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
 )
 
-func newTestService(t *testing.T, servers map[string]*incusfake.Server) *Service {
+func newTestService(t *testing.T, servers map[string]*incusfake.Server, opts ...Option) *Service {
 	t.Helper()
 
 	cfgs := make([]config.Cluster, 0, len(servers))
@@ -39,7 +39,7 @@ func newTestService(t *testing.T, servers map[string]*incusfake.Server) *Service
 	}
 	t.Cleanup(manager.Close)
 
-	return New(manager)
+	return New(manager, append([]Option{WithLogger(logger)}, opts...)...)
 }
 
 func startedAt() time.Time {

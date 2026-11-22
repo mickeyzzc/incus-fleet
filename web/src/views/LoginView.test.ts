@@ -41,11 +41,12 @@ describe('LoginView', () => {
     vi.mocked(api.login).mockResolvedValue({ authenticated: true })
     const { wrapper, router } = await mountLogin()
 
-    await wrapper.find('input').setValue('secret')
+    await wrapper.findAll('input')[0]!.setValue('admin')
+    await wrapper.findAll('input')[1]!.setValue('secret')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(api.login).toHaveBeenCalledWith('secret')
+    expect(api.login).toHaveBeenCalledWith('admin', 'secret')
     expect(router.currentRoute.value.path).toBe('/')
   })
 
@@ -53,7 +54,8 @@ describe('LoginView', () => {
     vi.mocked(api.login).mockResolvedValue({ authenticated: true })
     const { wrapper, router } = await mountLogin('/login?redirect=/instances')
 
-    await wrapper.find('input').setValue('secret')
+    await wrapper.findAll('input')[0]!.setValue('admin')
+    await wrapper.findAll('input')[1]!.setValue('secret')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
@@ -64,14 +66,15 @@ describe('LoginView', () => {
     vi.mocked(api.login).mockResolvedValue({ authenticated: true })
     const { wrapper, router } = await mountLogin('/login?redirect=https://evil.example')
 
-    await wrapper.find('input').setValue('secret')
+    await wrapper.findAll('input')[0]!.setValue('admin')
+    await wrapper.findAll('input')[1]!.setValue('secret')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
     expect(router.currentRoute.value.path).toBe('/')
   })
 
-  it('does not submit an empty token', async () => {
+  it('does not submit empty credentials', async () => {
     const { wrapper } = await mountLogin()
 
     await wrapper.find('form').trigger('submit')
@@ -81,16 +84,17 @@ describe('LoginView', () => {
   })
 
   it('shows invalid-token and generic errors', async () => {
-    vi.mocked(api.login).mockRejectedValueOnce(new ApiError(401, 'invalid_token', 'bad token'))
+    vi.mocked(api.login).mockRejectedValueOnce(new ApiError(401, 'invalid_credentials', 'bad credentials'))
     const { wrapper } = await mountLogin()
 
-    await wrapper.find('input').setValue('wrong')
+    await wrapper.findAll('input')[0]!.setValue('admin')
+    await wrapper.findAll('input')[1]!.setValue('wrong')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
-    expect(wrapper.text()).toContain('Invalid admin token.')
+    expect(wrapper.text()).toContain('Invalid username or password.')
 
     vi.mocked(api.login).mockRejectedValueOnce(new Error('network down'))
-    await wrapper.find('input').setValue('secret')
+    await wrapper.findAll('input')[1]!.setValue('secret')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('network down')

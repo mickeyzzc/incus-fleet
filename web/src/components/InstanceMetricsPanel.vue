@@ -151,7 +151,7 @@ function diskUsageLabel(disk: { usage: number; total: number }): string {
           {{ t('metrics.status') }}: <strong>{{ metrics.status }}</strong>
         </span>
         <span class="metric-pill">
-          {{ t('metrics.processes') }}: <strong>{{ metrics.processes }}</strong>
+          {{ t('metrics.processes') }}: <strong>{{ metrics.processes < 0 ? '—' : metrics.processes }}</strong>
         </span>
         <span class="metric-pill">PID: <strong>{{ metrics.pid || '—' }}</strong></span>
       </div>

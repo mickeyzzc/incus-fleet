@@ -284,7 +284,7 @@ func TestAttachDetachDevice(t *testing.T) {
 	}
 }
 
-func TestAttachDeviceValidation(t *testing.T) {
+func TestAttachDeviceValidationExtra(t *testing.T) {
 	srv := &incusfake.Server{
 		Instance:     manageInstance("web"),
 		NetworkNames: []string{"incusbr0"},
@@ -325,6 +325,131 @@ func TestDetachDeviceValidation(t *testing.T) {
 
 	if _, err := svc.DetachDevice(context.Background(), "c1", "web", "missing"); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("DetachDevice() expected invalid request, got %v", err)
+	}
+}
+
+func TestUpdateDeviceMergesAndPreservesKeys(t *testing.T) {
+	// A legacy NIC (nictype+parent) plus a disk with boot priority: edits must
+	// keep the keys the form does not manage.
+	srv := &incusfake.Server{
+		Instance: &api.Instance{
+			Name:       "vm1",
+			Type:       "virtual-machine",
+			Status:     "Running",
+			StatusCode: api.Running,
+			InstancePut: api.InstancePut{
+				Profiles: []string{"default"},
+				Devices: api.DevicesMap{
+					"eth0": {"type": "nic", "nictype": "bridged", "parent": "incusbr0", "ipv4.address": "10.0.0.5"},
+					"iso0": {"type": "disk", "pool": "default", "source": "installer", "boot.priority": "1"},
+				},
+			},
+			ExpandedDevices: api.DevicesMap{
+				"eth0": {"type": "nic", "nictype": "bridged", "parent": "incusbr0", "ipv4.address": "10.0.0.5"},
+				"iso0": {"type": "disk", "pool": "default", "source": "installer", "boot.priority": "1"},
+			},
+		},
+		Networks: []api.Network{
+			{Name: "incusbr0", Type: "bridge", Managed: true},
+			{Name: "lanbr", Type: "bridge", Managed: true},
+		},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+	ctx := context.Background()
+
+	detail, err := svc.UpdateDevice(ctx, "c1", "vm1", "eth0", DeviceRequest{
+		Type: "nic", Network: "lanbr", IPv4: "10.0.0.5",
+	})
+	if err != nil {
+		t.Fatalf("UpdateDevice() error = %v", err)
+	}
+	if detail.Name != "vm1" {
+		t.Fatalf("detail = %#v", detail)
+	}
+
+	nic := srv.UpdateArgs()[0].Instance.Devices["eth0"]
+	if nic["network"] != "lanbr" || nic["ipv4.address"] != "10.0.0.5" {
+		t.Fatalf("nic device = %#v", nic)
+	}
+	if _, has := nic["nictype"]; has {
+		t.Fatalf("nic must drop nictype when switched to a network: %#v", nic)
+	}
+	if _, has := nic["parent"]; has {
+		t.Fatalf("nic must drop parent when switched to a network: %#v", nic)
+	}
+
+	// Editing the legacy NIC without a network keeps nictype/parent and clears
+	// the address when the field is emptied.
+	srv.UpdateErr = nil
+	if _, err := svc.UpdateDevice(ctx, "c1", "vm1", "eth0", DeviceRequest{Type: "nic"}); err != nil {
+		t.Fatalf("UpdateDevice() legacy keep error = %v", err)
+	}
+	nic = srv.UpdateArgs()[1].Instance.Devices["eth0"]
+	if nic["nictype"] != "bridged" || nic["parent"] != "incusbr0" {
+		t.Fatalf("legacy nic keys must survive: %#v", nic)
+	}
+	if _, has := nic["ipv4.address"]; has {
+		t.Fatalf("empty address must clear ipv4.address: %#v", nic)
+	}
+
+	// Disk edits preserve boot.priority.
+	if _, err := svc.UpdateDevice(ctx, "c1", "vm1", "iso0", DeviceRequest{Type: "disk", Source: "installer-v2"}); err != nil {
+		t.Fatalf("UpdateDevice() disk error = %v", err)
+	}
+	disk := srv.UpdateArgs()[2].Instance.Devices["iso0"]
+	if disk["source"] != "installer-v2" || disk["boot.priority"] != "1" || disk["pool"] != "default" {
+		t.Fatalf("disk device = %#v", disk)
+	}
+}
+
+func TestUpdateDeviceProfileDeviceAndValidation(t *testing.T) {
+	// eth1 exists only on the profile: editing copies it to instance level.
+	srv := &incusfake.Server{
+		Instance:     manageInstance("vm1"),
+		NetworkNames: []string{"incusbr0"},
+	}
+	srv.Instance.ExpandedDevices = api.DevicesMap{
+		"root": {"type": "disk", "path": "/", "pool": "default", "size": "5GiB"},
+		"eth0": {"type": "nic", "network": "incusbr0"},
+		"eth1": {"type": "nic", "network": "incusbr0"},
+		"px":   {"type": "proxy", "listen": "tcp:0.0.0.0:8080", "connect": "tcp:127.0.0.1:80"},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+	ctx := context.Background()
+
+	if _, err := svc.UpdateDevice(ctx, "c1", "vm1", "eth1", DeviceRequest{Type: "nic", IPv6: "::1"}); err != nil {
+		t.Fatalf("UpdateDevice() profile device error = %v", err)
+	}
+	nic := srv.UpdateArgs()[0].Instance.Devices["eth1"]
+	if nic["network"] != "incusbr0" || nic["ipv6.address"] != "::1" {
+		t.Fatalf("profile nic device = %#v", nic)
+	}
+
+	cases := []struct {
+		name       string
+		deviceName string
+		req        DeviceRequest
+		want       string
+	}{
+		{name: "bad device name", deviceName: "bad name!", req: DeviceRequest{Type: "nic"}, want: "name"},
+		{name: "unknown device", deviceName: "missing", req: DeviceRequest{Type: "nic"}, want: "not attached"},
+		{name: "unknown network", deviceName: "eth0", req: DeviceRequest{Type: "nic", Network: "nope"}, want: "does not exist"},
+		{name: "bad ipv4", deviceName: "eth0", req: DeviceRequest{Type: "nic", IPv4: "999.1.1.1"}, want: "ipv4"},
+		{name: "bad ipv6 family", deviceName: "eth0", req: DeviceRequest{Type: "nic", IPv6: "10.0.0.1"}, want: "family"},
+		{name: "bad size", deviceName: "root", req: DeviceRequest{Type: "disk", Size: "huge"}, want: "size"},
+		{name: "bad proxy scheme", deviceName: "px", req: DeviceRequest{Type: "proxy", Listen: "http:0.0.0.0:80"}, want: "scheme"},
+	}
+
+	for _, tc := range cases {
+		_, err := svc.UpdateDevice(ctx, "c1", "vm1", tc.deviceName, tc.req)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: err = %v, want substring %q", tc.name, err, tc.want)
+		}
+	}
+
+	srv.UpdateErr = errors.New("update failed")
+	if _, err := svc.UpdateDevice(ctx, "c1", "vm1", "eth0", DeviceRequest{Type: "nic"}); err == nil {
+		t.Fatal("UpdateDevice() expected propagated update error")
 	}
 }
 
@@ -620,4 +745,109 @@ func TestImageTransfer(t *testing.T) {
 		t.Fatal("CopyImageTo() expected context cancellation error")
 	}
 	target.RemoteOperation = nil
+}
+
+// Attaching a NIC to an unmanaged physical parent produces a macvlan device
+// with parent= — never network=<unmanaged>, which Incus rejects.
+func TestAttachNICUnmanagedParent(t *testing.T) {
+	srv := &incusfake.Server{
+		Instance: manageInstance("vm1"),
+		Networks: []api.Network{
+			{Name: "wan0", Type: "physical", Managed: false},
+		},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+	ctx := context.Background()
+
+	if _, err := svc.AttachDevice(ctx, "c1", "vm1", DeviceRequest{Name: "eth1", Type: "nic", Network: "wan0"}); err != nil {
+		t.Fatalf("AttachDevice() error = %v", err)
+	}
+
+	nic := srv.UpdateArgs()[0].Instance.Devices["eth1"]
+	if nic["nictype"] != "macvlan" || nic["parent"] != "wan0" {
+		t.Fatalf("nic = %#v", nic)
+	}
+	if _, has := nic["network"]; has {
+		t.Fatalf("unmanaged parent must not use the network key: %#v", nic)
+	}
+}
+
+// TestSnapshotAndVolumeValidation covers the guard clauses on snapshot and
+// volume operations: each rejects empty names before touching a cluster.
+func TestSnapshotAndVolumeValidation(t *testing.T) {
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": {}})
+	ctx := context.Background()
+
+	if err := svc.CreateSnapshot(ctx, "c1", "vm1", SnapshotRequest{Name: ""}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("CreateSnapshot empty name = %v", err)
+	}
+	if err := svc.RestoreSnapshot(ctx, "c1", "vm1", ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("RestoreSnapshot empty name = %v", err)
+	}
+	if err := svc.DeleteSnapshot(ctx, "c1", "vm1", ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("DeleteSnapshot empty name = %v", err)
+	}
+	if err := svc.DeleteVolume("c1", "default", ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("DeleteVolume empty name = %v", err)
+	}
+	if err := svc.CreateVolume("c1", "default", VolumeRequest{Name: ""}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("CreateVolume empty name = %v", err)
+	}
+	// DetachDevice resolves the instance first, so an unknown instance is a
+	// not-found rather than a validation error.
+	if _, err := svc.DetachDevice(ctx, "c1", "vm1", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DetachDevice unknown instance = %v", err)
+	}
+	if _, err := svc.UpdateDevice(ctx, "c1", "vm1", "", DeviceRequest{}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("UpdateDevice empty device = %v", err)
+	}
+	if err := svc.DeleteSnapshot(ctx, "zz", "vm1", "snap0"); err == nil {
+		t.Fatal("DeleteSnapshot unknown cluster should fail")
+	}
+	// Read paths against an unknown cluster surface the lookup error.
+	if _, err := svc.ListSnapshots("zz", "vm1"); err == nil {
+		t.Fatal("ListSnapshots unknown cluster should fail")
+	}
+	if _, err := svc.Volumes("zz", "default"); err == nil {
+		t.Fatal("Volumes unknown cluster should fail")
+	}
+	if err := svc.CreateSnapshot(ctx, "zz", "vm1", SnapshotRequest{Name: "s0"}); err == nil {
+		t.Fatal("CreateSnapshot unknown cluster should fail")
+	}
+	if err := svc.RestoreSnapshot(ctx, "zz", "vm1", "s0"); err == nil {
+		t.Fatal("RestoreSnapshot unknown cluster should fail")
+	}
+}
+
+// TestAttachDeviceValidation covers the device-name guard and unknown-instance
+// handling on attach.
+func TestAttachDeviceValidation(t *testing.T) {
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": {}})
+	ctx := context.Background()
+
+	if _, err := svc.AttachDevice(ctx, "c1", "vm1", DeviceRequest{Name: "bad name!"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("AttachDevice(invalid name) = %v", err)
+	}
+	if _, err := svc.AttachDevice(ctx, "c1", "vm1", DeviceRequest{Name: "data"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("AttachDevice(unknown instance) = %v", err)
+	}
+	if _, err := svc.AttachDevice(ctx, "zz", "vm1", DeviceRequest{Name: "data"}); err == nil {
+		t.Fatal("AttachDevice(unknown cluster) should fail")
+	}
+}
+
+// TestUpdateDeviceGuards covers the invalid-name and unknown-instance paths.
+func TestUpdateDeviceGuards(t *testing.T) {
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": {}})
+	ctx := context.Background()
+
+	if _, err := svc.UpdateDevice(ctx, "c1", "vm1", "bad name!", DeviceRequest{}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("UpdateDevice(invalid name) = %v", err)
+	}
+	if _, err := svc.UpdateDevice(ctx, "c1", "vm1", "eth0", DeviceRequest{}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateDevice(unknown instance) = %v", err)
+	}
+	if _, err := svc.UpdateDevice(ctx, "zz", "vm1", "eth0", DeviceRequest{}); err == nil {
+		t.Fatal("UpdateDevice(unknown cluster) should fail")
+	}
 }

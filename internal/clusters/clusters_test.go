@@ -2,19 +2,57 @@ package clusters
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"io"
 	"log/slog"
+	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lxc/incus/v7/shared/api"
 
 	"github.com/mickeyzzc/incus-fleet/internal/config"
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
 )
+
+func testClientPEM(t *testing.T) (string, string) {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "incus-fleet-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	return string(certPEM), string(keyPEM)
+}
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -73,6 +111,12 @@ func TestSummaryAndList(t *testing.T) {
 		},
 		PoolResources: &api.ResourcesStoragePool{Space: api.ResourcesStoragePoolSpace{Used: 50, Total: 100}},
 		NetworkNames:  []string{"incusbr0", "eth0"},
+		// eth0 is an unmanaged host NIC: it must not leak into the cluster
+		// summary, which only carries managed (cluster-level) networks.
+		Networks: []api.Network{
+			{Name: "incusbr0", Type: "bridge", Managed: true},
+			{Name: "eth0", Type: "physical", Managed: false},
+		},
 		ServerResources: &api.Resources{
 			CPU:    api.ResourcesCPU{Architecture: "x86_64", Total: 8},
 			Memory: api.ResourcesMemory{Used: 4_000_000_000, Total: 16_000_000_000},
@@ -114,8 +158,8 @@ func TestSummaryAndList(t *testing.T) {
 	if len(s.Members) != 1 || s.Members[0].Name != "node-a" || !s.Members[0].Database {
 		t.Fatalf("Members = %#v", s.Members)
 	}
-	if len(s.Networks) != 2 || s.Networks[0] != "eth0" {
-		t.Fatalf("Networks = %#v", s.Networks)
+	if len(s.Networks) != 1 || s.Networks[0] != "incusbr0" {
+		t.Fatalf("Networks = %#v, want only the managed bridge", s.Networks)
 	}
 	if s.CPU.Total != 8 || s.CPU.Architecture != "x86_64" {
 		t.Fatalf("CPU = %#v", s.CPU)
@@ -294,6 +338,52 @@ func TestNewWithDefaultDialerRecordsErrors(t *testing.T) {
 	}
 }
 
+func TestConnectionArgsAcceptInlinePEM(t *testing.T) {
+	cert, key := testClientPEM(t)
+
+	cfg := testConfig("c1")
+	cfg.TLSCert = cert
+	cfg.TLSKey = key
+	cfg.TLSServerCert = "-----BEGIN CERTIFICATE-----\nYQ==\n-----END CERTIFICATE-----\n"
+
+	args, err := connectionArgs(cfg)
+	if err != nil {
+		t.Fatalf("connectionArgs(inline PEM) error = %v", err)
+	}
+	if strings.TrimSpace(args.TLSClientCert) != strings.TrimSpace(cert) ||
+		strings.TrimSpace(args.TLSClientKey) != strings.TrimSpace(key) {
+		t.Fatalf("connectionArgs(inline PEM) did not keep PEM contents")
+	}
+	if args.TLSServerCert == "" {
+		t.Fatal("connectionArgs(inline server cert) is empty")
+	}
+}
+
+func TestConnectionArgsReadFiles(t *testing.T) {
+	cert, key := testClientPEM(t)
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "client.crt")
+	keyPath := filepath.Join(dir, "client.key")
+	if err := os.WriteFile(certPath, []byte(cert), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte(key), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testConfig("c1")
+	cfg.TLSCert = certPath
+	cfg.TLSKey = keyPath
+
+	args, err := connectionArgs(cfg)
+	if err != nil {
+		t.Fatalf("connectionArgs(paths) error = %v", err)
+	}
+	if args.TLSClientCert != cert || args.TLSClientKey != key {
+		t.Fatal("connectionArgs(paths) did not read file contents")
+	}
+}
+
 func TestDefaultDialInvalidFiles(t *testing.T) {
 	dir := t.TempDir()
 	cert := filepath.Join(dir, "client.crt")
@@ -327,5 +417,214 @@ func TestDefaultDialInvalidFiles(t *testing.T) {
 	cfg.Name = "c1"
 	if _, err := DefaultDial(context.Background(), cfg); err == nil {
 		t.Fatal("invalid TLS material expected connect error")
+	}
+}
+
+func TestEndpointFailover(t *testing.T) {
+	cfg := testConfig("c1")
+	cfg.Endpoints = []string{"https://192.0.2.10:8443", "https://192.0.2.11:8443"}
+	var attempted []string
+	dial := func(_ context.Context, target config.Cluster) (InstanceServer, error) {
+		attempted = append(attempted, target.Endpoint)
+		if target.Endpoint == cfg.Endpoints[0] {
+			return nil, errors.New("primary endpoint down")
+		}
+		return &incusfake.Server{}, nil
+	}
+	m, err := NewWithDialer(context.Background(), []config.Cluster{cfg}, dial, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Close)
+
+	conn, err := m.Connection("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Client(); err != nil {
+		t.Fatalf("Client() error = %v", err)
+	}
+	if got := conn.ActiveEndpoint(); got != cfg.Endpoints[1] {
+		t.Fatalf("ActiveEndpoint = %q", got)
+	}
+	if len(attempted) != 2 || attempted[0] != cfg.Endpoints[0] || attempted[1] != cfg.Endpoints[1] {
+		t.Fatalf("dial attempts = %v", attempted)
+	}
+
+	if _, err := m.Reconnect(context.Background(), "c1"); err != nil {
+		t.Fatalf("Reconnect() error = %v", err)
+	}
+	if got := conn.ActiveEndpoint(); got != cfg.Endpoints[1] {
+		t.Fatalf("ActiveEndpoint after reconnect = %q", got)
+	}
+}
+
+func TestClusterWatchStopsOnCancel(t *testing.T) {
+	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")},
+		fakeDialer(map[string]InstanceServer{"c1": &incusfake.Server{}}, nil), testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		m.watch(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watch did not stop")
+	}
+}
+
+func TestClusterWatchRetriesOffline(t *testing.T) {
+	var attempts atomic.Int32
+	dial := func(context.Context, config.Cluster) (InstanceServer, error) {
+		attempts.Add(1)
+		return nil, errors.New("offline")
+	}
+	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")}, dial, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Close)
+	m.watchInterval = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.watch(ctx)
+		close(done)
+	}()
+	time.Sleep(80 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watch did not stop")
+	}
+	if attempts.Load() < 2 {
+		t.Fatalf("watch attempts = %d", attempts.Load())
+	}
+}
+
+func TestClusterWatchSuccessBranch(t *testing.T) {
+	var attempts atomic.Int32
+	dial := func(context.Context, config.Cluster) (InstanceServer, error) {
+		if attempts.Add(1) < 3 {
+			return nil, errors.New("offline")
+		}
+		return &incusfake.Server{}, nil
+	}
+	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")}, dial, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Close)
+	m.watchInterval = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.watch(ctx)
+		close(done)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := m.Connection("c1")
+		if err == nil {
+			if _, err := conn.Client(); err == nil {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	conn, err := m.Connection("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Client(); err != nil {
+		t.Fatalf("watch did not reconnect: %v", err)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watch did not stop")
+	}
+}
+
+func TestConnectionWithoutEndpoints(t *testing.T) {
+	cfg := testConfig("c1")
+	cfg.Endpoint = ""
+	cfg.Endpoints = nil
+	conn := &Connection{cfg: cfg, endpoints: config.ClusterEndpoints(cfg)}
+	if err := conn.connect(context.Background(), func(context.Context, config.Cluster) (InstanceServer, error) {
+		t.Fatal("dial should not be called")
+		return nil, nil
+	}); err == nil {
+		t.Fatal("connect without endpoints expected error")
+	}
+	if got := conn.ActiveEndpoint(); got != "" {
+		t.Fatalf("ActiveEndpoint = %q", got)
+	}
+}
+
+type unhealthyServer struct {
+	*incusfake.Server
+	fail atomic.Bool
+}
+
+func (s *unhealthyServer) GetServer() (*api.Server, string, error) {
+	if s.fail.Load() {
+		return nil, "", errors.New("endpoint unhealthy")
+	}
+	return s.Server.GetServer()
+}
+
+func TestClusterWatchHealthCheckSwitchesEndpoint(t *testing.T) {
+	first := &unhealthyServer{Server: &incusfake.Server{}}
+	cfg := testConfig("c1")
+	cfg.Endpoints = []string{"https://192.0.2.10:8443", "https://192.0.2.11:8443"}
+	var calls atomic.Int32
+	dial := func(_ context.Context, target config.Cluster) (InstanceServer, error) {
+		calls.Add(1)
+		if target.Endpoint == cfg.Endpoints[0] {
+			return first, nil
+		}
+		return &incusfake.Server{}, nil
+	}
+	m, err := NewWithDialer(context.Background(), []config.Cluster{cfg}, dial, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Close)
+	conn, err := m.Connection("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conn.ActiveEndpoint() != cfg.Endpoints[0] {
+		t.Fatalf("initial endpoint = %q", conn.ActiveEndpoint())
+	}
+	first.fail.Store(true)
+	m.watchInterval = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.watch(ctx)
+		close(done)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if conn.ActiveEndpoint() == cfg.Endpoints[1] {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if conn.ActiveEndpoint() != cfg.Endpoints[1] {
+		t.Fatalf("failover endpoint = %q", conn.ActiveEndpoint())
 	}
 }

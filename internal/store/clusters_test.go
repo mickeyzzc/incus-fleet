@@ -13,7 +13,7 @@ func TestRegisteredClusterLifecycle(t *testing.T) {
 	cluster := &RegisteredCluster{
 		Name:          "c64",
 		DisplayName:   "Cluster 64",
-		Endpoint:      "https://192.168.64.21:8443",
+		Endpoint:      "https://192.0.2.10:8443",
 		Project:       "default",
 		TLSCert:       "cert-pem",
 		TLSKey:        "key-pem",

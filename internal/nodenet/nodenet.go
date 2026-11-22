@@ -34,6 +34,34 @@ type Runner interface {
 	RunStdin(name string, args []string, stdin string) error
 }
 
+// DirectRunner runs commands directly. The helper uses it after sudo has
+// already elevated the process.
+type DirectRunner struct{}
+
+// Run implements Runner.
+func (DirectRunner) Run(name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, resolveBinary(name), args...).CombinedOutput() //nolint:gosec // allowlisted network binary
+	if err != nil {
+		return string(out), err
+	}
+
+	return string(out), nil
+}
+
+// RunStdin implements Runner.
+func (DirectRunner) RunStdin(name string, args []string, stdin string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, resolveBinary(name), args...) //nolint:gosec // allowlisted network binary
+	cmd.Stdin = strings.NewReader(stdin)
+
+	return cmd.Run()
+}
+
 // SudoRunner runs commands through `sudo -n`.
 type SudoRunner struct{}
 
@@ -153,6 +181,7 @@ type Route struct {
 	Gateway     string `json:"gateway,omitempty"`
 	Device      string `json:"device,omitempty"`
 	Metric      string `json:"metric,omitempty"`
+	Protocol    string `json:"protocol,omitempty"`
 }
 
 // FirewallRule is one nftables rule managed by fleet.
@@ -170,6 +199,7 @@ type Snapshot struct {
 	WifiScan     []WiFiNetwork  `json:"wifi_scan,omitempty"`
 	WifiDevice   string         `json:"wifi_device,omitempty"`
 	Capabilities []string       `json:"capabilities"`
+	Backend      string         `json:"backend,omitempty"`
 }
 
 // isWireless reports whether the kernel exposes the interface as a Wi-Fi
@@ -178,6 +208,62 @@ type Snapshot struct {
 func isWireless(ifname string) bool {
 	_, err := os.Stat(filepath.Join("/sys/class/net", ifname, "wireless"))
 	return err == nil
+}
+
+// CommandRunner runs one whole shell command on a host. nodeaccess's
+// CommandRunner satisfies this shape; the structural match avoids an import
+// cycle.
+type CommandRunner interface {
+	Run(ctx context.Context, command string) (string, error)
+}
+
+// LinkMasters maps every interface on the host to its bonding master
+// ("" when the interface is not a bond member), read from the link table
+// (`ip -j link show`). Callers use it both to keep bond slaves out of the
+// macvlan parent candidates and to attribute unlocated NICs to the member
+// that owns them.
+func LinkMasters(ctx context.Context, run CommandRunner) (map[string]string, error) {
+	out, err := run.Run(ctx, "ip -j link show")
+	if err != nil {
+		return nil, fmt.Errorf("%w: ip link show: %v", ErrUnavailable, err)
+	}
+
+	var links []struct {
+		Ifname string `json:"ifname"`
+		Master string `json:"master"`
+	}
+	if err := json.Unmarshal([]byte(out), &links); err != nil {
+		return nil, fmt.Errorf("%w: parse ip link output: %v", ErrUnavailable, err)
+	}
+
+	masters := make(map[string]string)
+	for _, link := range links {
+		if link.Ifname != "" {
+			masters[link.Ifname] = link.Master
+		}
+	}
+
+	return masters, nil
+}
+
+// BondSlaves maps bonding member interfaces to their master, read from the
+// member's link table. The instance forms use this to keep bond slaves out
+// of the macvlan parent candidates: a macvlan over a slave cannot come up
+// while the bond owns it.
+func BondSlaves(ctx context.Context, run CommandRunner) (map[string]string, error) {
+	masters, err := LinkMasters(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+
+	slaves := make(map[string]string)
+	for ifname, master := range masters {
+		if master != "" {
+			slaves[ifname] = master
+		}
+	}
+
+	return slaves, nil
 }
 
 // ListNICs returns every interface with its state and addresses.
@@ -380,7 +466,7 @@ func (s *Service) SetNICState(name string, up bool) error {
 	}
 
 	if _, err := s.run.Run("ip", "link", "set", "dev", name, state); err != nil {
-		return fmt.Errorf("nodenet: set %s %s: %v", name, state, err)
+		return fmt.Errorf("%w: set %s %s: %v", ErrUnavailable, name, state, err)
 	}
 
 	return nil
@@ -389,7 +475,7 @@ func (s *Service) SetNICState(name string, up bool) error {
 // AddressRequest configures one interface address.
 type AddressRequest struct {
 	DHCP    bool   `json:"dhcp"`
-	Address string `json:"address,omitempty"` // CIDR, e.g. 10.62.0.50/24
+	Address string `json:"address,omitempty"` // CIDR, e.g. 10.0.0.50/24
 	Gateway string `json:"gateway,omitempty"`
 	Persist bool   `json:"persist"`
 }
@@ -404,7 +490,7 @@ func (s *Service) ApplyAddress(_ context.Context, name string, req AddressReques
 
 	if req.DHCP {
 		if _, err := s.run.Run("dhcpcd", "-1", "--nohook", "resolv.conf", name); err != nil {
-			return fmt.Errorf("nodenet: dhcp on %s: %v", name, err)
+			return fmt.Errorf("%w: dhcp on %s: %v", ErrUnavailable, name, err)
 		}
 	} else {
 		if req.Address == "" {
@@ -425,11 +511,11 @@ func (s *Service) ApplyAddress(_ context.Context, name string, req AddressReques
 		}
 
 		if _, err := s.run.Run("ip", "addr", "add", req.Address, "dev", name); err != nil {
-			return fmt.Errorf("nodenet: add %s on %s: %v", req.Address, name, err)
+			return fmt.Errorf("%w: add %s on %s: %v", ErrUnavailable, req.Address, name, err)
 		}
 		if req.Gateway != "" {
 			if _, err := s.run.Run("ip", "route", "replace", "default", "via", req.Gateway, "dev", name); err != nil {
-				return fmt.Errorf("nodenet: gateway via %s on %s: %v", req.Gateway, name, err)
+				return fmt.Errorf("%w: gateway via %s on %s: %v", ErrUnavailable, req.Gateway, name, err)
 			}
 		}
 	}
@@ -456,7 +542,7 @@ func (s *Service) persistAddress(name string, req AddressRequest) error {
 
 	// tee as root writes the ifupdown snippet into interfaces.d.
 	if err := s.run.RunStdin("tee", []string{"/etc/network/interfaces.d/" + name}, snippet); err != nil {
-		return fmt.Errorf("nodenet: persist %s: %v", name, err)
+		return fmt.Errorf("%w: persist %s: %v", ErrUnavailable, name, err)
 	}
 
 	return nil
@@ -486,6 +572,7 @@ func (s *Service) ListRoutes() ([]Route, error) {
 			Destination: item.Dst,
 			Gateway:     item.Gateway,
 			Device:      item.Dev,
+			Protocol:    item.Protocol,
 		}
 		if item.Metric > 0 {
 			route.Metric = strconv.Itoa(item.Metric)
@@ -509,7 +596,7 @@ func (s *Service) AddRoute(destination, gateway, device string) error {
 	}
 
 	if _, err := s.run.Run("ip", "route", "add", destination, "via", gateway, "dev", device); err != nil {
-		return fmt.Errorf("nodenet: add route %s via %s: %v", destination, gateway, err)
+		return fmt.Errorf("%w: add route %s via %s: %v", ErrUnavailable, destination, gateway, err)
 	}
 
 	return nil
@@ -522,7 +609,7 @@ func (s *Service) DeleteRoute(destination string) error {
 	}
 
 	if _, err := s.run.Run("ip", "route", "del", destination); err != nil {
-		return fmt.Errorf("nodenet: delete route %s: %v", destination, err)
+		return fmt.Errorf("%w: delete route %s: %v", ErrUnavailable, destination, err)
 	}
 
 	return nil
@@ -604,7 +691,7 @@ func (s *Service) AddFirewallRule(req FirewallRequest) error {
 
 	args := []string{"add", "rule", fleetTable, "input", proto, "dport", strconv.Itoa(req.Port), action, "comment", fmt.Sprintf("%q", comment)}
 	if _, err := s.run.Run("nft", args...); err != nil {
-		return fmt.Errorf("nodenet: add rule: %v", err)
+		return fmt.Errorf("%w: add rule: %v", ErrUnavailable, err)
 	}
 
 	return nil
@@ -617,7 +704,7 @@ func (s *Service) DeleteFirewallRule(handle string) error {
 	}
 
 	if _, err := s.run.Run("nft", "delete", "rule", fleetTable, "input", "handle", handle); err != nil {
-		return fmt.Errorf("nodenet: delete rule handle %s: %v", handle, err)
+		return fmt.Errorf("%w: delete rule handle %s: %v", ErrUnavailable, handle, err)
 	}
 
 	return nil
@@ -633,10 +720,10 @@ func (s *Service) ensureFleetTable() error {
 	}
 
 	if _, err := s.run.Run("nft", "add", "table", "inet", "fleet_filter"); err != nil {
-		return fmt.Errorf("nodenet: create table: %v", err)
+		return fmt.Errorf("%w: create table: %v", ErrUnavailable, err)
 	}
 	if _, err := s.run.Run("nft", "add", "chain", "inet", "fleet_filter", "input", "{", "type", "filter", "hook", "input", "priority", "-10", ";", "policy", "accept", ";", "}"); err != nil {
-		return fmt.Errorf("nodenet: create chain: %v", err)
+		return fmt.Errorf("%w: create chain: %v", ErrUnavailable, err)
 	}
 
 	return nil
@@ -709,20 +796,20 @@ func (s *Service) WifiConnect(dev, ssid, password string) error {
 
 	config := fmt.Sprintf("network={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n", ssid, password)
 	if err := s.run.RunStdin("tee", []string{"/etc/wpa_supplicant/fleet.conf"}, config); err != nil {
-		return fmt.Errorf("nodenet: write wifi config: %v", err)
+		return fmt.Errorf("%w: write wifi config: %v", ErrUnavailable, err)
 	}
 
 	args := []string{"-B", "-i", dev, "-c", "/etc/wpa_supplicant/fleet.conf"}
 	if _, err := s.run.Run("wpa_supplicant", args...); err != nil {
-		return fmt.Errorf("nodenet: wpa_supplicant on %s: %v", dev, err)
+		return fmt.Errorf("%w: wpa_supplicant on %s: %v", ErrUnavailable, dev, err)
 	}
 
 	// Bring the link up and lease an address.
 	if _, err := s.run.Run("ip", "link", "set", "dev", dev, "up"); err != nil {
-		return fmt.Errorf("nodenet: bring %s up: %v", dev, err)
+		return fmt.Errorf("%w: bring %s up: %v", ErrUnavailable, dev, err)
 	}
 	if _, err := s.run.Run("dhcpcd", "-1", "--nohook", "resolv.conf", dev); err != nil {
-		return fmt.Errorf("nodenet: dhcp on %s: %v", dev, err)
+		return fmt.Errorf("%w: dhcp on %s: %v", ErrUnavailable, dev, err)
 	}
 
 	return nil
@@ -734,4 +821,54 @@ type TrafficSample struct {
 	Location string            `json:"location,omitempty"`
 	NICs     map[string]uint64 `json:"nics"` // nic -> rx bytes
 	TxBytes  map[string]uint64 `json:"tx"`   // nic -> tx bytes
+}
+
+// AddFleetRoute adds a route owned by fleet (protocol 99). It allows a
+// directly connected route when gateway is empty.
+func (s *Service) AddFleetRoute(destination, gateway, device string) error {
+	if net.ParseIP(strings.SplitN(destination, "/", 2)[0]) == nil {
+		return fmt.Errorf("%w: destination %q is invalid", ErrInvalidRequest, destination)
+	}
+	if device != "" {
+		if err := ValidateName(device); err != nil {
+			return err
+		}
+	}
+	if routes, err := s.ListRoutes(); err == nil {
+		for _, route := range routes {
+			if route.Destination == destination && route.Protocol != "" && route.Protocol != "99" {
+				return fmt.Errorf("%w: route %s is owned by protocol %s", ErrInvalidRequest, destination, route.Protocol)
+			}
+		}
+	} else {
+		return err
+	}
+	args := []string{"route", "replace", destination}
+	if gateway != "" {
+		if net.ParseIP(gateway) == nil {
+			return fmt.Errorf("%w: gateway %q is invalid", ErrInvalidRequest, gateway)
+		}
+		args = append(args, "via", gateway)
+	}
+	if device != "" {
+		args = append(args, "dev", device)
+	}
+	args = append(args, "proto", "99")
+	if _, err := s.run.Run("ip", args...); err != nil {
+		return fmt.Errorf("%w: add fleet route %s: %v", ErrUnavailable, destination, err)
+	}
+
+	return nil
+}
+
+// DeleteFleetRoute removes only a route owned by fleet (protocol 99).
+func (s *Service) DeleteFleetRoute(destination string) error {
+	if net.ParseIP(strings.SplitN(destination, "/", 2)[0]) == nil {
+		return fmt.Errorf("%w: destination %q is invalid", ErrInvalidRequest, destination)
+	}
+	if _, err := s.run.Run("ip", "route", "del", destination, "proto", "99"); err != nil {
+		return fmt.Errorf("%w: delete fleet route %s: %v", ErrUnavailable, destination, err)
+	}
+
+	return nil
 }

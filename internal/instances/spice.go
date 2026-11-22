@@ -18,10 +18,16 @@ const (
 	spicePortMin = 1024
 	spicePortMax = 65535
 
-	spiceListenAddr = "0.0.0.0"
-	spiceArgMarker  = "-spice "
-	spiceDialDelay  = 3 * time.Second
-	spiceDialTry    = 3
+	// spiceListenAddr keeps QEMU's SPICE listener on loopback. The fleet daemon
+	// bridges browser websockets onto it over the Incus API, so the port is
+	// never exposed to the cluster network. Binding 0.0.0.0 would hand anyone
+	// with L3 reachability an unauthenticated console.
+	spiceListenAddr = "127.0.0.1"
+
+	// spiceArgMarker identifies the QEMU argument this service manages.
+	spiceArgMarker = "-spice "
+	spiceDialDelay = 3 * time.Second
+	spiceDialTry   = 3
 )
 
 // SPICEPortFor derives a stable SPICE TCP port from an instance name so
@@ -122,10 +128,15 @@ func (s *Service) PrepareSPICE(ctx context.Context, clusterName, name string, po
 
 // SPICEDial dials the SPICE TCP listener of the member currently hosting the
 // instance. The host always comes from the cluster member list, never from
-// user input, so the bridge cannot be abused to reach arbitrary hosts.
+// user input, so the bridge cannot be abused to reach arbitrary hosts. The
+// port must also be the one derived for this instance; accepting an arbitrary
+// port would turn the bridge into a general TCP proxy inside the cluster.
 func (s *Service) SPICEDial(_ context.Context, clusterName, name string, port int) (net.Conn, error) {
 	if port < spicePortMin || port > spicePortMax {
 		return nil, fmt.Errorf("%w: spice port must be between %d and %d", ErrInvalidRequest, spicePortMin, spicePortMax)
+	}
+	if expected := SPICEPortFor(name); port != expected {
+		return nil, fmt.Errorf("%w: spice port %d is not the port for instance %q", ErrInvalidRequest, port, name)
 	}
 
 	client, err := s.client(clusterName)
@@ -146,7 +157,7 @@ func (s *Service) SPICEDial(_ context.Context, clusterName, name string, port in
 
 	var lastErr error
 	for attempt := 0; attempt < spiceDialTry; attempt++ {
-		conn, dialErr := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 5*time.Second)
+		conn, dialErr := s.dial(net.JoinHostPort(host, strconv.Itoa(port)), 5*time.Second)
 		if dialErr == nil {
 			return conn, nil
 		}

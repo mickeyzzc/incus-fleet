@@ -9,6 +9,7 @@ import InstanceMetricsPanel from '@/components/InstanceMetricsPanel.vue'
 import InstanceSnapshots from '@/components/InstanceSnapshots.vue'
 import FileManagerDialog from '@/components/FileManagerDialog.vue'
 import RemoteDesktopDialog from '@/components/RemoteDesktopDialog.vue'
+import InstallAgentDialog from '@/components/InstallAgentDialog.vue'
 import InstanceOpsDialog from '@/components/InstanceOpsDialog.vue'
 import TerminalDialog from '@/components/TerminalDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
@@ -42,6 +43,7 @@ const activeTab = ref('overview')
 const terminalOpen = ref(false)
 const filesOpen = ref(false)
 const desktopOpen = ref(false)
+const agentOpen = ref(false)
 const opsOpen = ref(false)
 
 const visible = computed({
@@ -50,6 +52,22 @@ const visible = computed({
 })
 
 const detail = computed(() => instances.detail(props.cluster, props.name))
+
+// The official incus-agent reports guest OS info; a VM without it shows the
+// one-click installer instead of exec/file features that cannot work yet.
+// For running VMs the agent is also the only source of state.network, so a
+// VM whose state carries interfaces is agent-backed even when os_info stays
+// empty (some minimal images never fill it).
+const agentMissing = computed(() => {
+  if (detail.value?.type !== 'virtual-machine') {
+    return false
+  }
+
+  const network = detail.value?.state?.network ?? {}
+  const hasNetwork = Object.keys(network).length > 0
+  const hasGuestInfo = Boolean(detail.value?.os || detail.value?.hostname)
+  return !hasNetwork && !hasGuestInfo
+})
 
 watch(
   () => [props.modelValue, props.cluster, props.name] as const,
@@ -113,8 +131,17 @@ function onDevicesChanged(updated: InstanceDetail): void {
             </el-button>
           </div>
           <div class="access-row">
-            <el-button size="small" type="primary" plain @click="desktopOpen = true">
+            <el-button
+              v-if="detail.type === 'virtual-machine'"
+              size="small"
+              type="primary"
+              plain
+              @click="desktopOpen = true"
+            >
               {{ t('desktop.open') }}
+            </el-button>
+            <el-button v-if="agentMissing" size="small" type="warning" plain @click="agentOpen = true">
+              {{ t('guestAgent.open') }}
             </el-button>
             <el-button size="small" type="warning" plain @click="opsOpen = true">
               {{ t('ops.open') }}
@@ -161,7 +188,7 @@ function onDevicesChanged(updated: InstanceDetail): void {
                 </div>
                 <div class="detail-item">
                   <div class="label">{{ t('detail.processes') }}</div>
-                  <div class="value">{{ detail.processes }}</div>
+                  <div class="value">{{ detail.processes < 0 ? '—' : detail.processes }}</div>
                 </div>
                 <div class="detail-item">
                   <div class="label">{{ t('detail.storagePool') }}</div>
@@ -256,9 +283,10 @@ function onDevicesChanged(updated: InstanceDetail): void {
       <el-empty v-else-if="!instances.detailLoading" :description="t('detail.unavailable')" />
     </div>
 
-    <TerminalDialog v-model="terminalOpen" :cluster="cluster" :instance="name" />
+    <TerminalDialog v-model="terminalOpen" :cluster="cluster" :instance="name" :instance-type="detail?.type ?? ''" />
     <FileManagerDialog v-model="filesOpen" :cluster="cluster" :instance="name" />
     <RemoteDesktopDialog v-model="desktopOpen" :cluster="cluster" :instance="name" />
+    <InstallAgentDialog v-model="agentOpen" :cluster="cluster" :instance="name" @done="instances.fetchDetail(cluster, name)" />
     <InstanceOpsDialog v-model="opsOpen" :cluster="cluster" :instance="name" @done="instances.fetchDetail(cluster, name)" />
   </el-drawer>
 </template>

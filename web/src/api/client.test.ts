@@ -35,19 +35,19 @@ function clientWith(response: Response = mockResponse({})) {
 }
 
 describe('ApiClient', () => {
-  it('logs in and posts the token as JSON', async () => {
+  it('logs in and posts credentials as JSON', async () => {
     const { client, fetchImpl } = clientWith(
       mockResponse({ authenticated: true, expires_at: '2026-11-12T00:00:00Z' }),
     )
 
-    const session = await client.login(' secret ')
+    const session = await client.login(' admin ', ' secret ')
 
     expect(session.authenticated).toBe(true)
     expect(fetchImpl).toHaveBeenCalledWith(
       'https://fleet.local/api/v1/auth/login',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ token: ' secret ' }),
+        body: JSON.stringify({ username: ' admin ', password: ' secret ' }),
         credentials: 'same-origin',
       }),
     )
@@ -488,6 +488,7 @@ describe('ApiClient', () => {
       [() => client.restoreSnapshot('c1', 'web', 'snap0'), 'POST', '/api/v1/clusters/c1/instances/web/snapshots/snap0/restore'],
       [() => client.deleteSnapshot('c1', 'web', 'snap0'), 'DELETE', '/api/v1/clusters/c1/instances/web/snapshots/snap0'],
       [() => client.attachDevice('c1', 'web', { name: 'data', type: 'disk' }), 'POST', '/api/v1/clusters/c1/instances/web/devices'],
+      [() => client.updateDevice('c1', 'web', 'data', { name: 'data', type: 'disk' }), 'PATCH', '/api/v1/clusters/c1/instances/web/devices/data'],
       [() => client.detachDevice('c1', 'web', 'data'), 'DELETE', '/api/v1/clusters/c1/instances/web/devices/data'],
       [() => client.instanceMetrics('c1', 'web'), 'GET', '/api/v1/clusters/c1/instances/web/metrics'],
       [() => client.deleteInstance('c1', 'web', true), 'DELETE', '/api/v1/clusters/c1/instances/web?force=true'],
@@ -513,6 +514,10 @@ describe('ApiClient', () => {
       [() => client.createScript({ name: 'init', body: 'echo' }), 'POST', '/api/v1/scripts'],
       [() => client.updateScript('script-1', { name: 'init', body: 'echo' }), 'PATCH', '/api/v1/scripts/script-1'],
       [() => client.deleteScript('script-1'), 'DELETE', '/api/v1/scripts/script-1'],
+      [() => client.listAnswerProfiles(), 'GET', '/api/v1/answer-profiles'],
+      [() => client.createAnswerProfile({ name: 'lab', profile: 'nocloud', is_default: false }), 'POST', '/api/v1/answer-profiles'],
+      [() => client.updateAnswerProfile('ap1', { name: 'lab', profile: 'nocloud', is_default: false }), 'PATCH', '/api/v1/answer-profiles/ap1'],
+      [() => client.deleteAnswerProfile('ap1'), 'DELETE', '/api/v1/answer-profiles/ap1'],
       [() => client.batchKeys({ targets: [], key_ids: [] }), 'POST', '/api/v1/batch/keys'],
       [() => client.batchScripts({ targets: [], script_id: 's' }), 'POST', '/api/v1/batch/scripts'],
       [() => client.batchPower({ targets: [], action: 'stop' }), 'POST', '/api/v1/batch/power'],
@@ -695,30 +700,111 @@ describe('ApiClient node network and cluster registration endpoints', () => {
   it('hits every node network endpoint', async () => {
     const { client, fetchImpl } = clientWith(mockResponse({ host: 'n1', nics: [] }))
 
-    await client.nodeSnapshot()
-    await client.nodeSnapshot('wlan0')
-    await client.nodeNICState('eth0', false)
-    await client.nodeApplyAddress('eth0', { dhcp: false, address: '10.62.0.50', persist: true })
-    await client.nodeWifiConnect('wlan0', 'OfficeWiFi', 'secret')
-    await client.nodeAddRoute('10.63.0.0/24', '10.62.0.1', 'eth0')
-    await client.nodeDeleteRoute('10.63.0.0/24')
-    await client.nodeAddFirewallRule({ port: 22, proto: 'tcp', action: 'accept', comment: 'ssh' })
-    await client.nodeDeleteFirewallRule('42')
+    await client.nodeSnapshot('c1', 'n1')
+    await client.nodeSnapshot('c1', 'n1', 'wlan0')
+    await client.nodeNICState('c1', 'n1', 'eth0', false)
+    await client.nodeApplyAddress('c1', 'n1', 'eth0', { dhcp: false, address: '10.0.0.50', persist: true })
+    await client.nodeWifiConnect('c1', 'n1', 'wlan0', 'OfficeWiFi', 'secret')
+    await client.nodeAddRoute('c1', 'n1', '10.0.1.0/24', '10.0.0.1', 'eth0')
+    await client.nodeDeleteRoute('c1', 'n1', '10.0.1.0/24')
+    await client.nodeAddFirewallRule('c1', 'n1', { port: 22, proto: 'tcp', action: 'accept', comment: 'ssh' })
+    await client.nodeDeleteFirewallRule('c1', 'n1', '42')
 
+    const auth = 'https://fleet.local/api/v1/clusters/c1/members/n1/node'
     const urls = fetchImpl.mock.calls.map((c) => String(c[0]))
-    expect(urls).toContain('https://fleet.local/api/v1/node')
-    expect(urls).toContain('https://fleet.local/api/v1/node?wifi=wlan0')
-    expect(urls).toContain('https://fleet.local/api/v1/node/networks/eth0/state')
-    expect(urls).toContain('https://fleet.local/api/v1/node/networks/eth0')
-    expect(urls).toContain('https://fleet.local/api/v1/node/networks/wlan0/wifi')
-    expect(urls).toContain('https://fleet.local/api/v1/node/routes')
-    expect(urls).toContain('https://fleet.local/api/v1/node/routes/10.63.0.0%2F24')
-    expect(urls).toContain('https://fleet.local/api/v1/node/firewall')
-    expect(urls).toContain('https://fleet.local/api/v1/node/firewall/42')
+    expect(urls).toContain(auth)
+    expect(urls).toContain(`${auth}?wifi=wlan0`)
+    expect(urls).toContain(`${auth}/networks/eth0/state`)
+    expect(urls).toContain(`${auth}/networks/eth0`)
+    expect(urls).toContain(`${auth}/networks/wlan0/wifi`)
+    expect(urls).toContain(`${auth}/routes`)
+    expect(urls).toContain(`${auth}/routes/10.0.1.0%2F24`)
+    expect(urls).toContain(`${auth}/firewall`)
+    expect(urls).toContain(`${auth}/firewall/42`)
 
     const methods = fetchImpl.mock.calls.map((c) => (c[1] as RequestInit | undefined)?.method)
     expect(methods).toContain('PATCH')
     expect(methods).toContain('DELETE')
+  })
+
+  it('loads host tasks and audit records', async () => {
+    const { client, fetchImpl } = clientWith(
+      mockResponse({
+        tasks: [{ id: 'task-1' }],
+        audit: [{ id: 'audit-1' }],
+        task: { id: 'task-1' },
+        events: [{ id: 'event-1' }],
+      }),
+    )
+
+    expect(await client.nodeTasks('c1', 'n1')).toHaveLength(1)
+    expect(await client.nodeAudit('c1', 'n1')).toHaveLength(1)
+    expect(await client.nodeTask('task-1')).toEqual({
+      task: { id: 'task-1' },
+      events: [{ id: 'event-1' }],
+    })
+
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0]))
+    expect(urls).toContain('https://fleet.local/api/v1/tasks?cluster=c1&member=n1&limit=50')
+    expect(urls).toContain('https://fleet.local/api/v1/audit?cluster=c1&member=n1&limit=50')
+    expect(urls).toContain('https://fleet.local/api/v1/tasks/task-1')
+  })
+
+  it('lists agents, creates enrollment tokens, and bootstraps', async () => {
+    const { client, fetchImpl } = clientWith(
+      mockResponse({
+        agents: [{ id: 'agent-1', cluster: 'c1', member: 'n1', status: 'online' }],
+        token: 'enroll-token',
+        result: { ok: true, task_id: 't1', mode: 'bootstrap', steps: ['install'] },
+      }),
+    )
+
+    expect(await client.listAgents()).toHaveLength(1)
+    expect((await client.createAgentEnrollmentToken('c1', 'n1')).token).toBe('enroll-token')
+    expect((await client.bootstrapAgent('agent-1', { mode: 'join', address: '198.51.100.11' })).ok).toBe(true)
+
+    const urls = fetchImpl.mock.calls.map((call) => String(call[0]))
+    expect(urls).toContain('https://fleet.local/api/v1/agents')
+    expect(urls).toContain('https://fleet.local/api/v1/agents/enrollment-tokens')
+    expect(urls).toContain('https://fleet.local/api/v1/agents/agent-1/bootstrap')
+  })
+
+  it('queries the external PromQL proxy', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({
+      status: 'success',
+      data: { resultType: 'matrix', result: [{ metric: { __name__: 'fleet_host_load' }, values: [[1, '1.5']] }] },
+    }))
+    const series = await client.metricQueryRange('fleet_host_load', '1h', '30s')
+    expect(series[0]?.name).toBe('fleet_host_load')
+    expect(series[0]?.points[0]?.value).toBe(1.5)
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('/api/v1/metrics/query_range?')
+  })
+
+  it('loads host metrics from the center buffer', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ series: [{ name: 'fleet_host_load' }] }))
+    const series = await client.hostMetrics('c1', 'n1')
+    expect(series).toHaveLength(1)
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain(
+      '/api/v1/metrics/query?cluster=c1&member=n1&from=1h',
+    )
+  })
+
+  it('provisions a new cluster member', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ member: { name: 'n2' }, steps: [] }))
+
+    const result = await client.joinClusterMember('c2', {
+      address: '198.51.100.11',
+      install_incus: true,
+      install_vms: false,
+      ignore_host_key: true,
+      ssh_user: 'node-admin',
+    })
+
+    expect(result.member.name).toBe('n2')
+    const [url, init] = fetchImpl.mock.calls[0] ?? []
+    expect(String(url)).toBe('https://fleet.local/api/v1/clusters/c2/members')
+    expect((init as RequestInit).method).toBe('POST')
+    expect(String((init as RequestInit).body)).toContain('198.51.100.11')
   })
 
   it('hits traffic and cluster registration endpoints', async () => {
@@ -739,5 +825,132 @@ describe('ApiClient node network and cluster registration endpoints', () => {
     expect(urls).toContain('https://fleet.local/api/v1/clusters/c1/traffic')
     expect(urls).toContain('https://fleet.local/api/v1/clusters')
     expect(urls).toContain('https://fleet.local/api/v1/clusters/c64')
+  })
+})
+
+describe('user management endpoints', () => {
+  it('lists users', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ users: [{ id: 'u1', username: 'admin' }] }))
+
+    const users = await client.listUsers()
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/users',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(users).toHaveLength(1)
+  })
+
+  it('creates a user', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ id: 'u1', username: 'new' }))
+
+    await client.createUser({ username: 'new', password: 'correct-horse-9', role: 'viewer' })
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/users',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('updates a user', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ id: 'u1', username: 'new' }))
+
+    await client.updateUser('u1', { role: 'operator' })
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/users/u1',
+      expect.objectContaining({ method: 'PATCH' }),
+    )
+  })
+
+  it('deletes a user', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse(undefined, { status: 204 }))
+
+    await client.deleteUser('u1')
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/users/u1',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('changes the signed-in password', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse(undefined, { status: 204 }))
+
+    await client.changePassword('old-password-1', 'new-password-2')
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/auth/password',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('logs in with the bootstrap token', async () => {
+    const { client, fetchImpl } = clientWith(mockResponse({ authenticated: true }))
+
+    await client.loginWithToken('  secret  ')
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fleet.local/api/v1/auth/login',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ token: '  secret  ' }),
+      }),
+    )
+  })
+})
+
+describe('fleet volume aggregation', () => {
+  function routedClient(handler: (url: string) => Response) {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => handler(String(input)))
+
+    return new ApiClient({ baseURL: 'https://fleet.local/', fetchImpl })
+  }
+
+  it('tags every volume with its cluster and pool', async () => {
+    const client = routedClient((url) => {
+      if (url.endsWith('/clusters')) {
+        return mockResponse({ clusters: [{ name: 'c1' }, { name: 'c2' }] })
+      }
+      if (url.includes('/resources')) {
+        return mockResponse({ storage_pools: [{ name: 'default' }], networks: [] })
+      }
+      if (url.includes('/volumes')) {
+        return mockResponse({ volumes: [{ name: 'vol-1', type: 'custom', config: {}, used_by: [] }] })
+      }
+      return mockResponse({})
+    })
+
+    const volumes = await client.listAllVolumes()
+
+    expect(volumes).toHaveLength(2)
+    expect(volumes[0]).toMatchObject({ name: 'vol-1', cluster: 'c1', pool: 'default' })
+    expect(volumes[1]).toMatchObject({ name: 'vol-1', cluster: 'c2', pool: 'default' })
+  })
+
+  it('skips a cluster whose volumes cannot be read', async () => {
+    const client = routedClient((url) => {
+      if (url.endsWith('/clusters')) {
+        return mockResponse({ clusters: [{ name: 'c1' }, { name: 'c2' }] })
+      }
+      if (url.includes('/clusters/c2/resources')) {
+        return mockResponse({ storage_pools: [{ name: 'default' }], networks: [] })
+      }
+      if (url.includes('/clusters/c2/') && url.includes('/volumes')) {
+        return mockResponse({ error: { code: 'cluster_unavailable', message: 'down' } }, { status: 503 })
+      }
+      if (url.includes('/resources')) {
+        return mockResponse({ storage_pools: [{ name: 'default' }], networks: [] })
+      }
+      if (url.includes('/volumes')) {
+        return mockResponse({ volumes: [{ name: 'vol-1', type: 'custom', config: {}, used_by: [] }] })
+      }
+      return mockResponse({})
+    })
+
+    const volumes = await client.listAllVolumes()
+
+    expect(volumes).toHaveLength(1)
+    expect(volumes[0]?.cluster).toBe('c1')
   })
 })

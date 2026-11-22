@@ -9,6 +9,9 @@ import {
   Switch as SwitchIcon,
   SwitchButton,
   Collection,
+  Document,
+  UserFilled,
+  Coin,
 } from '@element-plus/icons-vue'
 import en from 'element-plus/es/locale/lang/en'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
@@ -35,14 +38,31 @@ const pageTitle = computed(() => {
   return t('app.brand')
 })
 const elementLocale = computed(() => (locale.value === 'zh-CN' ? zhCn : en))
-const activeMenu = computed(() =>
-  route.name === 'cluster' ? `/clusters/${String(route.params.cluster ?? '')}` : route.path,
-)
+const activeMenu = computed(() => {
+  if (route.name === 'cluster' || route.name === 'node-detail') {
+    return `/clusters/${String(route.params.cluster ?? '')}`
+  }
+
+  return route.path
+})
 
 watch(
   () => auth.authenticated,
   (authenticated) => {
-    if (authenticated && clusters.items.length === 0) {
+    if (!authenticated) {
+      // A 401 mid-page used to leave the user stranded with failing
+      // requests; route to the sign-in view and offer to come back (#12).
+      if (route.meta.public !== true) {
+        void router.push({
+          name: 'login',
+          query: route.fullPath === '/' ? {} : { redirect: route.fullPath },
+        })
+      }
+
+      return
+    }
+
+    if (clusters.items.length === 0) {
       void clusters.fetchAll()
     }
   },
@@ -101,12 +121,14 @@ async function logout(): Promise<void> {
             </el-menu-item>
           </el-sub-menu>
 
-          <el-menu-item index="/node">
-            <span>{{ t('nav.node') }}</span>
-          </el-menu-item>
           <el-menu-item index="/instances">
             <el-icon><Box /></el-icon>
             <span>{{ t('nav.instances') }}</span>
+          </el-menu-item>
+
+          <el-menu-item index="/volumes">
+            <el-icon><Coin /></el-icon>
+            <span>{{ t('nav.fleetVolumes') }}</span>
           </el-menu-item>
 
           <el-menu-item index="/migrations">
@@ -117,6 +139,16 @@ async function logout(): Promise<void> {
           <el-menu-item index="/assets">
             <el-icon><Collection /></el-icon>
             <span>{{ t('nav.assets') }}</span>
+          </el-menu-item>
+
+          <el-menu-item index="/answer-profiles">
+            <el-icon><Document /></el-icon>
+            <span>{{ t('nav.answerProfiles') }}</span>
+          </el-menu-item>
+
+          <el-menu-item v-if="auth.canAdmin" index="/users">
+            <el-icon><UserFilled /></el-icon>
+            <span>{{ t('nav.users') }}</span>
           </el-menu-item>
         </el-menu>
 
@@ -135,6 +167,7 @@ async function logout(): Promise<void> {
             <p>{{ t('app.subtitle') }}</p>
           </div>
           <div class="topbar-actions">
+            <span v-if="auth.username" class="topbar-user">{{ auth.username }}</span>
             <LocaleSwitch />
             <el-button :icon="SwitchButton" plain @click="logout">
               {{ t('app.signOut') }}

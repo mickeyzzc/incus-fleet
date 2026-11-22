@@ -3,21 +3,35 @@
 # Install as /etc/sudoers.d/incus-fleet-nodesudoers with mode 0440 root:root:
 #   install -m 0440 -o root -g root deploy/nodesudoers /etc/sudoers.d/incus-fleet-nodesudoers
 #
-# The incus-fleet service runs unprivileged. The node network page performs a
-# narrow set of host operations through `sudo -n` against exactly these
-# binaries; anything else the service tries to exec fails closed.
+# The incus-fleet service runs unprivileged. The node network page and the
+# cluster private overlay network perform a narrow set of host operations
+# through `sudo -n` against exactly these binaries; anything else the service
+# tries to exec fails closed.
 #
-# `tee` is restricted to the two configuration files nodenet writes: the
-# ifupdown snippet per interface and the fleet-managed wpa_supplicant config.
-# Interface names are validated against ^[a-zA-Z0-9._@-]{1,15}$ before use, so
-# the wildcard cannot be steered outside /etc/network/interfaces.d.
+# Remote members are managed over SSH with the account configured in
+# node_access.ssh_user. Replace `incus-fleet` below with that account when the
+# fleet talks to a member over SSH (the Add node workflow generates the same
+# whitelist automatically). When the service manages its own host, `incus-fleet`
+# is correct.
+#
+# `tee` is restricted to fleet-owned configuration files: the ifupdown snippet
+# per interface, the fleet-managed wpa_supplicant config, and the overlay DHCP
+# config/unit. Interface and overlay names are validated before use, so the
+# wildcards cannot be steered outside their directories.
+#
+# Both /usr/bin and /usr/sbin variants are listed because the runner resolves
+# binaries through PATH and distributions differ.
 
 incus-fleet ALL=(root) NOPASSWD: \
-    /usr/bin/ip, \
-    /usr/sbin/nft, \
-    /usr/sbin/iw, \
-    /usr/sbin/dhcpcd, \
-    /usr/sbin/wpa_supplicant, \
-    /usr/bin/hostname, \
+    /usr/bin/ip, /usr/sbin/ip, \
+    /usr/bin/nft, /usr/sbin/nft, \
+    /usr/bin/iw, /usr/sbin/iw, \
+    /usr/bin/dhcpcd, /usr/sbin/dhcpcd, \
+    /usr/bin/wpa_supplicant, /usr/sbin/wpa_supplicant, \
+    /usr/bin/hostname, /usr/sbin/hostname, \
+    /usr/bin/systemctl, /bin/systemctl, \
+    /usr/bin/rm, /bin/rm, \
     /usr/bin/tee /etc/network/interfaces.d/*, \
-    /usr/bin/tee /etc/wpa_supplicant/fleet.conf
+    /usr/bin/tee /etc/wpa_supplicant/fleet.conf, \
+    /usr/bin/tee /etc/dnsmasq.d/fleet-overlay-*.conf, \
+    /usr/bin/tee /etc/systemd/system/fleet-overlay-dhcp-*.service

@@ -1,17 +1,24 @@
-# Example Caddy configuration for two independent incus-fleet instances.
+# Example Caddy configuration for two incus-fleet instances.
 #
-# Sessions are stored in memory per app instance, so the UI MUST be pinned to
-# one upstream. `lb_policy cookie` sets a separate sticky cookie; do not use
-# round-robin for browser traffic.
+# Which load-balancing policy you need depends on the database driver:
+#
+#   driver: sqlite (single node)  -> sessions live in process memory, so the UI
+#       MUST be pinned to one upstream. Use the sticky variant below and do not
+#       put a second instance behind this proxy.
+#
+#   driver: rqlite / postgres    -> sessions and all state live in the shared
+#       database, so any instance can serve any request. Use the round-robin
+#       variant below; a failing instance is dropped by the health check.
 #
 # Replace the hostname and upstream addresses. TLS terminates here; the app
 # instances listen on plain HTTP on the private network.
 
+# --- Shared database (rqlite or PostgreSQL): no stickiness needed -----------
 fleet.example.internal {
 	encode zstd gzip
 
 	reverse_proxy 192.0.2.20:8080 192.0.2.21:8080 {
-		lb_policy cookie incus_fleet_lb
+		lb_policy round_robin
 		lb_try_duration 5s
 		lb_try_interval 250ms
 		fail_duration 30s
@@ -26,3 +33,22 @@ fleet.example.internal {
 		-Server
 	}
 }
+
+# --- Single-node SQLite: sticky required ------------------------------------
+# fleet.example.internal {
+# 	encode zstd gzip
+#
+# 	reverse_proxy 192.0.2.20:8080 {
+# 		lb_policy cookie incus_fleet_lb
+# 		fail_duration 30s
+# 		max_fails 2
+# 		health_uri /api/v1/healthz
+# 		health_interval 10s
+# 		health_timeout 2s
+# 	}
+#
+# 	header {
+# 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+# 		-Server
+# 	}
+# }

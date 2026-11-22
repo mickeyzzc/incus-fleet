@@ -55,6 +55,11 @@ flowchart LR
 | `cmd/incus-fleet` | 参数解析、配置加载、结构化日志、信号处理 |
 | `internal/config` | YAML 解析、环境变量覆盖、默认值、校验、证书文件检查 |
 | `internal/clusters` | 连接 Incus 端点、维护使用固定证书的客户端、构建健康摘要、重新连接 |
+| `internal/bootstrap` | 签名的 Incus bootstrap spec 与签名校验 |
+| `internal/incusbootstrap` | join/init Incus preseed 渲染 |
+| `internal/hostops` | 类型化的主机操作接口与后端选择 |
+| `internal/nodeaccess` | 为集群成员解析本地或 SSH 主机操作器 |
+| `internal/nodejoin` | 通过 SSH 为新成员安装 Incus 并加入集群 |
 | `internal/instances` | 清单、生命周期、镜像、ISO、SPICE、文件、快照以及客户机操作 |
 | `internal/assets` | 共享的 SSH 密钥/脚本库，以及按实例批量执行 |
 | `internal/migrations` | 校验迁移请求、持久化任务、执行复制/移动、回滚 |
@@ -105,7 +110,83 @@ flowchart LR
 
 ## 资源监控
 
-宿主机 CPU、内存、存储和实例数量来自 Incus 集群资源 API。单实例指标来自实时实例状态 API：CPU 时间、内存使用量与峰值、各挂载点的磁盘占用，以及各网卡的流量计数。核心指标无需安装任何 agent；前端每 3 秒采样一次，并通过计数器差值推算速率。
+宿主机 CPU、内存、存储和实例数量来自 Incus 集群资源 API。单实例指标来自实时实例状态 API：CPU 时间、内存使用量与峰值、各挂载点的磁盘占用，以及各网卡的流量计数。前端每 3 秒采样一次，并通过计数器差值推算速率。
+
+可选主机 agent 每 10 秒上报主机遥测。中心把它保存在有界内存环形缓冲（360 个点，1 小时），并注入 `cluster`、`member`、`agent_id` 标签。`GET /api/v1/metrics/query|snapshot|export` 提供 JSON、Prometheus text 和 CSV；指标不写入控制面数据库。
+
+agent 无需额外权限即可采集 cgroup v2 容器指标（VM 只做宿主侧 cgroup 指标）。可选 eBPF 增加主机
+TCP 重传/OOM 计数、按 cgroup 归因的重传/OOM 计数，以及 per-cgroup block 延迟直方图。sockops 在
+进程上下文维护 IPv4/IPv6 flow→cgroup 映射，使 softirq 中的重传 tracepoint 仍能找到所属容器。
+sockops 使用 `BPF_F_ALLOW_MULTI` 挂载，不会替换已有程序。OOM tracepoint 通过
+`bpf_task_from_pid` 和 CO-RE 读取 task/cgroup 路径，精确归因 root 上下文的全局 OOM；没有这些
+kfunc 的内核保留 ring-buffer `/proc` 回退。cgroup id
+通过每个 cgroup 目录的内核 file handle 解析，包含嵌套 systemd cgroup。对象、BTF 或权限缺失时
+记录原因并回退 procfs/cgroup。
+
+启用外部指标后，中心还会通过有界重试队列把标准化后的 series 转发到 Prometheus 或
+VictoriaMetrics remote write 端点，并代理 PromQL range 查询供 UI 使用。
+`GET /api/v1/sd/agents` 使用独立 token 提供 HTTP 服务发现；本版本中 Prometheus 抓取的是中心为
+每个在线 agent 提供的代理端点。agent 直连监听在后续阶段。
+
+## 主机操作
+
+主机网络和节点准备操作通过类型化的 `hostops.Operator` 执行，由 resolver 选择后端。
+`node_access.mode` 可选 `auto`（默认）、`agent`、`ssh` 或 `local`。fleet 所在主机始终走本地；
+远程成员优先使用在线 agent，否则在配置了 SSH 时走 SSH。读操作可以回退 SSH；变更操作只有在
+`node_access.ssh_write_fallback=true` 时才回退（对于尚未部署 agent 的旧部署，默认是 true）。
+
+Linux 上 helper 通过原生 netlink 应用链路状态、静态地址和 fleet 路由；非 Linux 开发/测试仍用命令
+后端，持久化仍交给检测到的管理器。resolver 对远程成员优先使用在线 agent，因此节点网络页面会
+自动走 agent，只有配置允许时才回退 SSH。
+
+每个变更都会持久化为 `host_task`（含状态事件）和一条 `host_audit`，记录 actor、来源 IP、
+backend、action、plan hash、result 和时间戳。`unknown` 表示执行器失联，但操作可能已经完成，
+不会被当作失败。Wi-Fi 密码、SSH/sudo 密码、Incus join token 和私钥永远不会存储。当前实现
+同步执行并记录任务；agent 阶段会加入 queued、dispatched 和带 lease 的任务。
+
+`GET /api/v1/tasks`、`GET /api/v1/tasks/{id}` 和 `GET /api/v1/audit` 用于查询这些记录。
+
+## 主机 agent
+
+可选的 Rust agent 是类型化的主机执行器，不是 Incus 代理。它用一次性 token 注册，从中心 CA
+获取客户端证书，并向独立的 agent gateway（`agent.listen`，默认 `:8444`）建立出站 mTLS
+WebSocket。浏览器 API 负责创建注册 token，并通过 `GET /api/v1/agents/{id}/snapshot` 派发只读
+`nodenet.snapshot` 任务。
+
+协议是 protobuf `incusfleet.agent.v1`（`api/agent/v1/agent.proto`），同时生成 Go 和 Rust 类型。
+agent 发送 Hello、Facts 和 Heartbeat；中心发送任务和心跳确认。agent 上报 facts 和基于
+`ip -j` 的网络快照，并可经短生命周期特权 helper 执行允许列表内的链路/地址/路由/防火墙/Wi-Fi
+变更。helper 校验 JSON 契约，按 task ID 记录回滚快照，并通过检测到的管理器（ifupdown、
+systemd-networkd、netplan、wicked 或 NetworkManager）持久化地址。Incus 准备是签名的声明式
+spec：中心构建 join 或 init preseed，并用 agent CA 私钥签名；helper 验证签名，按需通过发行版
+包管理器安装，执行 `incus admin init --preseed`，等待本地 API，并把幂等步骤记录在
+`/var/lib/incus-fleet-helper`。指标和 eBPF 仍在后续阶段。
+
+## 中心 mesh
+
+可选 Raft mesh 为 center 提供 leader 选举、fencing term 和复制的 agent 连接归属。任意 center 都可以
+领取持久任务，并通过运维配置的 `control_address` 中继给持有 agent WebSocket 的 center。浏览器会话
+保存在共享 PostgreSQL 中，leader 切换不会让用户登出。使用 3 个投票节点（支持 2 个 center 加 1 个
+witness）；失去 quorum 会停止写入，需要按文档执行强制单机恢复，并让其他节点以 learner 身份重新加入。
+集群连接也支持有序的 `endpoints` 列表和后台故障切换。
+
+## 高可用与生命周期
+
+主机任务带有 `lease_owner`/`lease_until`，可由 worker 通过 PostgreSQL 的
+`FOR UPDATE SKIP LOCKED` 或 SQLite 事务领取。这是多中心实例协调的基础原语；当前同步 HTTP 路径
+还没有后台 dispatcher。
+
+中心可以通过 `agent.install` 提供自包含 Linux 安装器：下载 agent 和 helper、校验 SHA-256、写入
+CA/sudoers/systemd 资源、用一次性 token 注册并启动服务。这样 agent-first Add node 流程可以在全新
+主机上运行，无需手动复制二进制。
+
+agent 证书由中心 CA 签发。管理员可以为 agent 现有公钥签发替换证书，或吊销 agent；gateway 在
+连接时检查吊销状态并校验存储的证书指纹。agent 在离过期 30 天内通过 mTLS 自动续期。agent
+升级使用 detached Ed25519 签名、`.prev` 备份、`--version` 健康检查，失败时恢复旧二进制，并可
+自动重启 systemd 服务。审计记录可导出为 JSONL 或 CSV。
+
+后台 dispatcher（`ha.enabled`）用数据库 lease 领取 queued `agent.network` 任务，任务运行期间
+续租，并记录成功/失败。这样多个中心实例共享一个 PostgreSQL 时不会重复执行同一任务。
 
 ## 共享资产与批量操作
 

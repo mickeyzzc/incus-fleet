@@ -26,6 +26,10 @@
 - 单个 Go 二进制，内嵌 Vue UI
 - 管理员 token 登录，HttpOnly 会话；自动化可用 Bearer token
 - 每个部署使用独立客户端证书连接集群
+- 可选 Rust 主机 agent（alpha）：一次性注册、mTLS WebSocket、facts/心跳，并可通过短生命周期特权 helper 执行允许列表内的主机网络变更和签名 Incus 引导
+- Agent 主机与 cgroup v2 实例指标、可选 eBPF 计数器、中心 1 小时缓冲、JSON/Prometheus/CSV 导出、Prometheus/VictoriaMetrics remote write 与查询代理、HTTP SD、数据库任务 lease、证书轮换/吊销、签名 agent 升级、审计导出、原生 netlink 写入、
+agent 后端节点网络路由、一条命令完成 agent 安装的 agent-first 上线、带可选 Raft mesh 的 HA 任务 dispatcher、
+证书自动续期和 agent 指标直连抓取
 
 > 在线迁移会保留客户机网络状态。若两个集群使用不同网段，迁移后需在客户机内
 > 重新获取 DHCP（或让两个集群使用相同网段）。
@@ -59,6 +63,7 @@ flowchart LR
 
 - Go 1.27 或更新版本
 - Bun 1.4 或更新版本（前端）
+- Rust 1.99 或更新版本（可选主机 agent）
 - 两个或更多可通过 HTTPS 访问的 Incus 集群
 - 被每个集群信任的客户端证书
 - SQLite（默认）或 PostgreSQL
@@ -74,8 +79,8 @@ make build
 生成客户端证书，在每个集群上信任它，然后写入配置：
 
 ```bash
-scripts/gen-client-cert.sh incus-fleet ./certs
-incus config trust add-certificate ./certs/incus-fleet.crt --name incus-fleet
+scripts/gen-client-cert.sh incus-fleet ~/.config/incus-fleet/certs
+incus config trust add-certificate ~/.config/incus-fleet/certs/incus-fleet.crt --name incus-fleet
 install -m 600 deploy/examples/config.sqlite.yaml config.local.yaml
 $EDITOR config.local.yaml
 INCUS_FLEET_AUTH_TOKEN="$(openssl rand -hex 32)" ./bin/incus-fleet -config config.local.yaml -check
@@ -106,6 +111,7 @@ HTTP API 见 [docs/zh-CN/api.md](docs/zh-CN/api.md)，日常操作见
 | 架构 | [docs/architecture.md](docs/architecture.md) | [docs/zh-CN/architecture.md](docs/zh-CN/architecture.md) |
 | 部署 | [docs/deployment.md](docs/deployment.md) | [docs/zh-CN/deployment.md](docs/zh-CN/deployment.md) |
 | HTTP API | [docs/api.md](docs/api.md) | [docs/zh-CN/api.md](docs/zh-CN/api.md) |
+| 路线图 | [docs/roadmap.md](docs/roadmap.md) | [docs/zh-CN/roadmap.md](docs/zh-CN/roadmap.md) |
 | 工程规范 | [docs/standards.md](docs/standards.md) | [docs/zh-CN/standards.md](docs/zh-CN/standards.md) |
 | 贡献指南 | [CONTRIBUTING.md](CONTRIBUTING.md) | [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) |
 | 安全策略 | [SECURITY.md](SECURITY.md) | [SECURITY.zh-CN.md](SECURITY.zh-CN.md) |

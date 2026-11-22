@@ -6,6 +6,8 @@ import { ArrowLeft, Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 import InstanceActions from '@/components/InstanceActions.vue'
+import AddClusterMemberDialog from '@/components/AddClusterMemberDialog.vue'
+import InstanceDeleteDialog from '@/components/InstanceDeleteDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import ImageDistributeDialog from '@/components/ImageDistributeDialog.vue'
@@ -15,6 +17,7 @@ import IsoLaunchDialog from '@/components/IsoLaunchDialog.vue'
 import MemberDialog from '@/components/MemberDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
 import NetworkDialog from '@/components/NetworkDialog.vue'
+import OverlayDialog from '@/components/OverlayDialog.vue'
 import NodeUpgradeDialog from '@/components/NodeUpgradeDialog.vue'
 import ProfileDialog from '@/components/ProfileDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
@@ -27,6 +30,7 @@ import type {
   InstanceSummary,
   InstanceType,
   NetworkResource,
+  OverlayStatus,
   Profile,
   StoragePoolResource,
 } from '@/api/types'
@@ -54,10 +58,14 @@ const poolDialogOpen = ref(false)
 const poolEditing = ref<StoragePoolResource | null>(null)
 const networkDialogOpen = ref(false)
 const networkEditing = ref<NetworkResource | null>(null)
+const overlayDialogOpen = ref(false)
+const overlayItems = ref<OverlayStatus[]>([])
+const overlayLoading = ref(false)
 const profileDialogOpen = ref(false)
 const profileEditing = ref<Profile | null>(null)
 const memberDialogOpen = ref(false)
 const memberEditing = ref<ClusterMember | null>(null)
+const addMemberOpen = ref(false)
 const volumesDialogOpen = ref(false)
 const volumesPool = ref<StoragePoolResource | null>(null)
 const importDialogOpen = ref(false)
@@ -74,6 +82,28 @@ const profiles = computed(() => instances.profiles(props.cluster))
 const clusterImages = computed(() => instances.images(props.cluster))
 const clusterISOs = computed(() => instances.isoCache[props.cluster] ?? [])
 const poolNames = computed(() => (resources.value?.storage_pools ?? []).map((pool) => pool.name))
+// Networks ordered for readability: managed networks are cluster-wide, then
+// physical NICs grouped by member — a flat mix of every node's NICs read as
+// one confusing list (#13 F6 follow-up).
+const networkRows = computed(() => {
+  const networks = [...(resources.value?.networks ?? [])]
+  networks.sort((a, b) => {
+    if (a.managed !== b.managed) {
+      return a.managed ? -1 : 1
+    }
+    if (!a.managed && !b.managed) {
+      const memberA = a.locations.join(',')
+      const memberB = b.locations.join(',')
+      if (memberA !== memberB) {
+        return memberA.localeCompare(memberB)
+      }
+    }
+
+    return a.name.localeCompare(b.name)
+  })
+
+  return networks
+})
 const isoImportOpen = ref(false)
 const isoLaunchOpen = ref(false)
 const isoTarget = ref({ name: '', pool: '' })
@@ -94,6 +124,9 @@ function memberStatusLabel(status: string): string {
 }
 
 async function load(force = false): Promise<void> {
+  // Store error flags surface failures in the UI; this catch only keeps the
+  // 15s polling loop alive when a fetcher rejects (e.g. fetchISOs while the
+  // member is down) instead of dying with an unhandled rejection (#12).
   await Promise.all([
     clusters.fetchAll(),
     instances.fetchCluster(props.cluster, typeFilter.value),
@@ -101,7 +134,8 @@ async function load(force = false): Promise<void> {
     instances.fetchProfiles(props.cluster, force),
     instances.fetchImages(props.cluster, force),
     instances.fetchISOs(props.cluster, force),
-  ])
+    loadOverlays(force),
+  ]).catch(() => {})
 }
 
 onMounted(() => load())
@@ -114,7 +148,7 @@ watch(
   },
 )
 
-const { act, confirmDelete, isBusy } = useInstanceActions(() => load())
+const { act, confirmDelete, isBusy, deleteTarget, deleting, cancelDelete, submitDelete } = useInstanceActions(() => load())
 
 watch(typeFilter, async (type) => {
   await instances.fetchCluster(props.cluster, type)
@@ -130,6 +164,11 @@ async function reconnect(): Promise<void> {
 }
 
 function openDetail(instance: InstanceSummary): void {
+  // A poll can replace the row between the click and this handler, leaving an
+  // empty name. Ignore that click instead of opening an empty drawer.
+  if (!instance?.name) {
+    return
+  }
   detailName.value = instance.name
   detailOpen.value = true
 }
@@ -191,6 +230,51 @@ async function confirmDeletePool(pool: StoragePoolResource): Promise<void> {
   }
 }
 
+async function loadOverlays(force = false): Promise<void> {
+  overlayLoading.value = true
+  try {
+    overlayItems.value = await instances.fetchOverlays(props.cluster, force)
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  } finally {
+    overlayLoading.value = false
+  }
+}
+
+function openOverlayDialog(): void {
+  overlayDialogOpen.value = true
+}
+
+async function reconcileOverlay(overlay: OverlayStatus): Promise<void> {
+  try {
+    await instances.reconcileOverlay(props.cluster, overlay.name)
+    ElMessage.success(t('cluster.overlayReconciled', { name: overlay.name }))
+    await loadOverlays(true)
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  }
+}
+
+async function confirmDisableOverlay(overlay: OverlayStatus): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      t('cluster.overlayConfirmDisable', { name: overlay.name }),
+      t('cluster.overlayDisable'),
+      { type: 'warning', confirmButtonText: t('cluster.overlayDisable'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await instances.disableOverlay(props.cluster, overlay.name)
+    ElMessage.success(t('cluster.overlayRemoved', { name: overlay.name }))
+    await loadOverlays(true)
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  }
+}
+
 function openNetworkDialog(network: NetworkResource | null = null): void {
   networkEditing.value = network
   networkDialogOpen.value = true
@@ -246,6 +330,15 @@ function openMemberDialog(member: ClusterMember): void {
   memberDialogOpen.value = true
 }
 
+/** Opens the node detail page where host networking is managed. */
+function openNodeDetail(member: ClusterMember): void {
+  void router.push({ name: 'node-detail', params: { cluster: props.cluster, member: member.name } })
+}
+
+async function memberAdded(): Promise<void> {
+  await clusters.fetchAll()
+}
+
 function openVolumesDialog(pool: StoragePoolResource): void {
   volumesPool.value = pool
   volumesDialogOpen.value = true
@@ -292,6 +385,22 @@ async function deleteISO(iso: { name: string; pool: string }): Promise<void> {
 }
 
 async function deleteImage(fingerprint: string): Promise<void> {
+  // Image deletion is instant and unrecoverable; every other destructive
+  // action on this page confirms first (#12).
+  try {
+    await ElMessageBox.confirm(
+      t('images.deleteConfirm', { fingerprint: fingerprint.slice(0, 12) }),
+      t('common.delete'),
+      {
+        type: 'warning',
+        confirmButtonText: t('common.delete'),
+        cancelButtonText: t('common.cancel'),
+      },
+    )
+  } catch {
+    return
+  }
+
   try {
     await instances.deleteImage(props.cluster, fingerprint)
     ElMessage.success(t('images.deleted'))
@@ -466,31 +575,74 @@ function openNodeUpgrade(member: ClusterMember): void {
         </div>
 
         <div class="cluster-tags">
-          <el-tag
-            v-for="member in summary.members"
-            :key="member.name"
-            size="small"
-            effect="plain"
-            class="member-tag"
-            :title="t('admin.clickMemberHint')"
-            @click="openMemberDialog(member)"
-          >
-            {{ member.name }} · {{ memberStatusLabel(member.status) }}
-            <el-button
-              v-if="member.status === 'Online'"
-              type="primary"
-              size="small"
-              link
-              class="upgrade-link"
-              @click.stop="openNodeUpgrade(member)"
-            >
-              {{ t('node.upgrade') }}
-            </el-button>
-          </el-tag>
           <el-tag v-for="network in summary.networks" :key="network" size="small" effect="plain">
             {{ network }}
           </el-tag>
         </div>
+      </div>
+    </section>
+
+    <section v-if="summary" class="panel">
+      <div class="panel-body">
+        <div class="page-header" style="margin-bottom: 14px">
+          <div>
+            <h3 class="section-title">{{ t('cluster.nodes') }}</h3>
+            <p class="subtitle">{{ t('cluster.nodesHint') }}</p>
+          </div>
+          <div class="page-actions">
+            <el-button :icon="Plus" type="primary" @click="addMemberOpen = true">
+              {{ t('cluster.addNode') }}
+            </el-button>
+          </div>
+        </div>
+
+        <el-table :data="summary.members" size="small" stripe>
+          <el-table-column :label="t('common.name')" min-width="160">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openNodeDetail(row)">
+                {{ row.name }}
+              </el-button>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.status')" width="110">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'Online' ? 'success' : 'info'" size="small" effect="plain">
+                {{ memberStatusLabel(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.memberRoles')" min-width="150">
+            <template #default="{ row }">
+              <span class="mono">{{ row.roles?.join(', ') || t('common.none') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.architectures')" width="120">
+            <template #default="{ row }">{{ row.architecture || t('common.none') }}</template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.memberAddress')" min-width="190">
+            <template #default="{ row }">
+              <span class="mono">{{ row.url || summary.endpoint }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" width="220" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openNodeDetail(row)">
+                {{ t('cluster.manageNode') }}
+              </el-button>
+              <el-button link type="primary" @click="openMemberDialog(row)">
+                {{ t('common.edit') }}
+              </el-button>
+              <el-button
+                v-if="row.status === 'Online'"
+                link
+                type="warning"
+                @click="openNodeUpgrade(row)"
+              >
+                {{ t('node.upgrade') }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
     </section>
 
@@ -756,7 +908,7 @@ function openNodeUpgrade(member: ClusterMember): void {
           </div>
         </div>
 
-        <el-table v-loading="instances.resourcesLoading" :data="resources?.networks ?? []" stripe>
+        <el-table v-loading="instances.resourcesLoading" :data="networkRows" stripe>
           <el-table-column :label="t('cluster.networkName')" min-width="150">
             <template #default="{ row }">
               <strong>{{ row.name }}</strong>
@@ -764,6 +916,14 @@ function openNodeUpgrade(member: ClusterMember): void {
             </template>
           </el-table-column>
           <el-table-column :label="t('cluster.networkType')" width="120" prop="type" />
+          <el-table-column :label="t('cluster.locations')" min-width="130">
+            <template #default="{ row }">
+              <!-- Managed networks exist on every member; physical NICs live
+                   on one node, so their member is the identity that matters. -->
+              <span v-if="row.managed" class="muted">{{ t('cluster.allMembers') }}</span>
+              <span v-else class="mono">{{ row.locations.join(', ') || t('cluster.unknownMember') }}</span>
+            </template>
+          </el-table-column>
           <el-table-column :label="t('cluster.managed')" width="110">
             <template #default="{ row }">
               <el-tag :type="row.managed ? 'success' : 'info'" size="small" effect="light">
@@ -806,6 +966,86 @@ function openNodeUpgrade(member: ClusterMember): void {
       </div>
     </section>
 
+
+    <section class="panel">
+      <div class="panel-body">
+        <div class="section-heading page-header">
+          <div>
+            <h3 class="section-title">{{ t('cluster.overlayTitle') }}</h3>
+            <p class="subtitle">{{ t('cluster.overlayHint') }}</p>
+          </div>
+          <div class="page-actions">
+            <el-button :icon="Plus" @click="openOverlayDialog">
+              {{ t('cluster.overlayCreate') }}
+            </el-button>
+          </div>
+        </div>
+
+        <el-table v-loading="overlayLoading" :data="overlayItems" stripe>
+          <el-table-column :label="t('cluster.overlaySubnet')" min-width="150">
+            <template #default="{ row }">
+              <strong>{{ row.name }}</strong>
+              <span class="mini-label mono">{{ row.subnet }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.overlayBridge')" width="130" prop="bridge" />
+          <el-table-column :label="t('cluster.overlayVNI')" width="100">
+            <template #default="{ row }">
+              <span class="mono">{{ row.vni }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.overlayGateway')" min-width="130">
+            <template #default="{ row }">
+              {{ row.gateway_member }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.overlayMTU')" width="90">
+            <template #default="{ row }">
+              <span class="mono">{{ row.mtu }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.overlayTunnels', { count: 0 })" width="140">
+            <template #default="{ row }">
+              {{ t('cluster.overlayTunnels', { count: row.tunnels.length }) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('cluster.overlayStatus')" width="110">
+            <template #default="{ row }">
+              <el-tag :type="row.enabled ? 'success' : 'info'" size="small" effect="light">
+                {{ row.enabled ? t('cluster.overlayEnabled') : t('cluster.overlayDisabled') }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" width="180" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="reconcileOverlay(row)">
+                {{ t('cluster.overlayReconcile') }}
+              </el-button>
+              <el-button link type="danger" @click="confirmDisableOverlay(row)">
+                {{ t('cluster.overlayDisable') }}
+              </el-button>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty :description="t('cluster.overlayEmpty')" />
+          </template>
+        </el-table>
+
+        <div v-for="overlay in overlayItems" :key="`${overlay.name}-members`" class="overlay-members">
+          <h4 class="mini-title">{{ overlay.name }} · {{ t('cluster.overlayMember') }}</h4>
+          <div class="overlay-member-grid">
+            <div v-for="member in overlay.members" :key="member.member" class="overlay-member">
+              <strong>{{ member.member }}</strong>
+              <el-tag :type="member.gateway ? 'warning' : 'info'" size="small" effect="plain">
+                {{ member.gateway ? t('cluster.overlayRoleGateway') : t('cluster.overlayRoleMember') }}
+              </el-tag>
+              <span class="muted mono">{{ member.bridge_ip }}</span>
+              <span class="muted mono">{{ member.underlay_ip }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
     <section class="panel">
       <div class="panel-body">
         <div class="section-heading page-header">
@@ -890,6 +1130,12 @@ function openNodeUpgrade(member: ClusterMember): void {
       :pool="poolEditing"
       @saved="instances.fetchResources(cluster, true)"
     />
+    <OverlayDialog
+      v-model="overlayDialogOpen"
+      :cluster="cluster"
+      :members="summary?.members ?? []"
+      @saved="loadOverlays(true)"
+    />
     <NetworkDialog
       v-model="networkDialogOpen"
       :cluster="cluster"
@@ -902,6 +1148,7 @@ function openNodeUpgrade(member: ClusterMember): void {
       :profile="profileEditing"
       @saved="instances.fetchProfiles(cluster, true)"
     />
+    <AddClusterMemberDialog v-model="addMemberOpen" :cluster="cluster" @added="memberAdded" />
     <MemberDialog v-model="memberDialogOpen" :cluster="cluster" :member="memberEditing" />
     <NodeUpgradeDialog
       v-model="nodeUpgradeDialogOpen"
@@ -938,6 +1185,12 @@ function openNodeUpgrade(member: ClusterMember): void {
       :iso-pool="isoTarget.pool"
       :networks="(resources?.networks ?? []).map((network) => network.name)"
       @launched="instances.fetchCluster(cluster, typeFilter)"
+    />
+    <InstanceDeleteDialog
+      :target="deleteTarget"
+      :busy="deleting"
+      @cancel="cancelDelete"
+      @confirm="submitDelete"
     />
   </div>
 </template>

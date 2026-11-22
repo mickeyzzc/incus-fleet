@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -143,10 +144,23 @@ func TestSPICEDial(t *testing.T) {
 		},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": vm})
+	// The production dialer targets the instance-derived port on the hosting
+	// member. Point it at the ephemeral test listener instead, and record what
+	// it was asked to dial so the port rule is still exercised.
+	var dialedAddr string
+	svc.dial = func(addr string, _ time.Duration) (net.Conn, error) {
+		dialedAddr = addr
+		return net.DialTimeout("tcp", listener.Addr().String(), 3*time.Second)
+	}
 
-	conn, err := svc.SPICEDial(context.Background(), "c1", "vm-01", portNum)
+	wantPort := SPICEPortFor("vm-01")
+
+	conn, err := svc.SPICEDial(context.Background(), "c1", "vm-01", wantPort)
 	if err != nil {
 		t.Fatalf("SPICEDial() error = %v", err)
+	}
+	if !strings.HasSuffix(dialedAddr, ":"+strconv.Itoa(wantPort)) {
+		t.Fatalf("dialed address = %q, want port %d", dialedAddr, wantPort)
 	}
 	defer conn.Close() //nolint:errcheck // test teardown
 
@@ -165,7 +179,65 @@ func TestSPICEDial(t *testing.T) {
 	if _, err = svc.SPICEDial(context.Background(), "c1", "vm-01", 80); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("SPICEDial() bad port = %v", err)
 	}
-	if _, err = svc.SPICEDial(context.Background(), "c1", "missing", portNum); !errors.Is(err, ErrNotFound) {
+	// A port inside the allowed range but not derived from this instance must be
+	// rejected: otherwise the bridge would proxy to arbitrary cluster services.
+	wrong := wantPort + 1
+	if wrong > spicePortMax {
+		wrong = wantPort - 1
+	}
+	if _, err = svc.SPICEDial(context.Background(), "c1", "vm-01", wrong); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("SPICEDial() mismatched port = %v, want ErrInvalidRequest", err)
+	}
+	if _, err = svc.SPICEDial(context.Background(), "c1", "missing", SPICEPortFor("missing")); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("SPICEDial() missing instance = %v", err)
+	}
+}
+
+func TestSpiceMemberHostFallbacks(t *testing.T) {
+	// A client that fails to list members falls back to loopback.
+	failing := &failingMemberClient{}
+	if host := spiceMemberHost(failing, "node-a"); host != "127.0.0.1" {
+		t.Fatalf("host = %q, want loopback", host)
+	}
+
+	// An empty member list does the same.
+	empty := &staticMemberClient{}
+	if host := spiceMemberHost(empty, "node-a"); host != "127.0.0.1" {
+		t.Fatalf("host = %q, want loopback", host)
+	}
+
+	// An empty location resolves to the first member.
+	one := &staticMemberClient{members: []api.ClusterMember{
+		{ServerName: "node-a", URL: "https://192.0.2.10:8443"},
+	}}
+	if host := spiceMemberHost(one, ""); host != "192.0.2.10" {
+		t.Fatalf("host = %q, want the first member", host)
+	}
+}
+
+type failingMemberClient struct{}
+
+func (failingMemberClient) GetClusterMembers() ([]api.ClusterMember, error) {
+	return nil, errors.New("boom")
+}
+
+type staticMemberClient struct {
+	members []api.ClusterMember
+}
+
+func (s *staticMemberClient) GetClusterMembers() ([]api.ClusterMember, error) {
+	return s.members, nil
+}
+
+func TestSetDialerReplacesHook(t *testing.T) {
+	svc := &Service{}
+	called := false
+	svc.SetDialer(func(string, time.Duration) (net.Conn, error) {
+		called = true
+		return nil, errors.New("not dialing")
+	})
+
+	if _, err := svc.dial("127.0.0.1:1", time.Second); err == nil || !called {
+		t.Fatalf("dial() = %v, called=%v", err, called)
 	}
 }

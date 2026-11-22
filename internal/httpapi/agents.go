@@ -1,0 +1,248 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/mickeyzzc/incus-fleet/internal/agentgw"
+	"github.com/mickeyzzc/incus-fleet/internal/agentops"
+	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
+	"github.com/mickeyzzc/incus-fleet/internal/bootstrap"
+	"github.com/mickeyzzc/incus-fleet/internal/store"
+)
+
+// BootstrapSigner signs declarative Incus bootstrap specs.
+type BootstrapSigner interface {
+	SignBootstrap(*bootstrap.Spec) error
+}
+
+// AgentDispatcher is the subset of the agent gateway used by HTTP handlers.
+type AgentDispatcher interface {
+	Dispatch(ctx context.Context, agentID string, typ agentpb.TaskType, payload []byte, timeout time.Duration) (*agentpb.TaskResult, error)
+}
+
+const (
+	defaultEnrollmentTTL = 15 * time.Minute
+	maxEnrollmentTTL     = time.Hour
+)
+
+// createAgentEnrollmentToken issues a single-use token for one cluster member.
+func (a *API) createAgentEnrollmentToken(w http.ResponseWriter, r *http.Request) {
+	if a.store == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "agent registry is not enabled")
+		return
+	}
+
+	var req struct {
+		Cluster    string `json:"cluster"`
+		Member     string `json:"member"`
+		TTLSeconds int    `json:"ttl_seconds"`
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	req.Cluster = strings.TrimSpace(req.Cluster)
+	req.Member = strings.TrimSpace(req.Member)
+	if req.Cluster == "" || req.Member == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "cluster and member are required")
+		return
+	}
+	if a.clusters == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "cluster manager is not configured")
+		return
+	}
+	if _, err := a.clusters.Get(req.Cluster); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	ttl := defaultEnrollmentTTL
+	if req.TTLSeconds > 0 {
+		ttl = time.Duration(req.TTLSeconds) * time.Second
+	}
+	if ttl > maxEnrollmentTTL {
+		writeError(w, http.StatusBadRequest, "invalid_request", "ttl_seconds must be at most 3600")
+		return
+	}
+
+	token, hash, err := agentgw.NewEnrollmentToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to generate enrollment token")
+		return
+	}
+	now := time.Now().UTC()
+	record := &store.EnrollmentToken{
+		ID:        store.NewID(),
+		TokenHash: hash,
+		Cluster:   req.Cluster,
+		Member:    req.Member,
+		ExpiresAt: now.Add(ttl),
+		CreatedBy: "admin",
+		CreatedAt: now,
+	}
+	if err := a.store.CreateEnrollmentToken(r.Context(), record); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"token":      token,
+		"cluster":    record.Cluster,
+		"member":     record.Member,
+		"expires_at": record.ExpiresAt,
+	})
+}
+
+// listAgents returns enrolled agents.
+func (a *API) listAgents(w http.ResponseWriter, r *http.Request) {
+	if a.store == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "agent registry is not enabled")
+		return
+	}
+	agents, err := a.store.ListAgents(r.Context())
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+	cluster := strings.TrimSpace(r.URL.Query().Get("cluster"))
+	member := strings.TrimSpace(r.URL.Query().Get("member"))
+	if cluster != "" || member != "" {
+		filtered := make([]*store.Agent, 0, len(agents))
+		for _, agent := range agents {
+			if cluster != "" && agent.Cluster != cluster {
+				continue
+			}
+			if member != "" && agent.Member != member {
+				continue
+			}
+			filtered = append(filtered, agent)
+		}
+		agents = filtered
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
+}
+
+// agentNetwork dispatches one allowlisted network mutation to an agent.
+func (a *API) agentNetwork(w http.ResponseWriter, r *http.Request) {
+	if a.agent == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "agent gateway is not enabled")
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "failed to read request body")
+		return
+	}
+	var spec agentpb.NodenetApplySpec
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(body, &spec); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid network request")
+		return
+	}
+	spec.Action = strings.TrimSpace(spec.Action)
+	taskType := agentpb.TaskType_TASK_TYPE_NODENET_APPLY
+	switch {
+	case agentops.IsNodenetAction(spec.Action):
+	case spec.Action == "confirm":
+		taskType = agentpb.TaskType_TASK_TYPE_NODENET_CONFIRM
+	case spec.Action == "rollback":
+		taskType = agentpb.TaskType_TASK_TYPE_NODENET_ROLLBACK
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", "unsupported network action")
+		return
+	}
+	if (spec.Action == "confirm" || spec.Action == "rollback") && spec.TaskId == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "task_id is required for confirm and rollback")
+		return
+	}
+
+	payload, err := proto.Marshal(&spec)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to encode network request")
+		return
+	}
+	result, err := a.agent.Dispatch(r.Context(), r.PathValue("id"), taskType, payload, 30*time.Second)
+	if err != nil {
+		if errors.Is(err, agentgw.ErrAgentOffline) {
+			writeError(w, http.StatusServiceUnavailable, "agent_offline", "agent is not connected")
+			return
+		}
+		writeError(w, http.StatusGatewayTimeout, "agent_timeout", err.Error())
+		return
+	}
+	if result.State != agentpb.TaskState_TASK_STATE_SUCCEEDED {
+		message := result.Error
+		if message == "" {
+			message = "agent network task failed"
+		}
+		writeError(w, http.StatusBadGateway, "agent_error", message)
+		return
+	}
+
+	var applied agentpb.NodenetApplyResult
+	if err := proto.Unmarshal(result.Payload, &applied); err != nil {
+		writeError(w, http.StatusBadGateway, "agent_error", "agent returned an invalid network result")
+		return
+	}
+	if !applied.Ok {
+		writeError(w, http.StatusBadGateway, "agent_error", applied.Error)
+		return
+	}
+	payloadJSON, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(&applied)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to encode network result")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"result": json.RawMessage(payloadJSON)})
+}
+
+// agentSnapshot dispatches a read-only network snapshot to one agent.
+func (a *API) agentSnapshot(w http.ResponseWriter, r *http.Request) {
+	if a.agent == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "agent gateway is not enabled")
+		return
+	}
+
+	result, err := a.agent.Dispatch(r.Context(), r.PathValue("id"),
+		agentpb.TaskType_TASK_TYPE_NODENET_SNAPSHOT, nil, 15*time.Second)
+	if err != nil {
+		if errors.Is(err, agentgw.ErrAgentOffline) {
+			writeError(w, http.StatusServiceUnavailable, "agent_offline", "agent is not connected")
+			return
+		}
+		writeError(w, http.StatusGatewayTimeout, "agent_timeout", err.Error())
+		return
+	}
+	if result.State != agentpb.TaskState_TASK_STATE_SUCCEEDED {
+		message := result.Error
+		if message == "" {
+			message = "agent task failed"
+		}
+		writeError(w, http.StatusBadGateway, "agent_error", message)
+		return
+	}
+
+	var snapshot agentpb.NodenetSnapshot
+	if err := proto.Unmarshal(result.Payload, &snapshot); err != nil {
+		writeError(w, http.StatusBadGateway, "agent_error", "agent returned an invalid snapshot")
+		return
+	}
+	payload, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(&snapshot)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to encode snapshot")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"snapshot": json.RawMessage(payload)})
+}

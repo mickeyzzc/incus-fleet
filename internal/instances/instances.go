@@ -4,6 +4,8 @@ package instances
 import (
 	"errors"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -20,11 +22,56 @@ var ErrNotFound = errors.New("instances: not found")
 // Service reads instance inventory from the cluster manager.
 type Service struct {
 	clusters *clusters.Manager
+
+	// dial opens a TCP connection to a SPICE listener. Tests replace it to
+	// point at an ephemeral listener; production uses net.DialTimeout.
+	dial func(addr string, timeout time.Duration) (net.Conn, error)
+
+	// workDir is the scratch directory for unattended-install ISO
+	// remastering (default data/unattended relative to the server cwd).
+	workDir string
+	// iso performs the on-disk ISO surgery for unattended installs
+	// (default: xorriso on PATH).
+	iso isoTool
+	// logger receives unattended watch lifecycle messages.
+	logger *slog.Logger
+}
+
+// Option customizes the instance service.
+type Option func(*Service)
+
+// WithUnattendedWorkDir overrides the scratch directory used for ISO
+// remastering.
+func WithUnattendedWorkDir(dir string) Option {
+	return func(s *Service) { s.workDir = dir }
+}
+
+// WithXorriso overrides the xorriso executable used for unattended ISO
+// surgery.
+func WithXorriso(path string) Option {
+	return func(s *Service) { s.iso = newXorrisoTool(path) }
+}
+
+// withIsoTool replaces the ISO surgery tool (test hook).
+func withIsoTool(tool isoTool) Option {
+	return func(s *Service) { s.iso = tool }
+}
+
+// WithLogger attaches a logger for unattended watch lifecycle messages.
+func WithLogger(logger *slog.Logger) Option {
+	return func(s *Service) { s.logger = logger }
 }
 
 // New creates an instance inventory service.
-func New(manager *clusters.Manager) *Service {
-	return &Service{clusters: manager}
+func New(manager *clusters.Manager, opts ...Option) *Service {
+	s := &Service{clusters: manager, dial: func(addr string, timeout time.Duration) (net.Conn, error) {
+		return net.DialTimeout("tcp", addr, timeout)
+	}, iso: newXorrisoTool("xorriso")}
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	return s
 }
 
 // Summary is the list representation of an instance.
@@ -280,4 +327,10 @@ func isNotFound(err error) bool {
 	}
 
 	return false
+}
+
+// SetDialer replaces the TCP dialer used for SPICE bridging. It exists so tests
+// can point the bridge at an ephemeral listener; production never calls it.
+func (s *Service) SetDialer(dial func(addr string, timeout time.Duration) (net.Conn, error)) {
+	s.dial = dial
 }

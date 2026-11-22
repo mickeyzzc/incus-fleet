@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
@@ -105,25 +105,35 @@ export function useInstanceActions(refresh: () => Promise<void>) {
     }
   }
 
-  async function confirmDelete(instance: InstanceRef): Promise<void> {
-    try {
-      await ElMessageBox.confirm(
-        t('instances.deleteConfirm', { name: instance.name }),
-        t('instances.deleteTitle'),
-        {
-          type: 'warning',
-          confirmButtonText: t('common.delete'),
-          cancelButtonText: t('common.cancel'),
-        },
-      )
-    } catch {
+  // Delete confirmation state (#13 F5): a dialog with an explicit "delete
+  // storage volumes" option replaces the plain message box, so instance-owned
+  // volumes can be removed in the same step.
+  const deleteTarget = ref<InstanceRef | null>(null)
+  const deleteVolumes = ref(false)
+  const deleting = computed(() =>
+    deleteTarget.value ? actionKey.value === keyOf(deleteTarget.value) : false,
+  )
+
+  function confirmDelete(instance: InstanceRef): void {
+    deleteVolumes.value = false
+    deleteTarget.value = instance
+  }
+
+  function cancelDelete(): void {
+    deleteTarget.value = null
+  }
+
+  async function submitDelete(): Promise<void> {
+    const instance = deleteTarget.value
+    if (!instance) {
       return
     }
 
     actionKey.value = keyOf(instance)
     try {
-      await instances.deleteInstance(instance.cluster, instance.name, true)
+      await instances.deleteInstance(instance.cluster, instance.name, true, deleteVolumes.value)
       ElMessage.success(t('instances.deleteSuccess', { name: instance.name }))
+      deleteTarget.value = null
       await refresh()
     } catch (err) {
       ElMessage.error(t('instances.actionFailed', { error: errorMessage(err) }))
@@ -132,7 +142,7 @@ export function useInstanceActions(refresh: () => Promise<void>) {
     }
   }
 
-  return { actionKey, isBusy, act, confirmDelete }
+  return { actionKey, isBusy, act, confirmDelete, deleteTarget, deleteVolumes, deleting, cancelDelete, submitDelete }
 }
 
 /** Runs a loader on an interval while the page stays visible. */

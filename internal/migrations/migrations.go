@@ -76,12 +76,32 @@ func WithRunTimeout(timeout time.Duration) Option {
 	}
 }
 
+// WithOwner sets the stable instance identity recorded on each submitted
+// migration. A restarting instance uses it to fail only its own interrupted
+// tasks instead of those another instance is still running.
+func WithOwner(owner string) Option {
+	return func(s *Service) {
+		s.owner = strings.TrimSpace(owner)
+	}
+}
+
+// WithNetworkFixer installs the post-move guest network restoration step.
+func WithNetworkFixer(fixer *NetworkFixer) Option {
+	return func(s *Service) {
+		s.network = fixer
+	}
+}
+
 // Service schedules and executes migrations.
 type Service struct {
 	clusters   *clusters.Manager
 	store      store.Store
 	logger     *slog.Logger
 	runTimeout time.Duration
+	owner      string
+	// network restores a guest's DHCP lease after a cross-cluster move. It is
+	// optional so tests and single-cluster setups can run without it.
+	network *NetworkFixer
 
 	mu     sync.Mutex
 	active map[string]struct{}
@@ -156,6 +176,7 @@ func (s *Service) Submit(ctx context.Context, req Request) (*store.Migration, er
 		Mode:          plan.request.Mode,
 		Live:          plan.request.Live,
 		Status:        StatusPending,
+		Owner:         s.owner,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
@@ -407,6 +428,19 @@ func (s *Service) execute(p *plan) {
 		if err := ensureRunning(ctx, sourceClient, req.Instance); err != nil {
 			fail("restart source", err)
 			return
+		}
+	}
+
+	// A moved guest keeps the DHCP lease it got on the source cluster, and the
+	// target bridge cannot see that lease, so it would stay unreachable until
+	// the lease expires. Ask the guest to release and renew now.
+	if s.network != nil && req.Mode == ModeMove {
+		s.setStatus(ctx, migration.ID, StatusVerifying, "restoring guest network", "")
+		if err := s.network.RestoreLease(ctx, req.TargetCluster, req.Instance); err != nil {
+			// Network restoration is best-effort: the data move succeeded and
+			// failing the task here would misreport it.
+			s.logger.Warn("guest network restore failed",
+				"migration", migration.ID, "instance", req.Instance, "error", err)
 		}
 	}
 

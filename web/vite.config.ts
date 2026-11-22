@@ -39,6 +39,10 @@ export default defineConfig({
         'src/env.d.ts',
         'src/test/**',
         'src/**/*.test.ts',
+        // Type-only declarations and locale message tables hold no executable
+        // logic; counting them skews function coverage without adding signal.
+        'src/api/types.ts',
+        'src/i18n/locales/**',
       ],
       thresholds: {
         lines: 90,

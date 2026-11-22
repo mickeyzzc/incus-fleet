@@ -21,6 +21,8 @@ import type {
   LaunchISORequest,
   MemberUpdateRequest,
   NetworkRequest,
+  OverlayRequest,
+  OverlayStatus,
   OpsRequest,
   OpsResult,
   Profile,
@@ -28,6 +30,8 @@ import type {
   SnapshotRequest,
   StoragePoolRequest,
   StorageVolume,
+  UnattendedLaunchRequest,
+  UnattendedLaunchResult,
   UpdateInstanceRequest,
   VolumeRequest,
 } from '@/api/types'
@@ -44,6 +48,8 @@ export const useInstancesStore = defineStore('instances', () => {
   const snapshotCache = ref<Record<string, InstanceSnapshot[]>>({})
   const volumeCache = ref<Record<string, StorageVolume[]>>({})
   const fileCache = ref<Record<string, FileEntry[]>>({})
+  const overlayCache = ref<Record<string, OverlayStatus[]>>({})
+  const overlayLoading = ref(false)
   const loading = ref(false)
   const detailLoading = ref(false)
   const imagesLoading = ref(false)
@@ -245,11 +251,11 @@ export const useInstancesStore = defineStore('instances', () => {
   }
 
   /** Deletes an instance and removes it from cached state. */
-  async function deleteInstance(cluster: string, name: string, force = false): Promise<void> {
+  async function deleteInstance(cluster: string, name: string, force = false, volumes = false): Promise<void> {
     error.value = ''
 
     try {
-      await api.deleteInstance(cluster, name, force)
+      await api.deleteInstance(cluster, name, force, volumes)
       items.value = items.value.filter(
         (instance) => !(instance.cluster === cluster && instance.name === name),
       )
@@ -356,6 +362,75 @@ export const useInstancesStore = defineStore('instances', () => {
     try {
       await api.deleteNetwork(cluster, name)
       delete resourceCache.value[cluster]
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Loads the private overlay definitions of one cluster. */
+  async function fetchOverlays(cluster: string, force = false): Promise<OverlayStatus[]> {
+    if (!force && overlayCache.value[cluster]) {
+      return overlayCache.value[cluster] ?? []
+    }
+
+    overlayLoading.value = true
+    try {
+      const overlays = await api.listOverlays(cluster)
+      overlayCache.value[cluster] = overlays
+      return overlays
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      overlayLoading.value = false
+    }
+  }
+
+  /** Enables a private overlay and refreshes the cached list. */
+  async function enableOverlay(cluster: string, request: OverlayRequest): Promise<OverlayStatus> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const status = await api.enableOverlay(cluster, request)
+      delete overlayCache.value[cluster]
+      return status
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Re-applies an overlay against the current member list. */
+  async function reconcileOverlay(cluster: string, name: string): Promise<OverlayStatus> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const status = await api.reconcileOverlay(cluster, name)
+      delete overlayCache.value[cluster]
+      return status
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Tears a private overlay down. */
+  async function disableOverlay(cluster: string, name: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.disableOverlay(cluster, name)
+      delete overlayCache.value[cluster]
     } catch (err) {
       error.value = errorMessage(err)
       throw err
@@ -542,7 +617,32 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
-  /** Runs a guest-side maintenance action inside an instance. */
+    /** Launches an unattended-install VM from an ISO and refreshes instances. */
+  async function launchUnattended(
+    cluster: string,
+    pool: string,
+    isoName: string,
+    request: UnattendedLaunchRequest,
+  ): Promise<UnattendedLaunchResult | null> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const { instance, launch } = await api.launchUnattended(cluster, pool, isoName, request)
+      delete imageCache.value[cluster]
+      if (instance) {
+        items.value = [instance, ...items.value.filter((it) => !(it.cluster === cluster && it.name === instance.name))]
+      }
+      return launch
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+/** Runs a guest-side maintenance action inside an instance. */
   async function runOps(cluster: string, instance: string, request: OpsRequest): Promise<OpsResult> {
     saving.value = true
     error.value = ''
@@ -778,6 +878,28 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
+  /** Updates one device's configuration and caches the returned detail. */
+  async function updateDevice(
+    cluster: string,
+    instance: string,
+    device: string,
+    request: DeviceRequest,
+  ): Promise<InstanceDetail> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const detail = await api.updateDevice(cluster, instance, device, request)
+      details.value[detailKey(cluster, instance)] = detail
+      return detail
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
   /** Lists one directory inside an instance, caching per path. */
   async function fetchFiles(cluster: string, instance: string, dir: string): Promise<void> {
     const key = fileKey(cluster, instance, dir)
@@ -924,6 +1046,8 @@ export const useInstancesStore = defineStore('instances', () => {
     filesLoading,
     saving,
     error,
+    overlayCache,
+    overlayLoading,
     filter,
     lastUpdated,
     containers,
@@ -946,6 +1070,10 @@ export const useInstancesStore = defineStore('instances', () => {
     createNetwork,
     updateNetwork,
     deleteNetwork,
+    fetchOverlays,
+    enableOverlay,
+    reconcileOverlay,
+    disableOverlay,
     createProfile,
     updateProfile,
     deleteProfile,
@@ -959,6 +1087,7 @@ export const useInstancesStore = defineStore('instances', () => {
     importISO,
     deleteISO,
     launchFromISO,
+    launchUnattended,
     runOps,
     rebuildInstance,
     cloneInstance,
@@ -969,6 +1098,7 @@ export const useInstancesStore = defineStore('instances', () => {
     deleteVolume,
     attachDevice,
     detachDevice,
+    updateDevice,
     fetchFiles,
     uploadFile,
     mkdirDir,

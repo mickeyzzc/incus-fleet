@@ -27,6 +27,15 @@ from the language switcher.*
 - Single Go binary with the Vue UI embedded
 - Admin-token login with HttpOnly sessions; bearer tokens for automation
 - Cluster connections pinned to per-deployment client certificates
+- Optional Rust host agent (alpha): one-time enrollment, mTLS WebSocket, facts/heartbeats, and
+  allowlisted host network changes and signed Incus bootstrap through a short-lived privileged
+  helper
+- Agent host and cgroup v2 instance metrics, optional eBPF counters, a one-hour center buffer,
+  JSON/Prometheus/CSV export, Prometheus/VictoriaMetrics remote write and query proxy, HTTP SD,
+  database task leases, certificate rotation/revocation, signed agent upgrade, audit export,
+  native netlink writes, agent-backed node network routing, agent-first onboarding with a
+  one-command installer, an HA task dispatcher with an optional Raft center mesh, automatic
+  certificate renewal, and direct agent metrics scraping
 
 > Live migration preserves guest network state. When clusters use different subnets,
 > renew DHCP inside the guest after the move (or use matching subnets).
@@ -62,6 +71,7 @@ semantics.
 
 - Go 1.27 or newer
 - Bun 1.4 or newer (frontend)
+- Rust 1.99 or newer (optional host agent)
 - Two or more Incus clusters reachable over HTTPS
 - A client certificate trusted by each cluster
 - SQLite (default) or PostgreSQL
@@ -77,8 +87,8 @@ make build
 Generate a client certificate, trust it on every cluster, and write a config:
 
 ```bash
-scripts/gen-client-cert.sh incus-fleet ./certs
-incus config trust add-certificate ./certs/incus-fleet.crt --name incus-fleet
+scripts/gen-client-cert.sh incus-fleet ~/.config/incus-fleet/certs
+incus config trust add-certificate ~/.config/incus-fleet/certs/incus-fleet.crt --name incus-fleet
 install -m 600 deploy/examples/config.sqlite.yaml config.local.yaml
 $EDITOR config.local.yaml
 INCUS_FLEET_AUTH_TOKEN="$(openssl rand -hex 32)" ./bin/incus-fleet -config config.local.yaml -check
@@ -109,6 +119,7 @@ The instance drawer monitors CPU, memory, disk, and network every 3 seconds:
 | Architecture | [docs/architecture.md](docs/architecture.md) | [docs/zh-CN/architecture.md](docs/zh-CN/architecture.md) |
 | Deployment | [docs/deployment.md](docs/deployment.md) | [docs/zh-CN/deployment.md](docs/zh-CN/deployment.md) |
 | HTTP API | [docs/api.md](docs/api.md) | [docs/zh-CN/api.md](docs/zh-CN/api.md) |
+| Roadmap | [docs/roadmap.md](docs/roadmap.md) | [docs/zh-CN/roadmap.md](docs/zh-CN/roadmap.md) |
 | Engineering standards | [docs/standards.md](docs/standards.md) | [docs/zh-CN/standards.md](docs/zh-CN/standards.md) |
 | Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) | [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) |
 | Security policy | [SECURITY.md](SECURITY.md) | [SECURITY.zh-CN.md](SECURITY.zh-CN.md) |

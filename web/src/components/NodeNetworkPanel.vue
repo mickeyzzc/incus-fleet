@@ -1,17 +1,28 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
-import type { NodeNIC } from '@/api/types'
+import type { NodeAudit, NodeNIC, NodeTask } from '@/api/types'
 import { api } from '@/api'
 import { errorMessage } from '@/utils/errors'
+import { formatDateTime } from '@/utils/format'
+
+const props = defineProps<{
+  cluster: string
+  member: string
+}>()
 
 const { t } = useI18n()
 
 const loading = ref(false)
-const snapshot = ref<{ host: string; nics: NodeNIC[]; routes: { destination: string; gateway?: string; device?: string; metric?: string }[]; firewall: { handle: string; rule: string }[]; wifi_scan?: { ssid: string; signal: number; secure: boolean; frequency: number }[]; wifi_device?: string } | null>(null)
+const snapshot = ref<{ host: string; nics: NodeNIC[]; routes: { destination: string; gateway?: string; device?: string; metric?: string }[]; firewall: { handle: string; rule: string }[]; wifi_scan?: { ssid: string; signal: number; secure: boolean; frequency: number }[]; wifi_device?: string; backend?: string } | null>(null)
+
+const historyOpen = ref(false)
+const historyLoading = ref(false)
+const historyTasks = ref<NodeTask[]>([])
+const historyAudit = ref<NodeAudit[]>([])
 
 const addressDialogOpen = ref(false)
 const addressTarget = ref<NodeNIC | null>(null)
@@ -27,19 +38,42 @@ const wifiDialogOpen = ref(false)
 const wifiForm = reactive({ ssid: '', password: '' })
 
 const wifiDevice = computed(() => snapshot.value?.wifi_device ?? '')
+const displayHost = computed(() => snapshot.value?.host || props.member)
 
-onMounted(() => {
-  void refresh()
-})
+watch(
+  [() => props.cluster, () => props.member],
+  () => {
+    snapshot.value = null
+    void refresh()
+  },
+  { immediate: true },
+)
 
 async function refresh(): Promise<void> {
   loading.value = true
   try {
-    snapshot.value = await api.nodeSnapshot(wifiDevice.value || undefined)
+    snapshot.value = await api.nodeSnapshot(props.cluster, props.member, wifiDevice.value || undefined)
   } catch (err) {
     ElMessage.error(errorMessage(err))
   } finally {
     loading.value = false
+  }
+}
+
+async function openHistory(): Promise<void> {
+  historyOpen.value = true
+  historyLoading.value = true
+  try {
+    const [tasks, audit] = await Promise.all([
+      api.nodeTasks(props.cluster, props.member, 50),
+      api.nodeAudit(props.cluster, props.member, 50),
+    ])
+    historyTasks.value = tasks
+    historyAudit.value = audit
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  } finally {
+    historyLoading.value = false
   }
 }
 
@@ -67,7 +101,7 @@ async function toggleNIC(nic: NodeNIC): Promise<void> {
   }
 
   try {
-    await api.nodeNICState(nic.name, up)
+    await api.nodeNICState(props.cluster, props.member, nic.name, up)
     ElMessage.success(t('nodeActions.stateChanged', { name: nic.name }))
     await refresh()
   } catch (err) {
@@ -91,7 +125,7 @@ async function submitAddress(): Promise<void> {
   }
 
   try {
-    await api.nodeApplyAddress(target.name, {
+    await api.nodeApplyAddress(props.cluster, props.member, target.name, {
       dhcp: addressForm.dhcp,
       address: addressForm.dhcp ? undefined : addressForm.address.trim(),
       gateway: addressForm.dhcp ? undefined : addressForm.gateway.trim(),
@@ -107,7 +141,13 @@ async function submitAddress(): Promise<void> {
 
 async function submitRoute(): Promise<void> {
   try {
-    await api.nodeAddRoute(routeForm.destination.trim(), routeForm.gateway.trim(), routeForm.device.trim())
+    await api.nodeAddRoute(
+      props.cluster,
+      props.member,
+      routeForm.destination.trim(),
+      routeForm.gateway.trim(),
+      routeForm.device.trim(),
+    )
     ElMessage.success(t('nodeActions.routeAdded'))
     routeDialogOpen.value = false
     await refresh()
@@ -128,7 +168,7 @@ async function confirmDeleteRoute(destination: string): Promise<void> {
   }
 
   try {
-    await api.nodeDeleteRoute(destination)
+    await api.nodeDeleteRoute(props.cluster, props.member, destination)
     ElMessage.success(t('nodeActions.routeDeleted'))
     await refresh()
   } catch (err) {
@@ -138,7 +178,7 @@ async function confirmDeleteRoute(destination: string): Promise<void> {
 
 async function submitFirewall(): Promise<void> {
   try {
-    await api.nodeAddFirewallRule({
+    await api.nodeAddFirewallRule(props.cluster, props.member, {
       port: firewallForm.port,
       proto: firewallForm.proto,
       action: firewallForm.action,
@@ -164,7 +204,7 @@ async function confirmDeleteFirewall(handle: string): Promise<void> {
   }
 
   try {
-    await api.nodeDeleteFirewallRule(handle)
+    await api.nodeDeleteFirewallRule(props.cluster, props.member, handle)
     ElMessage.success(t('nodeActions.firewallRuleDeleted'))
     await refresh()
   } catch (err) {
@@ -174,7 +214,7 @@ async function confirmDeleteFirewall(handle: string): Promise<void> {
 
 async function connectWiFi(ssid: string): Promise<void> {
   try {
-    await api.nodeWifiConnect(wifiDevice.value, ssid, wifiForm.password)
+    await api.nodeWifiConnect(props.cluster, props.member, wifiDevice.value, ssid, wifiForm.password)
     ElMessage.success(t('nodeActions.wifiConnected', { ssid }))
     wifiDialogOpen.value = false
     wifiForm.password = ''
@@ -203,19 +243,31 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
   <div class="page">
     <div class="page-header">
       <div>
-        <h2>{{ t('nodePage.title') }}</h2>
+        <h3 class="section-title">{{ t('nodePage.title') }}</h3>
         <p class="subtitle">
-          {{ t('nodePage.subtitle', { host: snapshot?.host || '' }) }}
+          {{ t('nodePage.subtitle', { host: displayHost }) }}
         </p>
+        <el-tag v-if="snapshot?.backend" size="small" type="info">
+          {{ t('nodePage.backend', { backend: snapshot.backend }) }}
+        </el-tag>
       </div>
       <div class="page-actions">
+        <el-button :loading="historyLoading" @click="openHistory">
+          {{ t('nodePage.history') }}
+        </el-button>
         <el-button :icon="Refresh" :loading="loading" @click="refresh">
           {{ t('common.refresh') }}
         </el-button>
       </div>
     </div>
 
-    <el-alert class="fleet-alert" type="warning" :closable="false" show-icon :title="t('nodePage.warning')" />
+    <el-alert
+      class="fleet-alert"
+      type="warning"
+      :closable="false"
+      show-icon
+      :title="t('nodePage.warning', { host: displayHost })"
+    />
 
     <section class="panel">
       <div class="panel-body">
@@ -386,10 +438,10 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         </el-form-item>
         <template v-if="!addressForm.dhcp">
           <el-form-item :label="t('nodePage.addressCidr')">
-            <el-input v-model="addressForm.address" placeholder="10.62.0.50" />
+            <el-input v-model="addressForm.address" placeholder="10.0.0.50" />
           </el-form-item>
           <el-form-item :label="t('network.networkGateway')">
-            <el-input v-model="addressForm.gateway" placeholder="10.62.0.1" />
+            <el-input v-model="addressForm.gateway" placeholder="10.0.0.1" />
           </el-form-item>
         </template>
         <el-form-item :label="t('nodePage.persist')">
@@ -406,13 +458,13 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
     <el-dialog v-model="routeDialogOpen" :title="t('nodePage.addRoute')" width="520px" destroy-on-close>
       <el-form label-position="top">
         <el-form-item :label="t('nodePage.destination')">
-          <el-input v-model="routeForm.destination" placeholder="10.63.0.0/24" />
+          <el-input v-model="routeForm.destination" placeholder="10.0.1.0/24" />
         </el-form-item>
         <el-form-item :label="t('network.networkGateway')">
-          <el-input v-model="routeForm.gateway" placeholder="10.62.0.1" />
+          <el-input v-model="routeForm.gateway" placeholder="10.0.0.1" />
         </el-form-item>
         <el-form-item :label="t('nodePage.device')">
-          <el-input v-model="routeForm.device" placeholder="enp1s0" />
+          <el-input v-model="routeForm.device" placeholder="eth0" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -459,6 +511,39 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         <el-button type="primary" @click="connectWiFi(wifiForm.ssid)">{{ t('nodeActions.wifiConnect') }}</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="historyOpen" :title="t('nodePage.historyTitle', { host: displayHost })" width="860px">
+      <div v-loading="historyLoading">
+        <h4 class="section-title">{{ t('nodePage.tasks') }}</h4>
+        <el-table :data="historyTasks" size="small" stripe :empty-text="t('common.none')">
+          <el-table-column :label="t('nodePage.taskType')" min-width="170">
+            <template #default="{ row }">{{ row.type }}</template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.state')" width="120">
+            <template #default="{ row }">{{ row.state }}</template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.time')" min-width="180">
+            <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+          </el-table-column>
+        </el-table>
+
+        <h4 class="section-title history-heading">{{ t('nodePage.audit') }}</h4>
+        <el-table :data="historyAudit" size="small" stripe :empty-text="t('common.none')">
+          <el-table-column :label="t('nodePage.action')" min-width="170">
+            <template #default="{ row }">{{ row.action }}</template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.backendLabel')" width="110">
+            <template #default="{ row }">{{ row.backend }}</template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.result')" width="120">
+            <template #default="{ row }">{{ row.result }}</template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.time')" min-width="180">
+            <template #default="{ row }">{{ formatDateTime(row.at) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -471,5 +556,9 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
   margin-left: 10px;
   color: var(--fleet-ink-soft, var(--el-text-color-secondary));
   font-size: 12px;
+}
+
+.history-heading {
+  margin-top: 20px;
 }
 </style>

@@ -13,6 +13,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Runs first: a leaked credential must fail the build before any artifact is
+  # produced, and must fail on forks where hooks cannot be installed.
+  secrets:
+    name: Secret and infrastructure scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # history scan needs every commit
+
+      - name: Scan tracked files
+        run: ./scripts/secret-scan.sh --all
+
+      - name: Scan history for private keys
+        run: ./scripts/secret-scan.sh --history
+
   backend:
     name: Go build, test, coverage
     runs-on: ubuntu-latest
@@ -32,7 +48,7 @@ jobs:
 
       - name: Coverage (90% gate)
         run: |
-          packages=$(go list ./internal/... | grep -v '/internal/testutil' | paste -sd, -)
+          packages=$(go list ./internal/... | grep -v -E '/internal/(testutil|agentpb|prompb)' | paste -sd, -)
           go test -coverpkg="$packages" -coverprofile=coverage.out ./cmd/... ./internal/... ./web
           total=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+')
           echo "Go coverage: ${total}%"
@@ -65,6 +81,28 @@ jobs:
 
       - name: Build
         run: bun run build
+
+  agent:
+    name: Rust agent format, lint, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format
+        run: cargo fmt --manifest-path agent/Cargo.toml -- --check
+
+      - name: Clippy
+        run: cargo clippy --manifest-path agent/Cargo.toml --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --manifest-path agent/Cargo.toml
 
   lint:
     name: golangci-lint

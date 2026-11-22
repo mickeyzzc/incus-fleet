@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { defineComponent, h } from 'vue'
-import NodeView from './NodeView.vue'
+import NodeNetworkPanel from '@/components/NodeNetworkPanel.vue'
 import { api } from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -189,7 +189,7 @@ describe('NodeView', () => {
         mac: 'aa:bb:cc:dd:ee:ff',
         mtu: 1500,
         addresses: [
-          { family: 'inet', address: '10.62.0.50', prefixlen: 24 },
+          { family: 'inet', address: '10.0.0.50', prefixlen: 24 },
           { family: 'inet6', address: 'fe80::1', prefixlen: 64 },
         ],
         wifi: null,
@@ -205,8 +205,8 @@ describe('NodeView', () => {
       },
     ],
     routes: [
-      { destination: '10.62.0.0/24', gateway: '', device: 'eth0', metric: '100' },
-      { destination: 'default', gateway: '10.62.0.1', device: 'eth0', metric: '100' },
+      { destination: '10.0.0.0/24', gateway: '', device: 'eth0', metric: '100' },
+      { destination: 'default', gateway: '10.0.0.1', device: 'eth0', metric: '100' },
     ],
     firewall: [
       { handle: '42', rule: 'tcp dport 22 accept comment "fleet_rule"' },
@@ -218,11 +218,12 @@ describe('NodeView', () => {
     ],
     wifi_device: 'wlan0',
     capabilities: ['nics', 'routes', 'firewall'],
+    backend: 'local',
   }
 
-  const mountView = (props = {}) => {
-    return mount(NodeView, {
-      props,
+  const mountView = () => {
+    return mount(NodeNetworkPanel, {
+      props: { cluster: 'c1', member: 'n1' },
       global: {
         stubs: {
           ElButton: ElButtonStub,
@@ -250,15 +251,52 @@ describe('NodeView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     ;(api.nodeSnapshot as any).mockResolvedValue(mockSnapshot)
+    ;(api.nodeTasks as any).mockResolvedValue([
+      {
+        id: 'task-1',
+        cluster: 'c1',
+        member: 'n1',
+        type: 'node.route.add',
+        state: 'succeeded',
+        created_at: '2026-11-18T00:00:00Z',
+      },
+    ])
+    ;(api.nodeAudit as any).mockResolvedValue([
+      {
+        id: 'audit-1',
+        at: '2026-11-18T00:00:01Z',
+        backend: 'local',
+        cluster: 'c1',
+        member: 'n1',
+        action: 'node.route.add',
+        result: 'succeeded',
+      },
+    ])
     ;(ElMessageBox.confirm as any).mockResolvedValue('confirm')
   })
 
   it('fetches snapshot on mount', async () => {
-    mountView()
+    const wrapper = mountView()
     await nextTick()
     await vi.dynamicImportSettled?.()
     await nextTick()
-    expect(api.nodeSnapshot).toHaveBeenCalledWith(undefined)
+    expect(api.nodeSnapshot).toHaveBeenCalledWith('c1', 'n1', undefined)
+    expect(wrapper.text()).toContain('Backend: local')
+  })
+
+  it('opens host history and renders tasks and audit', async () => {
+    const wrapper = mountView()
+    await nextTick()
+    await vi.dynamicImportSettled?.()
+    await nextTick()
+
+    await vmOf(wrapper).openHistory()
+    await nextTick()
+
+    expect(api.nodeTasks).toHaveBeenCalledWith('c1', 'n1', 50)
+    expect(api.nodeAudit).toHaveBeenCalledWith('c1', 'n1', 50)
+    expect(wrapper.text()).toContain('node.route.add')
+    expect(wrapper.text()).toContain('succeeded')
   })
 
   it('stateTag returns correct tag types', async () => {
@@ -278,7 +316,7 @@ describe('NodeView', () => {
 
     const nic = { name: 'eth0', state: 'up', kind: 'ethernet', addresses: [] }
     await vmOf(wrapper).toggleNIC(nic)
-    expect(api.nodeNICState).toHaveBeenCalledWith('eth0', false)
+    expect(api.nodeNICState).toHaveBeenCalledWith('c1', 'n1', 'eth0', false)
     expect(ElMessage.success).toHaveBeenCalled()
   })
 
@@ -290,7 +328,7 @@ describe('NodeView', () => {
 
     const nic = { name: 'wlan0', state: 'down', kind: 'wifi', addresses: [] }
     await vmOf(wrapper).toggleNIC(nic)
-    expect(api.nodeNICState).toHaveBeenCalledWith('wlan0', true)
+    expect(api.nodeNICState).toHaveBeenCalledWith('c1', 'n1', 'wlan0', true)
     expect(ElMessage.success).toHaveBeenCalled()
   })
 
@@ -322,12 +360,12 @@ describe('NodeView', () => {
       name: 'eth0',
       state: 'up',
       kind: 'ethernet',
-      addresses: [{ family: 'inet', address: '10.62.0.50', prefixlen: 24 }],
+      addresses: [{ family: 'inet', address: '10.0.0.50', prefixlen: 24 }],
     }
     vmOf(wrapper).openAddressDialog(nic)
     expect(vmOf(wrapper).addressTarget).toEqual(nic)
     expect(vmOf(wrapper).addressForm.dhcp).toBe(false)
-    expect(vmOf(wrapper).addressForm.address).toBe('10.62.0.50')
+    expect(vmOf(wrapper).addressForm.address).toBe('10.0.0.50')
     expect(vmOf(wrapper).addressDialogOpen).toBe(true)
   })
 
@@ -341,7 +379,7 @@ describe('NodeView', () => {
     vmOf(wrapper).addressForm.dhcp = true
     await vmOf(wrapper).submitAddress()
 
-    expect(api.nodeApplyAddress).toHaveBeenCalledWith('eth0', {
+    expect(api.nodeApplyAddress).toHaveBeenCalledWith('c1', 'n1', 'eth0', {
       dhcp: true,
       address: undefined,
       gateway: undefined,
@@ -359,14 +397,14 @@ describe('NodeView', () => {
 
     vmOf(wrapper).addressTarget = { name: 'eth0', state: 'up', kind: 'ethernet', addresses: [] }
     vmOf(wrapper).addressForm.dhcp = false
-    vmOf(wrapper).addressForm.address = '10.63.0.50'
-    vmOf(wrapper).addressForm.gateway = '10.63.0.1'
+    vmOf(wrapper).addressForm.address = '10.0.1.50'
+    vmOf(wrapper).addressForm.gateway = '10.0.1.1'
     await vmOf(wrapper).submitAddress()
 
-    expect(api.nodeApplyAddress).toHaveBeenCalledWith('eth0', {
+    expect(api.nodeApplyAddress).toHaveBeenCalledWith('c1', 'n1', 'eth0', {
       dhcp: false,
-      address: '10.63.0.50',
-      gateway: '10.63.0.1',
+      address: '10.0.1.50',
+      gateway: '10.0.1.1',
       persist: true,
     })
   })
@@ -377,12 +415,12 @@ describe('NodeView', () => {
     await vi.dynamicImportSettled?.()
     await nextTick()
 
-    vmOf(wrapper).routeForm.destination = '10.64.0.0/24'
-    vmOf(wrapper).routeForm.gateway = '10.62.0.1'
+    vmOf(wrapper).routeForm.destination = '203.0.113.0/24'
+    vmOf(wrapper).routeForm.gateway = '10.0.0.1'
     vmOf(wrapper).routeForm.device = 'eth0'
     await vmOf(wrapper).submitRoute()
 
-    expect(api.nodeAddRoute).toHaveBeenCalledWith('10.64.0.0/24', '10.62.0.1', 'eth0')
+    expect(api.nodeAddRoute).toHaveBeenCalledWith('c1', 'n1', '203.0.113.0/24', '10.0.0.1', 'eth0')
     expect(ElMessage.success).toHaveBeenCalled()
     expect(vmOf(wrapper).routeDialogOpen).toBe(false)
   })
@@ -393,8 +431,8 @@ describe('NodeView', () => {
     await vi.dynamicImportSettled?.()
     await nextTick()
 
-    await vmOf(wrapper).confirmDeleteRoute('10.62.0.0/24')
-    expect(api.nodeDeleteRoute).toHaveBeenCalledWith('10.62.0.0/24')
+    await vmOf(wrapper).confirmDeleteRoute('10.0.0.0/24')
+    expect(api.nodeDeleteRoute).toHaveBeenCalledWith('c1', 'n1', '10.0.0.0/24')
     expect(ElMessage.success).toHaveBeenCalled()
   })
 
@@ -410,7 +448,7 @@ describe('NodeView', () => {
     vmOf(wrapper).firewallForm.comment = 'test rule'
     await vmOf(wrapper).submitFirewall()
 
-    expect(api.nodeAddFirewallRule).toHaveBeenCalledWith({
+    expect(api.nodeAddFirewallRule).toHaveBeenCalledWith('c1', 'n1', {
       port: 8080,
       proto: 'tcp',
       action: 'accept',
@@ -427,7 +465,7 @@ describe('NodeView', () => {
     await nextTick()
 
     await vmOf(wrapper).confirmDeleteFirewall('42')
-    expect(api.nodeDeleteFirewallRule).toHaveBeenCalledWith('42')
+    expect(api.nodeDeleteFirewallRule).toHaveBeenCalledWith('c1', 'n1', '42')
     expect(ElMessage.success).toHaveBeenCalled()
   })
 
@@ -441,7 +479,7 @@ describe('NodeView', () => {
     vmOf(wrapper).wifiForm.password = 'password123'
     await vmOf(wrapper).connectWiFi('TestWiFi')
 
-    expect(api.nodeWifiConnect).toHaveBeenCalledWith('wlan0', 'TestWiFi', 'password123')
+    expect(api.nodeWifiConnect).toHaveBeenCalledWith('c1', 'n1', 'wlan0', 'TestWiFi', 'password123')
     expect(ElMessage.success).toHaveBeenCalled()
     expect(vmOf(wrapper).wifiDialogOpen).toBe(false)
     expect(vmOf(wrapper).wifiForm.password).toBe('')
@@ -457,7 +495,7 @@ describe('NodeView', () => {
     ;(api.nodeWifiConnect as any).mockResolvedValueOnce(undefined)
 
     await vmOf(wrapper).connectSavedNetwork('SavedWiFi')
-    expect(api.nodeWifiConnect).toHaveBeenCalledWith('wlan0', 'SavedWiFi', '')
+    expect(api.nodeWifiConnect).toHaveBeenCalledWith('c1', 'n1', 'wlan0', 'SavedWiFi', '')
   })
 
   it('refresh calls api.nodeSnapshot', async () => {
@@ -468,7 +506,7 @@ describe('NodeView', () => {
 
     ;(api.nodeSnapshot as any).mockClear()
     await vmOf(wrapper).refresh()
-    expect(api.nodeSnapshot).toHaveBeenCalledWith('wlan0')
+    expect(api.nodeSnapshot).toHaveBeenCalledWith('c1', 'n1', 'wlan0')
   })
 
   it('shows error when snapshot fetch fails', async () => {
@@ -520,13 +558,13 @@ describe('NodeView template interactions', () => {
         name: 'eth0',
         state: 'up',
         kind: 'ethernet',
-        addresses: [{ family: 'inet', address: '10.62.0.50', prefixlen: 24 }],
+        addresses: [{ family: 'inet', address: '10.0.0.50', prefixlen: 24 }],
       },
       { name: 'wlan0', state: 'down', kind: 'wifi', addresses: [] },
     ],
     routes: [
-      { destination: '10.62.0.0/24', gateway: '', device: 'eth0', metric: '100' },
-      { destination: 'default', gateway: '10.62.0.1', device: 'eth0', metric: '100' },
+      { destination: '10.0.0.0/24', gateway: '', device: 'eth0', metric: '100' },
+      { destination: 'default', gateway: '10.0.0.1', device: 'eth0', metric: '100' },
     ],
     firewall: [{ handle: '42', rule: 'tcp dport 22 accept comment "fleet_rule"' }],
     wifi_scan: [
@@ -537,7 +575,8 @@ describe('NodeView template interactions', () => {
   }
 
   function build() {
-    return mount(NodeView, {
+    return mount(NodeNetworkPanel, {
+      props: { cluster: 'c1', member: 'n1' },
       global: {
         stubs: {
           ElButton: ElButtonStub,
@@ -565,6 +604,27 @@ describe('NodeView template interactions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     ;(api.nodeSnapshot as any).mockResolvedValue(mockSnapshot)
+    ;(api.nodeTasks as any).mockResolvedValue([
+      {
+        id: 'task-1',
+        cluster: 'c1',
+        member: 'n1',
+        type: 'node.route.add',
+        state: 'succeeded',
+        created_at: '2026-11-18T00:00:00Z',
+      },
+    ])
+    ;(api.nodeAudit as any).mockResolvedValue([
+      {
+        id: 'audit-1',
+        at: '2026-11-18T00:00:01Z',
+        backend: 'local',
+        cluster: 'c1',
+        member: 'n1',
+        action: 'node.route.add',
+        result: 'succeeded',
+      },
+    ])
     ;(ElMessageBox.confirm as any).mockResolvedValue('confirm')
   })
 
@@ -584,7 +644,7 @@ describe('NodeView template interactions', () => {
     // toggle first (fresh DOM), then open the address dialog
     await firstRow.findAll('button')[1]!.trigger('click')
     await new Promise((r) => setTimeout(r, 10))
-    expect(api.nodeNICState).toHaveBeenCalledWith('eth0', false)
+    expect(api.nodeNICState).toHaveBeenCalledWith('c1', 'n1', 'eth0', false)
 
     // re-query after the refresh re-rendered the table
     const refreshedRow = wrapper.findAll('.el-table__row')[0]!
@@ -601,15 +661,15 @@ describe('NodeView template interactions', () => {
     expect(vmOf(wrapper).routeDialogOpen).toBe(true)
 
     const routeDialog = wrapper.findAll('.el-dialog').find((d) => d.text().includes('Add route'))
-    await routeDialog!.find('input[placeholder="10.63.0.0/24"]').setValue('10.64.0.0/24')
-    await routeDialog!.find('input[placeholder="10.62.0.1"]').setValue('10.62.0.1')
-    await routeDialog!.find('input[placeholder="enp1s0"]').setValue('eth0')
+    await routeDialog!.find('input[placeholder="10.0.1.0/24"]').setValue('203.0.113.0/24')
+    await routeDialog!.find('input[placeholder="10.0.0.1"]').setValue('10.0.0.1')
+    await routeDialog!.find('input[placeholder="eth0"]').setValue('eth0')
 
     const inputs = wrapper.findAll('input')
     const create = routeDialog!.findAll('button').filter((b) => b.text().includes('Create'))
     await create[0]!.trigger('click')
     await new Promise((r) => setTimeout(r, 10))
-    expect(api.nodeAddRoute).toHaveBeenCalledWith('10.64.0.0/24', '10.62.0.1', 'eth0')
+    expect(api.nodeAddRoute).toHaveBeenCalledWith('c1', 'n1', '203.0.113.0/24', '10.0.0.1', 'eth0')
 
     // dialog Cancel closes the route dialog
     const routeFooter = wrapper.findAll('.el-dialog__footer').find((f) => f.text().includes('Create'))
@@ -626,12 +686,12 @@ describe('NodeView template interactions', () => {
     // The routes table is the second rendered table; find the delete button inside a row
     const rows = wrapper.findAll('.el-table__row')
     const deleteButton = rows
-      .filter((r) => r.text().includes('10.62.0.0/24'))
+      .filter((r) => r.text().includes('10.0.0.0/24'))
       .map((r) => r.findAll('button'))
       .flat()
       .find((b) => b.text().includes('Delete'))!
     await deleteButton!.trigger('click')
-    expect(api.nodeDeleteRoute).toHaveBeenCalledWith('10.62.0.0/24')
+    expect(api.nodeDeleteRoute).toHaveBeenCalledWith('c1', 'n1', '10.0.0.0/24')
   })
 
   it('clicks firewall add and per-row delete', async () => {
@@ -651,6 +711,8 @@ describe('NodeView template interactions', () => {
     await create[0]!.trigger('click')
     await new Promise((r) => setTimeout(r, 10))
     expect(api.nodeAddFirewallRule).toHaveBeenCalledWith(
+      'c1',
+      'n1',
       expect.objectContaining({ port: 8080 }),
     )
 
@@ -662,7 +724,7 @@ describe('NodeView template interactions', () => {
       .flat()
       .find((b) => b.text().includes('Delete'))!
     await deleteButton!.trigger('click')
-    expect(api.nodeDeleteFirewallRule).toHaveBeenCalledWith('42')
+    expect(api.nodeDeleteFirewallRule).toHaveBeenCalledWith('c1', 'n1', '42')
   })
 
   it('clicks wifi connect for secure and open networks', async () => {
@@ -686,7 +748,7 @@ describe('NodeView template interactions', () => {
     const openConnect = openRow!.findAll('button').find((b) => b.text().includes('Connect'))!
     await openConnect!.trigger('click')
     expect(ElMessageBox.confirm).toHaveBeenCalled()
-    expect(api.nodeWifiConnect).toHaveBeenCalledWith('wlan0', 'GuestWiFi', '')
+    expect(api.nodeWifiConnect).toHaveBeenCalledWith('c1', 'n1', 'wlan0', 'GuestWiFi', '')
   })
 
   it('toggles address radio and persist switch', async () => {
@@ -710,12 +772,12 @@ describe('NodeView template interactions', () => {
     const row = wrapper.findAll('.el-table__row')[0]!
     await row.findAll('button')[0]!.trigger('click')
 
-    await wrapper.find('input[placeholder="10.62.0.50"]').setValue('10.63.0.77')
-    await wrapper.find('input[placeholder="10.62.0.1"]').setValue('10.63.0.1')
+    await wrapper.find('input[placeholder="10.0.0.50"]').setValue('10.0.1.77')
+    await wrapper.find('input[placeholder="10.0.0.1"]').setValue('10.0.1.1')
 
     const save = wrapper.findAll('button').find((b) => b.text().includes('Save'))!
     await save.trigger('click')
-    expect(api.nodeApplyAddress).toHaveBeenCalledWith('eth0', expect.objectContaining({ address: '10.63.0.77' }))
+    expect(api.nodeApplyAddress).toHaveBeenCalledWith('c1', 'n1', 'eth0', expect.objectContaining({ address: '10.0.1.77' }))
 
     // re-open and cancel
     await row.findAll('button')[0]!.trigger('click')
@@ -756,7 +818,7 @@ describe('NodeView template interactions', () => {
     expect(api.nodeNICState).not.toHaveBeenCalled()
 
     ;(ElMessageBox.confirm as any).mockRejectedValueOnce('cancel')
-    await vmOf(wrapper).confirmDeleteRoute('10.62.0.0/24')
+    await vmOf(wrapper).confirmDeleteRoute('10.0.0.0/24')
     expect(api.nodeDeleteRoute).not.toHaveBeenCalled()
 
     ;(ElMessageBox.confirm as any).mockRejectedValueOnce('cancel')

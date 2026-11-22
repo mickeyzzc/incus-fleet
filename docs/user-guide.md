@@ -29,14 +29,84 @@ Prerequisites:
 12. [Shared asset library and batch operations](#shared-asset-library-and-batch-operations)
 13. [Resource monitoring](#resource-monitoring)
 14. [Storage pools and networks](#storage-pools-and-networks)
-15. [FAQ](#faq)
+15. [Private interconnect networks](#private-interconnect-networks)
+16. [FAQ](#faq)
 
 ## Sign in and choose a language
 
-1. Open the fleet URL, enter the admin token, and sign in. Sessions last 12 hours; sign in
-   again after they expire.
-2. Use the gear icon in the top-right corner → **Language** to switch between English and
+1. Open the fleet URL, enter your **username and password**, and sign in. Sessions last 12
+   hours; sign in again after they expire. If a session expires mid-page, fleet routes to the
+   sign-in view automatically and returns you to the original page afterwards. The current
+   account name appears in the top bar.
+2. Create the first administrator in one of two ways:
+   - set `INCUS_FLEET_BOOTSTRAP_ADMIN_USERNAME` and `INCUS_FLEET_BOOTSTRAP_ADMIN_PASSWORD`
+     in `incus-fleet.env` and restart the service; or
+   - sign in with the shared admin token and create one under **Users**.
+   The shared token stops working as soon as any local account exists.
+3. Use the gear icon in the top-right corner → **Language** to switch between English and
    中文. The choice applies immediately and is stored in the browser.
+
+## Users and roles
+
+Only administrators see **Users** in the sidebar.
+
+- **Roles**: Administrator (everything), Operator (mutate instances and nodes, cannot manage
+  users), Viewer (read-only).
+- **Create**: username, password (at least 8 characters), role; optionally mark the account
+  disabled or require a password change at next sign-in.
+- **Edit**: change the role, reset the password, enable or disable. Leaving the password
+  blank keeps the current one.
+- **Delete**: confirmed before it happens. The last administrator cannot be deleted or
+  demoted; the API returns a conflict.
+- **Authorization is server-side**: a viewer is refused (403) even when it calls the API
+  directly and bypasses the UI.
+
+![Users page: account list with roles and status](images/auth/users-redacted.png)
+
+## Remote desktop
+
+The **Remote desktop** button opens a live graphical console for running virtual machines
+directly in the browser. It works without any VNC or SPICE support in the host's QEMU: the
+fleet attaches a second QEMU monitor (`raw.qemu.conf`, QMP control mode) to the VM, polls
+framebuffer screenshots through it, and injects keyboard and pointer events. The first
+preparation restarts a running VM once; after that opening the console is immediate and
+idempotent.
+
+In the console window: click into the picture to give it keyboard focus (arrow keys, Enter,
+Ctrl+Alt+Del all reach the guest), click or drag inside it to move the pointer and press
+buttons, and scroll to send wheel events. The picture refreshes automatically about once a
+second. The toolbar also shows the guest power state with **Start**, **Restart**, and **Stop**
+buttons, so a stopped VM can be booted without leaving the console. Containers have no display
+device and do not offer this button.
+
+## Installing the incus agent
+
+Systems installed from an arbitrary ISO (for example fnOS) do not carry Incus's in-guest agent,
+which is why the exec terminal, file manager, and instance metrics stay unavailable on such VMs.
+When the drawer detects a virtual machine without the agent, it shows an **Install agent**
+button: enter the guest's SSH credentials and Fleet runs Incus's official `install.sh` inside the
+guest (the agent ships on a read-only `config` share Incus mounts into every VM). The
+credentials are used for that one session and never stored; sudo escalation is supported for
+non-root users.
+
+Manual fallback inside the guest, if you prefer:
+
+```
+mount -t 9p config /mnt
+/mnt/install.sh
+```
+
+The installer only supports systemd guests with 9p support in the kernel (Debian, Ubuntu, and
+derivatives qualify). Windows VMs need the virtio-win agent flow and are not covered yet.
+
+## Online terminal
+
+Open the instance drawer and click **Terminal**. Containers start in **Command** mode (Incus
+has no serial console for containers) and virtual machines start in **Console** mode.
+Submitting a command works with Enter or the **Start** button, and the output is written into
+the terminal above.
+
+![Online terminal running a command and returning the kernel and disk usage](images/auth/terminal-redacted.png)
 
 ## Tour the dashboard
 
@@ -45,6 +115,9 @@ The dashboard opens after sign-in and shows:
 - Online status, Incus version, and instance count for every cluster;
 - Total instances and the running/stopped split;
 - Resource overview (CPU, memory, storage).
+
+The status refreshes automatically every 15 seconds while the tab is visible, so a member
+coming back online appears without a manual reload.
 
 ![Fleet dashboard](images-en/05-dashboard-resources.png)
 
@@ -56,7 +129,8 @@ profiles, and members.
 ## Images: import and distribute
 
 Fleet uploads a local image file to one cluster, then distributes it to other clusters with
-one click: upload once, use everywhere.
+one click: upload once, use everywhere. Deleting an image on a cluster asks for confirmation
+first — it cannot be undone.
 
 ### Step 1: prepare the image files
 
@@ -119,7 +193,83 @@ and boot a blank virtual machine from the ISO to install the OS.
 5. When installation finishes, shut the VM down, detach the ISO in the device panel (or
    delete and recreate the VM), then boot into the installed system.
 
-ISO files live in the storage pool and can be deleted from the list at any time.
+### Unattended installation
+
+The interactive path above needs keyboard input in the remote desktop. **Unattended install**
+does the whole installation without a single keystroke: Fleet ships your answer file on the
+installation media, forces the installer's default boot entry, and watches for completion.
+
+1. In the **Create VM from ISO** dialog, fill in the VM name as usual, then enable
+   **Unattended install**.
+2. Pick the **installer profile** (Fleet guesses one from the ISO name):
+
+   ![Unattended install options in the Create VM from ISO dialog](images/iso/unattended-dialog.png)
+
+   - **Debian / d-i preseed** — Debian and derivatives shipping the debian-installer;
+   - **Ubuntu autoinstall (Subiquity)** — Ubuntu server 20.04+ ISOs;
+   - **RHEL / Fedora kickstart** — RHEL, Rocky, Alma, CentOS Stream, Fedora;
+   - **Generic cloud-init (NoCloud seed)** — custom ISOs that honor cloud-init.
+3. Supply the answers in one of three ways:
+   - Fill the template fields: hostname (defaults to the VM name), user account, password,
+     timezone, target disk, locale, and keyboard layout;
+   - Pick a saved **Answer profile** from the dropdown — configurations are managed under the
+     **Answer profiles** page, can be marked as the default for their installer, and are applied
+     automatically when a launch supplies no answer content;
+   - Enable **Provide my own answer file** and paste a complete preseed.cfg / ks.cfg / user-data.
+
+   **Preview answer file** renders exactly what will be shipped.
+4. Click **Start unattended install**. What happens next:
+   - Debian/RHEL profiles are *remastered*: the answer file is added to the ISO and the GRUB
+     configuration gains the unattended kernel arguments plus a 10-second default boot. The
+     original ISO stays untouched; a derived `<iso>-<profile>-auto` volume is created instead.
+   - Ubuntu/generic profiles keep the installer ISO untouched and attach a generated NoCloud
+     seed ISO (`cidata-<vm>`) as a second media.
+5. Watch the progress on the **Remote desktop** — the installer runs from boot to finish with
+   no input. The patched boot menu boots itself after 10 seconds:
+
+   ![GRUB menu of the remastered Debian installer, booting the default entry automatically](images/iso/unattended-grub-menu.png)
+
+   When it completes, the VM powers off, Fleet automatically detaches the installation media
+   and deletes the derived volumes (including the answer-file copies), and you can simply
+   start the VM to boot the installed system.
+
+   ![Debian installer running unattended: installing the base system](images/iso/unattended-installing.png)
+
+Notes and requirements:
+
+- Unattended install is **fully self-contained**: everything runs inside Fleet and the cluster.
+  No external downloader, artifact service, or internet access is required — it works in isolated
+  cluster networks. Images only need to be present in the asset library (they can be uploaded
+  from a local file, so an external download helper is optional and never a prerequisite).
+- **xorriso** must be installed on the fleet server (`apt install xorriso`); it remasters the
+  installer ISO and builds the seed media. The scratch directory `unattended.work_dir`
+  (default `data/unattended` relative to the server working directory) needs several GB free
+  for large ISOs.
+- The remaster runs on the cluster member that stores the ISO; the VM is created on the same
+  member.
+- Debian/RHEL remaster profiles carry the answer file inside the derived ISO — treat those
+  volumes like any media containing credentials. They are deleted automatically after the
+  install; if the watch window (6 h) expires, detach the media and delete the derived volume
+  from the storage panel.
+- Generic NoCloud installs (custom ISOs) have no deterministic "finished" signal; media stays
+  attached until you detach it or the watch window expires.
+
+ISO files live in the storage pool and can be deleted from the list at any time. Downloaded
+installer images (for example the current Debian netinst and Arch Linux ISOs) appear in the
+shared asset library once uploaded:
+
+![Imported installer ISOs in the shared asset library](images/iso/asset-library-isos.png)
+
+The installer boots into a GRUB menu or the distribution's splash screen; the remote desktop
+follows the framebuffer size automatically.
+
+![Debian installer booting from an ISO](images-en/iso-install-grub.png)
+
+*ISO installer boot menu in the browser remote desktop (English UI).*
+
+![Installer splash screen](images-en/iso-install-boot.png)
+
+*The same VM after the graphical installer started; resolution adapted automatically.*
 
 ## Create an instance
 
@@ -135,16 +285,24 @@ Open a cluster → **Instances** → **Create instance**. Key fields:
 
 ### Choosing a network: same-subnet IPs
 
+The network dropdown groups its options so heterogeneous clusters stay readable: managed
+networks (usable on every member) come first, then one group of physical NICs per member.
+The cluster network table shows a **Members** column with the same information; bond member
+NICs are hidden from the parent candidates because a macvlan over a bond slave cannot come
+up.
+
+![Cluster network table with the Members column](images-en/networks-members.png)
+
 The instance address depends on the selected network:
 
 - **Managed bridge** (for example `incusbr0`): the instance joins the Incus internal NAT
   subnet (for example `10.x.x.x`). Outbound traffic is NATed and the instance is not directly
   reachable from outside.
 - **Physical NIC (macvlan)**: NICs without the managed marker (for example the host NIC
-  `eth0`). The instance is bridged directly onto the physical LAN via macvlan and **gets a
-  DHCP address from the same subnet as the host** (for example, if the host is on
-  `198.51.100.0/24`, the instance receives `198.51.100.x`). Other LAN devices can reach the
-  instance directly.
+  `eth0`, listed under the member that owns it). The instance is bridged directly onto the
+  physical LAN via macvlan and **gets a DHCP address from the same subnet as the host** (for
+  example, if the host is on `198.51.100.0/24`, the instance receives `198.51.100.x`). Other
+  LAN devices can reach the instance directly.
 
 To give an instance an address on the host subnet, select the **physical NIC** (parent is the
 host NIC name) when creating it. Do not enter a static IP: macvlan addresses come from the LAN
@@ -152,6 +310,16 @@ DHCP server.
 
 After creation, confirm in the address column that the IP is in the expected subnet. If no
 address appears, check the switch/router DHCP service and the NIC bridge state.
+
+> **Bonded hosts:** if the physical NIC is a slave of a bond, it cannot be used as a macvlan
+> parent (`Failed to start device "eth0": device or resource busy`). Select the bond interface
+> itself instead, or attach the NIC later from the instance's **Devices** tab as a macvlan
+> device with the bond as its parent. The edit form's Network field only accepts managed
+> Incus networks; use the Devices tab for physical parents.
+
+![Instance resource limits in the create form](images-en/instance-create-form-resources.png)
+
+*CPU, memory, root disk and network selection in the create/edit form (English UI).*
 
 ## Day-to-day instance management
 
@@ -167,10 +335,31 @@ From the instance list or the detail drawer you can:
     normal shutdown).
 - **File management**: browse the instance filesystem, upload, download, create directories,
   and delete files.
-- **Devices**: attach a disk (storage volume or host path) or a second NIC; detach devices in
-  the same panel.
-- **Delete instance**: asks for confirmation and can delete the instance's storage volumes at
-  the same time.
+- **Devices**: attach a disk (storage volume or host path) or a second NIC; edit any attached
+  device (switch networks, change static addresses, resize disks — the merge keeps keys the
+  form does not manage, such as boot priority); expand a row to see the full device
+  configuration; detach devices in the same panel. Clearing a NIC address falls back to DHCP.
+  Switching a NIC to a managed network rewrites legacy `nictype`/`parent` devices.
+- **Delete instance**: asks for confirmation and offers a checkbox to delete the instance's
+  attached storage volumes in the same step (shared ISO installer assets are kept).
+
+![Instance devices panel](images-en/instance-devices-panel.png)
+
+*Devices tab: root disk, a macvlan NIC and an attached custom volume (English UI).*
+
+## Remote desktop
+
+The **Remote desktop** button opens a live graphical console for running virtual machines
+directly in the browser. It works without any VNC or SPICE support in the host's QEMU: the
+fleet attaches a second QEMU monitor (`raw.qemu.conf`, QMP control mode) to the VM, polls
+framebuffer screenshots through it, and injects keyboard and pointer events. The first
+preparation restarts a running VM once; after that opening the console is immediate and
+idempotent.
+
+In the console window: click into the picture to give it keyboard focus (arrow keys, Enter,
+Ctrl+Alt+Del all reach the guest), click or drag inside it to move the pointer and press
+buttons, and scroll to send wheel events. The picture refreshes automatically about once a
+second. Containers have no display device and do not offer this button.
 
 ## Online terminals and remote desktop
 
@@ -182,15 +371,17 @@ Fleet provides three browser sessions, available from the detail drawer or the l
   working directory survive across commands. If the command exits and the session closes, the
   next input reopens the session automatically and runs the pending command.
 - **Serial console (Console)**: useful for boot problems and kernel output.
-- **Remote desktop (VMs)**: running VMs can open a graphical console. Fleet configures a QEMU
-  SPICE channel for the VM (a `-spice` TCP listener in `raw.qemu`, with a port allocated per
-  instance name). The browser connects to the SPICE server channel by channel through a
-  websocket-TCP bridge and shows the installer or desktop live. The first configuration
-  restarts a running VM once; later sessions connect immediately. Containers have no display
+- **Remote desktop (VMs)**: running VMs can open a graphical console. Fleet appends a second
+  QEMU monitor to the VM through `raw.qemu.conf` (QMP control mode, unix socket under /tmp)
+  and relaxes the instance's AppArmor profile for that socket and the screenshot scratch
+  file. The browser polls PNG framebuffer dumps from that monitor and sends keyboard and
+  absolute-pointer events back. The first configuration restarts a running VM once; later
+  sessions are read-only preparations and connect immediately. Containers have no display
   device and do not offer remote desktop.
 
-  Security note: the SPICE TCP listener has no ticket authentication and listens on all
-  interfaces of the cluster member. Restrict access to the port range with a firewall.
+  Security note: the monitor socket lives in the member's /tmp and is reachable only by
+  processes allowed by the instance's AppArmor profile; the fleet drives it over SSH with
+  sudo, so no extra listening TCP port is involved.
 
 Sessions close with the page and leave no daemon process on the host.
 
@@ -321,6 +512,16 @@ online terminal for `systemctl status postgresql`, logs, and database creation.
 > itself** cannot reach a macvlan instance on the same parent NIC, but other LAN machines
 > (including instances on other hosts) can. Verify from another machine.
 
+## Cross-cluster migration and guest networking
+
+Moving an instance to another cluster also moves it to that cluster's bridge subnet. After the
+transfer the fleet asks the guest to release its old DHCP lease and request a new one, so the
+instance comes back with an address from the target subnet, a correct default route, and
+working connectivity — no manual `dhclient` needed.
+
+If the guest uses a static address, or has no DHCP client installed, the migration still
+succeeds and the fleet only logs a warning; you then need to adjust that address yourself.
+
 ## Shared asset library and batch operations
 
 Keeping common content in one place and reusing it is key to reducing repetitive operations.
@@ -346,6 +547,9 @@ appears:
 | Batch inject keys | Choose one or more keys from the library and inject them into the target account on each instance; shows success/failure and exit code per instance |
 | Batch run script | Choose a script and run it as root on every instance; captures output per instance |
 | Batch start / stop / restart | Power operations on the selected instances |
+
+Selections survive the automatic list refresh — ticks stay where you put them until you
+clear them yourself.
 
 Typical flow: create a batch of instances → select all → batch inject a public key → SSH in
 with the matching private key → batch run the bootstrap script. Key injection and scripts run
@@ -393,11 +597,20 @@ The instance detail drawer has a **Monitoring** tab that samples every 3 seconds
 Stopped instances only show the status row. VM metrics depend on a running Incus agent (VMs
 created from official cloud images become ready a few seconds after boot).
 
+### Host agent metrics
+
+When the optional Rust host agent is installed, the node detail page adds a **Host metrics**
+panel with CPU, memory, load, uptime, and network counters for the last hour. The center keeps
+these samples in memory only (10-second interval, 360 points); restarting the center clears them.
+The panel's **Source** selector can switch between **Center 1h** and **Prometheus/VM** when the
+external query proxy is configured. Use the API export (`json`, `prometheus`, or `csv`) for longer
+retention or external systems.
+
 ### Deeper metrics (roadmap)
 
-For guest-internal metrics such as per-process data, disk I/O, or custom collection, the plan
-is a lightweight **Rust** guest agent installed through Fleet that reports richer telemetry.
-The Incus state API already covers the core metrics needed for routine operations.
+For guest-internal metrics such as per-process data or custom collection, the plan is to extend
+the host agent with per-instance cgroups and optional eBPF. The Incus state API already covers the
+core metrics needed for routine operations.
 
 ## Storage pools and networks
 
@@ -410,6 +623,52 @@ The cluster detail page provides:
   network).
 - **Profiles**: create, update, and delete configuration templates; select them when creating
   instances.
+
+## Private interconnect networks
+
+Incus requires every cluster member to share one network definition, so a managed bridge
+(`incusbr0`) has the same subnet and gateway address on all members. To connect instances
+across nodes without touching guest configuration and without any physical router changes,
+fleet manages a private overlay per cluster:
+
+- fleet creates its own host bridge (`fleetbr0` by default) on every member. Because fleet owns
+  it, the cluster-wide network rule does not apply and each member can hold a distinct bridge
+  address.
+- Every pair of members is joined by a point-to-point VXLAN tunnel, so two members get one tunnel
+  and N members form a full mesh. Traffic between members stays on the tunnels; only egress leaves
+  through the gateway.
+- One member acts as the **gateway**: it runs dnsmasq for the overlay subnet and masquerades the
+  subnet towards its physical NIC.
+
+Instances attach with a legacy `nictype=bridged, parent=fleetbr0` NIC, so a guest keeps using DHCP
+and its default gateway exactly as before. Nothing inside the guest changes.
+
+Enable it from the cluster page (**Private interconnect → Enable private network**): choose the
+subnet, a VNI, the gateway member, and optionally the MTU and DHCP range. After adding or removing
+a cluster member, run **Reconcile** to rebuild the tunnel mesh. **Disable** removes the tunnels,
+DHCP, NAT, and bridges from every member.
+
+Notes:
+
+- The gateway member is a single egress point in this release; multi-gateway failover is planned.
+- `MTU` defaults to 1450 to leave room for the VXLAN header on a 1500-byte underlay. Raise it only
+  when the underlay supports jumbo frames.
+- The overlay is plaintext VXLAN on the underlay, like the rest of the cluster network. Add
+  WireGuard underneath if you need encryption between sites.
+- OVN remains a future alternative for ACLs, forwards, and multi-tenant isolation. The overlay
+  abstraction keeps that switch local to the network backend.
+
+## Node network and operation history
+
+Each cluster member has a **Node network** page (Cluster → Nodes → Manage node). The page shows
+the selected `backend` (`local` or `ssh`; the agent backend is added in a later release) and lets
+you manage NIC state, addresses, routes, the fleet-managed firewall table, and Wi-Fi.
+
+Every mutating operation is recorded. **History** opens the task and audit timeline for that
+member, including the action, backend, result, state transitions, and timestamps. Wi-Fi passwords,
+SSH/sudo passwords, and join tokens are never shown in history. The server-side `node_access.mode`
+and `ssh_write_fallback` settings control which backend is allowed; see
+[Deployment](deployment.md#node-network-management-optional).
 
 ## FAQ
 
@@ -425,11 +684,10 @@ The cluster detail page provides:
 - **A physical NIC is missing?** The NIC must be unmanaged on the host (not part of an Incus
   managed bridge).
 - **Remote desktop will not open or says it is being configured?** Remote desktop only works
-  for VMs. The first open configures the SPICE listener and restarts the VM; wait for it to
-  boot and open the session again.
-- **Which ports must be allowed for remote desktop?** Each VM uses one TCP port, allocated
-  automatically in the 5910-5989 range by instance name. Restrict the source subnet with a
-  firewall.
+  for VMs. The first open configures the QEMU monitor and restarts the VM; wait for it to
+  boot and open the session again. Later opens are immediate.
+- **Which ports must be allowed for remote desktop?** None beyond the fleet API itself. The
+  console drives a unix-socket QEMU monitor on the member over SSH; no extra TCP listener.
 - **Maintenance actions report an agent error?** VMs need a running Incus agent to execute
   commands. VMs created from official cloud images become ready a few seconds after boot.
 - **Rebuild says the instance must be stopped?** An image upgrade rewrites the root disk, and

@@ -8,6 +8,7 @@ import type {
   CreateInstanceRequest,
   InstanceDetail,
   InstanceImage,
+  NetworkResource,
   UpdateInstanceRequest,
 } from '@/api/types'
 import { useInstancesStore } from '@/stores/instances'
@@ -69,6 +70,18 @@ const filteredImages = computed(() =>
 )
 const pools = computed(() => instances.resources(form.cluster)?.storage_pools ?? [])
 const networks = computed(() => instances.resources(form.cluster)?.networks ?? [])
+// Fleet overlay bridges are host bridges, so Incus does not report them as
+// networks. Merge them in so instances can be attached to the private network.
+const overlayNetworks = computed<NetworkResource[]>(() =>
+  (instances.overlayCache[form.cluster] ?? []).map((overlay) => ({
+    name: overlay.bridge,
+    type: 'bridge',
+    managed: false,
+    ipv4: overlay.subnet,
+    used_by: [],
+    locations: [],
+  })),
+)
 const isPhysicalNetwork = computed(() => {
   if (nicDevice.value?.device.nictype === 'macvlan') {
     return true
@@ -76,6 +89,48 @@ const isPhysicalNetwork = computed(() => {
 
   const selected = networks.value.find((network) => network.name === form.network)
   return Boolean(selected && !selected.managed)
+})
+
+// Dropdown grouping: managed networks span the whole cluster, while a
+// physical NIC exists on one member only. Listing every member's NICs flat
+// turned the cluster-level form into an indistinguishable mix, so physical
+// NICs render under one group per member (#13 F6/F7 follow-up).
+const networkGroups = computed(() => {
+  const managed = networks.value.filter((network) => network.managed)
+  const groups: { label: string; options: typeof networks.value }[] = []
+
+  if (managed.length > 0) {
+    groups.push({ label: t('form.managedNetworks'), options: managed })
+  }
+
+  const byLocation = new Map<string, typeof networks.value>()
+  for (const network of networks.value) {
+    if (network.managed) {
+      continue
+    }
+    const location =
+      network.locations.length > 0 ? network.locations.join(', ') : t('cluster.unknownMember')
+    const bucket = byLocation.get(location)
+    if (bucket) {
+      bucket.push(network)
+    } else {
+      byLocation.set(location, [network])
+    }
+  }
+  const physical = [...byLocation.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  for (const [location, options] of physical) {
+    groups.push({ label: t('form.physicalNetworksOn', { member: location }), options })
+  }
+
+  // Overlay bridges are fleet-managed host bridges; Incus does not list them as
+  // networks, so add them as a dedicated group.
+  const known = new Set(networks.value.map((network) => network.name))
+  const overlays = overlayNetworks.value.filter((network) => !known.has(network.name))
+  if (overlays.length > 0) {
+    groups.push({ label: t('form.overlayNetworks'), options: overlays })
+  }
+
+  return groups
 })
 
 let pendingCluster = ''
@@ -121,7 +176,7 @@ function resetForm(): void {
   form.storagePool = detail.storage_pool ?? ''
 
   if (nicDevice.value) {
-    form.network = nicDevice.value.device.network ?? ''
+    form.network = nicDevice.value.device.network ?? nicDevice.value.device.parent ?? ''
     form.ipv4 = nicDevice.value.device['ipv4.address'] ?? ''
     form.ipv6 = nicDevice.value.device['ipv6.address'] ?? ''
   }
@@ -251,14 +306,17 @@ function updateRequest(): UpdateInstanceRequest {
 
   if (nicDevice.value) {
     request.device = nicDevice.value.name
-    if (isPhysicalNetwork.value) {
-      return request
+    const currentNetwork = nicDevice.value.device.network ?? nicDevice.value.device.parent ?? ''
+    if (form.network && form.network !== currentNetwork) {
+      request.network = form.network
     }
 
-    request.ipv4 = form.ipv4.trim()
-    request.ipv6 = form.ipv6.trim()
-    if (form.network) {
-      request.network = form.network
+    // Physical NICs take their addresses from the LAN DHCP server; sending
+    // device-level addresses would silently do nothing, so they stay editable
+    // only for managed networks.
+    if (!isPhysicalNetwork.value) {
+      request.ipv4 = form.ipv4.trim()
+      request.ipv6 = form.ipv6.trim()
     }
   }
 
@@ -415,18 +473,20 @@ async function submit(): Promise<void> {
             clearable
             style="width: 100%"
           >
-            <el-option
-              v-for="network in networks"
-              :key="network.name"
-              :label="
-                network.managed
-                  ? `${network.name} · ${network.type}`
-                  : t('form.networkPhysical', { name: network.name })
-              "
-              :value="network.name"
-            />
+            <el-option-group v-for="group in networkGroups" :key="group.label" :label="group.label">
+              <el-option
+                v-for="network in group.options"
+                :key="network.name"
+                :label="
+                  network.managed
+                    ? `${network.name} · ${network.type}`
+                    : t('form.networkPhysical', { name: network.name })
+                "
+                :value="network.name"
+              />
+            </el-option-group>
           </el-select>
-          <p v-if="isPhysicalNetwork && !isEdit" class="field-hint">
+          <p v-if="isPhysicalNetwork" class="field-hint">
             {{ t('form.networkPhysicalHint') }}
           </p>
         </el-form-item>
@@ -434,6 +494,9 @@ async function submit(): Promise<void> {
         <template v-if="!isPhysicalNetwork">
           <el-form-item :label="t('form.ipv4')">
             <el-input v-model="form.ipv4" :placeholder="t('form.ipv4Placeholder')" />
+            <p v-if="isEdit && instance?.type === 'virtual-machine'" class="field-hint">
+              {{ t('form.vmAddressHint') }}
+            </p>
           </el-form-item>
 
           <el-form-item :label="t('form.ipv6')">

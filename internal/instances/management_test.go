@@ -49,9 +49,8 @@ func manageInstance(name string) *api.Instance {
 
 func TestCreate(t *testing.T) {
 	srv := &incusfake.Server{
-		Instance:     &api.Instance{Name: "vm1"},
-		PoolNames:    []string{"default", "fast"},
-		NetworkNames: []string{"incusbr0", "incusbr1"},
+		Instance:  &api.Instance{Name: "vm1"},
+		PoolNames: []string{"default", "fast"},
 		Networks: []api.Network{
 			{Name: "incusbr0", Type: "bridge", Managed: true},
 			{Name: "incusbr1", Type: "bridge", Managed: true},
@@ -147,9 +146,9 @@ func TestCreateNoStart(t *testing.T) {
 
 func TestCreateValidation(t *testing.T) {
 	srv := &incusfake.Server{
-		Instance:     &api.Instance{Name: "ok"},
-		PoolNames:    []string{"default"},
-		NetworkNames: []string{"incusbr0"},
+		Instance:  &api.Instance{Name: "ok"},
+		PoolNames: []string{"default"},
+		Networks:  []api.Network{{Name: "incusbr0", Type: "bridge", Managed: true}},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
@@ -216,7 +215,10 @@ func TestCreateErrors(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	srv := &incusfake.Server{Instance: manageInstance("vm1"), NetworkNames: []string{"incusbr0", "incusbr1"}}
+	srv := &incusfake.Server{Instance: manageInstance("vm1"), Networks: []api.Network{
+		{Name: "incusbr0", Type: "bridge", Managed: true},
+		{Name: "incusbr1", Type: "bridge", Managed: true},
+	}}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
 	cpu := "4"
@@ -292,7 +294,10 @@ func TestUpdateUsesExpandedNIC(t *testing.T) {
 	instance := manageInstance("vm1")
 	delete(instance.Devices, "eth0")
 	instance.ExpandedDevices["eth0"] = map[string]string{"type": "nic", "network": "incusbr0"}
-	srv := &incusfake.Server{Instance: instance, NetworkNames: []string{"incusbr0", "incusbr1"}}
+	srv := &incusfake.Server{Instance: instance, Networks: []api.Network{
+		{Name: "incusbr0", Type: "bridge", Managed: true},
+		{Name: "incusbr1", Type: "bridge", Managed: true},
+	}}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
 	device := "eth0"
@@ -306,8 +311,35 @@ func TestUpdateUsesExpandedNIC(t *testing.T) {
 	}
 }
 
+// A legacy nictype+parent NIC cannot carry "network"; switching networks must
+// drop the legacy keys or Incus rejects the whole update.
+func TestUpdateLegacyNICSwitchDropsNictype(t *testing.T) {
+	instance := manageInstance("vm1")
+	instance.Devices["eth0"] = map[string]string{"type": "nic", "nictype": "bridged", "parent": "incusbr0"}
+	srv := &incusfake.Server{Instance: instance, Networks: []api.Network{
+		{Name: "incusbr0", Type: "bridge", Managed: true},
+		{Name: "incusbr1", Type: "bridge", Managed: true},
+	}}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	network := "incusbr1"
+	if _, err := svc.Update(context.Background(), "c1", "vm1", UpdateRequest{Device: "eth0", Network: &network}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	nic := srv.UpdateArgs()[0].Instance.Devices["eth0"]
+	if nic["network"] != "incusbr1" {
+		t.Fatalf("nic = %#v", nic)
+	}
+	if _, has := nic["nictype"]; has {
+		t.Fatalf("nictype must be dropped on network switch: %#v", nic)
+	}
+	if _, has := nic["parent"]; has {
+		t.Fatalf("parent must be dropped on network switch: %#v", nic)
+	}
+}
+
 func TestUpdateValidation(t *testing.T) {
-	srv := &incusfake.Server{Instance: manageInstance("vm1"), NetworkNames: []string{"incusbr0"}}
+	srv := &incusfake.Server{Instance: manageInstance("vm1"), Networks: []api.Network{{Name: "incusbr0", Type: "bridge", Managed: true}}}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
 	badCPU := "two"
@@ -396,7 +428,7 @@ func TestDelete(t *testing.T) {
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
-	if err := svc.Delete(context.Background(), "c1", "vm1", true); err != nil {
+	if err := svc.Delete(context.Background(), "c1", "vm1", true, false); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
 	calls := srv.Calls()
@@ -421,7 +453,7 @@ func TestDeleteStopped(t *testing.T) {
 	srv := &incusfake.Server{State: &api.InstanceState{Status: "Stopped", StatusCode: api.Stopped}}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
-	if err := svc.Delete(context.Background(), "c1", "vm1", false); err != nil {
+	if err := svc.Delete(context.Background(), "c1", "vm1", false, false); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
 	if srv.HasCall("UpdateInstanceState") {
@@ -438,22 +470,22 @@ func TestDeleteErrors(t *testing.T) {
 		return &api.InstanceState{Status: "Stopped"}, nil
 	}}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
-	if err := svc.Delete(context.Background(), "c1", "missing", false); !errors.Is(err, ErrNotFound) {
+	if err := svc.Delete(context.Background(), "c1", "missing", false, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Delete() error = %v", err)
 	}
-	if err := svc.Delete(context.Background(), "missing", "vm1", false); err == nil {
+	if err := svc.Delete(context.Background(), "missing", "vm1", false, false); err == nil {
 		t.Fatal("Delete() expected unknown cluster error")
 	}
 
 	srv = &incusfake.Server{State: &api.InstanceState{Status: "Stopped"}, DeleteErr: errors.New("boom")}
 	svc = newTestService(t, map[string]*incusfake.Server{"c1": srv})
-	if err := svc.Delete(context.Background(), "c1", "vm1", false); err == nil {
+	if err := svc.Delete(context.Background(), "c1", "vm1", false, false); err == nil {
 		t.Fatal("Delete() expected delete error")
 	}
 
 	srv = &incusfake.Server{State: &api.InstanceState{Status: "Running"}, UpdateStateErr: errors.New("boom")}
 	svc = newTestService(t, map[string]*incusfake.Server{"c1": srv})
-	if err := svc.Delete(context.Background(), "c1", "vm1", false); err == nil {
+	if err := svc.Delete(context.Background(), "c1", "vm1", false, false); err == nil {
 		t.Fatal("Delete() expected stop error")
 	}
 }
@@ -611,5 +643,237 @@ func TestUpdateRootDiskFallsBackToDefaultPool(t *testing.T) {
 	root := args[0].Instance.Devices["root"]
 	if root["size"] != "30GiB" || root["pool"] != "default" || root["path"] != "/" {
 		t.Fatalf("root = %#v", root)
+	}
+}
+
+func TestDeleteWithVolumes(t *testing.T) {
+	instance := manageInstance("vm1")
+	instance.Devices["data"] = map[string]string{"type": "disk", "pool": "default", "source": "vm1-data"}
+	instance.Devices["iso0"] = map[string]string{"type": "disk", "pool": "default", "source": "installer"}
+
+	newServer := func() *incusfake.Server {
+		return &incusfake.Server{
+			State:    &api.InstanceState{Status: "Stopped", StatusCode: api.Stopped},
+			Instance: instance,
+			Volumes: []api.StorageVolume{
+				{Name: "vm1-data", ContentType: "block"},
+				{Name: "installer", ContentType: "iso"},
+			},
+		}
+	}
+
+	t.Run("removes attached custom volumes but keeps ISO assets", func(t *testing.T) {
+		srv := newServer()
+		svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+		if err := svc.Delete(context.Background(), "c1", "vm1", false, true); err != nil {
+			t.Fatalf("Delete() error = %v", err)
+		}
+
+		calls := srv.Calls()
+		deleted := false
+		for _, call := range calls {
+			if call == "DeleteStoragePoolVolume:default/custom/vm1-data" {
+				deleted = true
+			}
+			if call == "DeleteStoragePoolVolume:default/custom/installer" {
+				t.Fatalf("shared ISO asset must be kept: %#v", calls)
+			}
+		}
+		if !deleted {
+			t.Fatalf("attached custom volume not deleted: %#v", calls)
+		}
+	})
+
+	t.Run("keeps volumes by default", func(t *testing.T) {
+		srv := newServer()
+		svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+		if err := svc.Delete(context.Background(), "c1", "vm1", false, false); err != nil {
+			t.Fatalf("Delete() error = %v", err)
+		}
+
+		for _, call := range srv.Calls() {
+			if len(call) > 24 && call[:24] == "DeleteStoragePoolVolume:" {
+				t.Fatalf("volume deleted without the option: %s", call)
+			}
+		}
+	})
+
+	t.Run("missing volumes are skipped silently", func(t *testing.T) {
+		srv := newServer()
+		srv.Volumes = nil // every GetStoragePoolVolume 404s
+		svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+		if err := svc.Delete(context.Background(), "c1", "vm1", false, true); err != nil {
+			t.Fatalf("Delete() error = %v", err)
+		}
+	})
+}
+
+// An unmanaged physical parent attaches as macvlan+parent — the create path's
+// shape — because Incus rejects unmanaged names in the "network" key.
+func TestUpdateUnmanagedNetworkUsesMacvlanParent(t *testing.T) {
+	instance := manageInstance("vm1")
+	srv := &incusfake.Server{
+		Instance: instance,
+		Networks: []api.Network{
+			{Name: "incusbr0", Type: "bridge", Managed: true},
+			{Name: "wan0", Type: "physical", Managed: false},
+		},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	network := "wan0"
+	if _, err := svc.Update(context.Background(), "c1", "vm1", UpdateRequest{Device: "eth0", Network: &network}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	nic := srv.UpdateArgs()[0].Instance.Devices["eth0"]
+	if nic["nictype"] != "macvlan" || nic["parent"] != "wan0" {
+		t.Fatalf("nic = %#v", nic)
+	}
+	if _, has := nic["network"]; has {
+		t.Fatalf("unmanaged parent must not use the network key: %#v", nic)
+	}
+}
+
+func TestUpdateUnmanagedNetworkRejectsStaticIP(t *testing.T) {
+	instance := manageInstance("vm1")
+	srv := &incusfake.Server{
+		Instance: instance,
+		Networks: []api.Network{
+			{Name: "wan0", Type: "physical", Managed: false},
+		},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	network := "wan0"
+	ipv4 := "10.0.0.9"
+	_, err := svc.Update(context.Background(), "c1", "vm1", UpdateRequest{Device: "eth0", Network: &network, IPv4: &ipv4})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if len(srv.UpdateArgs()) != 0 {
+		t.Fatalf("rejected update must not reach Incus")
+	}
+}
+
+func TestMemberNames(t *testing.T) {
+	srv := &incusfake.Server{
+		Members: []api.ClusterMember{{ServerName: "m2"}, {ServerName: "m1"}},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	names, err := svc.MemberNames("c1")
+	if err != nil {
+		t.Fatalf("MemberNames() error = %v", err)
+	}
+	if len(names) != 2 || names[0] != "m1" || names[1] != "m2" {
+		t.Fatalf("names = %#v", names)
+	}
+
+	srv.MembersErr = errors.New("cluster offline")
+	if _, err := svc.MemberNames("c1"); err == nil {
+		t.Fatal("MemberNames() expected error")
+	}
+}
+
+func TestCreateUsesBridgedNICForOverlayBridge(t *testing.T) {
+	srv := &incusfake.Server{Instance: &api.Instance{Name: "vm1"}, Networks: []api.Network{{Name: "fleetbr0", Managed: false}}}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if _, err := svc.Create(context.Background(), "c1", CreateRequest{Name: "vm1", Type: "container", Image: "debian", Network: "fleetbr0"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	args := srv.CreateArgs()
+	if len(args) != 1 {
+		t.Fatalf("create args = %#v", args)
+	}
+	nic := args[0].Devices["eth0"]
+	if nic["nictype"] != "bridged" || nic["parent"] != "fleetbr0" {
+		t.Fatalf("overlay NIC = %#v; want bridged/fleetbr0", nic)
+	}
+}
+
+func TestCreateUsesMacvlanForPhysicalNIC(t *testing.T) {
+	srv := &incusfake.Server{Instance: &api.Instance{Name: "ct1"}, Networks: []api.Network{{Name: "enp1s0", Managed: false}}}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if _, err := svc.Create(context.Background(), "c1", CreateRequest{Name: "ct1", Type: "container", Image: "debian", Network: "enp1s0"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	nic := srv.CreateArgs()[0].Devices["eth0"]
+	if nic["nictype"] != "macvlan" {
+		t.Fatalf("physical NIC = %#v; want macvlan", nic)
+	}
+}
+
+// A guest without the incus agent (ISO-booted installer) cannot answer an
+// elegant stop/restart: Incus would block until the full graceful timeout
+// before failing, leaving the console buttons dead for minutes. Those
+// actions force immediately when the state reports no agent activity.
+func TestActionForcesWithoutAgent(t *testing.T) {
+	srv := &incusfake.Server{
+		State: &api.InstanceState{Status: "Running", StatusCode: api.Running, Processes: -1},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if err := svc.Action(context.Background(), "c1", "vm1", ActionRequest{Action: "restart"}); err != nil {
+		t.Fatalf("Action() error = %v", err)
+	}
+
+	args := srv.UpdateStateArgs()
+	if len(args) != 1 {
+		t.Fatalf("UpdateStateArgs() = %#v", args)
+	}
+	if !args[0].Force {
+		t.Fatalf("agent-less restart must force: %#v", args[0])
+	}
+	if args[0].Timeout != 0 {
+		t.Fatalf("agent-less restart must not wait: %#v", args[0])
+	}
+}
+
+func TestActionKeepsGracefulPathWithAgent(t *testing.T) {
+	processes := int64(42)
+	srv := &incusfake.Server{
+		State: &api.InstanceState{Status: "Running", StatusCode: api.Running, Processes: processes},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if err := svc.Action(context.Background(), "c1", "vm1", ActionRequest{Action: "restart"}); err != nil {
+		t.Fatalf("Action() error = %v", err)
+	}
+
+	args := srv.UpdateStateArgs()
+	if len(args) != 1 {
+		t.Fatalf("UpdateStateArgs() = %#v", args)
+	}
+	if args[0].Force {
+		t.Fatalf("agent-backed restart must stay graceful: %#v", args[0])
+	}
+	if args[0].Timeout != 300 {
+		t.Fatalf("graceful timeout = %#v", args[0])
+	}
+}
+
+func TestDeleteForcesStopWithoutAgent(t *testing.T) {
+	srv := &incusfake.Server{
+		State: &api.InstanceState{Status: "Running", StatusCode: api.Running, Processes: -1},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if err := svc.Delete(context.Background(), "c1", "vm1", false, false); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	args := srv.UpdateStateArgs()
+	if len(args) != 1 {
+		t.Fatalf("UpdateStateArgs() = %#v", args)
+	}
+	if !args[0].Force || args[0].Timeout != 0 {
+		t.Fatalf("agent-less delete must force-stop: %#v", args[0])
 	}
 }

@@ -76,8 +76,8 @@ func (s *SQLStore) GetKeystone(ctx context.Context, id string) (*Keystone, error
 
 	var key Keystone
 	var created int64
-	err := s.db.QueryRowContext(ctx, query, id).
-		Scan(&key.ID, &key.Name, &key.PublicKey, &key.Comment, &created)
+	err := s.db.QueryRowContext(ctx, s.rebind(query), id). //nolint:gosec // query is a constant
+								Scan(&key.ID, &key.Name, &key.PublicKey, &key.Comment, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -166,8 +166,8 @@ func (s *SQLStore) GetScript(ctx context.Context, id string) (*Script, error) {
 
 	var script Script
 	var created, updated int64
-	err := s.db.QueryRowContext(ctx, query, id).
-		Scan(&script.ID, &script.Name, &script.Description, &script.Body, &created, &updated)
+	err := s.db.QueryRowContext(ctx, s.rebind(query), id). //nolint:gosec // query is a constant
+								Scan(&script.ID, &script.Name, &script.Description, &script.Body, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -186,9 +186,13 @@ func (s *SQLStore) UpdateScript(ctx context.Context, script *Script) error {
 		return fmt.Errorf("store: script id required")
 	}
 
+	updated := time.Now().UTC().Truncate(time.Nanosecond)
+	if !updated.After(script.CreatedAt) {
+		updated = script.CreatedAt.Add(time.Nanosecond)
+	}
 	const query = `UPDATE scripts SET name = ?, description = ?, body = ?, updated_at = ? WHERE id = ?`
 	res, err := s.db.ExecContext(ctx, s.rebind(query),
-		script.Name, script.Description, script.Body, time.Now().UTC().UnixNano(), script.ID)
+		script.Name, script.Description, script.Body, updated.UnixNano(), script.ID)
 	if err != nil {
 		return err
 	}
