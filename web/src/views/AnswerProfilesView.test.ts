@@ -134,6 +134,44 @@ describe('AnswerProfilesView', () => {
     await flushPromises()
   })
 
+  it('edits every template field and toggles the custom answer area', async () => {
+    const wrapper = await mountView()
+    const edit = wrapper.findAll('button').find((b) => b.text().includes('Edit'))
+    await edit!.trigger('click')
+    await flushPromises()
+    const dialog = wrapper.find('.el-dialog')
+
+    // Template field v-model setters.
+    for (const [selector, value] of [
+      ['input[placeholder="defaults to VM name"]', 'host-x'],
+      ['input[placeholder="fleet"]', 'user-x'],
+      ['input[type="password"]', 'pw-x'],
+      ['input[placeholder="UTC"]', 'Asia/Tokyo'],
+      ['input[placeholder="/dev/vda"]', '/dev/vdc'],
+      ['input[placeholder="en_US"]', 'fr_FR'],
+      ['input[placeholder="us"]', 'de'],
+    ] as [string, string][]) {
+      const input = dialog.find(selector)
+      if (input.exists()) await input.setValue(value)
+    }
+    await flushPromises()
+
+    // Toggle custom answer area on/off, then cancel.
+    const custom = dialog.find('.el-checkbox input[type="checkbox"]')
+    if (custom.exists()) {
+      await custom.setValue(true)
+      await flushPromises()
+      const textarea = dialog.find('textarea')
+      if (textarea.exists()) await textarea.setValue('#cloud-config\n')
+      await custom.setValue(false)
+      await flushPromises()
+    }
+    const cancel = dialog.findAll('button').find((b) => b.text().includes('Cancel'))
+    await cancel!.trigger('click')
+    await flushPromises()
+    expect(api.updateAnswerProfile).not.toHaveBeenCalled()
+  })
+
   it('shows the empty state when no profiles are saved', async () => {
     vi.mocked(api.listAnswerProfiles).mockResolvedValue([])
     const wrapper = await mountView()

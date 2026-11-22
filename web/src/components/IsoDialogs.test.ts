@@ -378,6 +378,28 @@ describe('IsoLaunchDialog unattended', () => {
     expect(request?.spec).toBeUndefined()
   })
 
+  it('touches every editable field and the cancel action', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+    // network select
+    const networkSelect = wrapper.findAllComponents({ name: 'ElSelect' })[0]!
+    networkSelect.vm.$emit('update:modelValue', 'incusbr0')
+    await flushPromises()
+    // root disk
+    await wrapper.find('input[placeholder="20GiB"]').setValue('40GiB')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+    // hostname + timezone on the template path
+    await wrapper.find('input[placeholder="defaults to VM name"]').setValue('extra-host')
+    await wrapper.find('input[placeholder="UTC"]').setValue('Europe/Berlin')
+    await flushPromises()
+    // cancel button closes the dialog
+    const cancel = wrapper.findAll('button').find((b) => b.text().includes('Cancel'))
+    await cancel!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeTruthy()
+  })
+
   it('reports a preview failure', async () => {
     vi.mocked(api.previewUnattendedAnswer).mockRejectedValueOnce(new Error('preview down'))
     const wrapper = mountUnattended()
