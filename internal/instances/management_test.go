@@ -49,8 +49,8 @@ func manageInstance(name string) *api.Instance {
 
 func TestCreate(t *testing.T) {
 	srv := &incusfake.Server{
-		Instance:     &api.Instance{Name: "vm1"},
-		PoolNames:    []string{"default", "fast"},
+		Instance:  &api.Instance{Name: "vm1"},
+		PoolNames: []string{"default", "fast"},
 		Networks: []api.Network{
 			{Name: "incusbr0", Type: "bridge", Managed: true},
 			{Name: "incusbr1", Type: "bridge", Managed: true},
@@ -150,9 +150,9 @@ func TestCreateNoStart(t *testing.T) {
 
 func TestCreateValidation(t *testing.T) {
 	srv := &incusfake.Server{
-		Instance:     &api.Instance{Name: "ok"},
-		PoolNames:    []string{"default"},
-		Networks: []api.Network{{Name: "incusbr0", Type: "bridge", Managed: true}},
+		Instance:  &api.Instance{Name: "ok"},
+		PoolNames: []string{"default"},
+		Networks:  []api.Network{{Name: "incusbr0", Type: "bridge", Managed: true}},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
@@ -220,9 +220,9 @@ func TestCreateErrors(t *testing.T) {
 
 func TestUpdate(t *testing.T) {
 	srv := &incusfake.Server{Instance: manageInstance("vm1"), Networks: []api.Network{
-			{Name: "incusbr0", Type: "bridge", Managed: true},
-			{Name: "incusbr1", Type: "bridge", Managed: true},
-		}}
+		{Name: "incusbr0", Type: "bridge", Managed: true},
+		{Name: "incusbr1", Type: "bridge", Managed: true},
+	}}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
 	cpu := "4"
@@ -299,9 +299,9 @@ func TestUpdateUsesExpandedNIC(t *testing.T) {
 	delete(instance.Devices, "eth0")
 	instance.ExpandedDevices["eth0"] = map[string]string{"type": "nic", "network": "incusbr0"}
 	srv := &incusfake.Server{Instance: instance, Networks: []api.Network{
-			{Name: "incusbr0", Type: "bridge", Managed: true},
-			{Name: "incusbr1", Type: "bridge", Managed: true},
-		}}
+		{Name: "incusbr0", Type: "bridge", Managed: true},
+		{Name: "incusbr1", Type: "bridge", Managed: true},
+	}}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
 	device := "eth0"
@@ -321,9 +321,9 @@ func TestUpdateLegacyNICSwitchDropsNictype(t *testing.T) {
 	instance := manageInstance("vm1")
 	instance.Devices["eth0"] = map[string]string{"type": "nic", "nictype": "bridged", "parent": "incusbr0"}
 	srv := &incusfake.Server{Instance: instance, Networks: []api.Network{
-			{Name: "incusbr0", Type: "bridge", Managed: true},
-			{Name: "incusbr1", Type: "bridge", Managed: true},
-		}}
+		{Name: "incusbr0", Type: "bridge", Managed: true},
+		{Name: "incusbr1", Type: "bridge", Managed: true},
+	}}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
 	network := "incusbr1"
