@@ -77,6 +77,28 @@ const profiles = computed(() => instances.profiles(props.cluster))
 const clusterImages = computed(() => instances.images(props.cluster))
 const clusterISOs = computed(() => instances.isoCache[props.cluster] ?? [])
 const poolNames = computed(() => (resources.value?.storage_pools ?? []).map((pool) => pool.name))
+// Networks ordered for readability: managed networks are cluster-wide, then
+// physical NICs grouped by member — a flat mix of every node's NICs read as
+// one confusing list (#13 F6 follow-up).
+const networkRows = computed(() => {
+  const networks = [...(resources.value?.networks ?? [])]
+  networks.sort((a, b) => {
+    if (a.managed !== b.managed) {
+      return a.managed ? -1 : 1
+    }
+    if (!a.managed && !b.managed) {
+      const memberA = a.locations.join(',')
+      const memberB = b.locations.join(',')
+      if (memberA !== memberB) {
+        return memberA.localeCompare(memberB)
+      }
+    }
+
+    return a.name.localeCompare(b.name)
+  })
+
+  return networks
+})
 const isoImportOpen = ref(false)
 const isoLaunchOpen = ref(false)
 const isoTarget = ref({ name: '', pool: '' })
@@ -816,7 +838,7 @@ function openNodeUpgrade(member: ClusterMember): void {
           </div>
         </div>
 
-        <el-table v-loading="instances.resourcesLoading" :data="resources?.networks ?? []" stripe>
+        <el-table v-loading="instances.resourcesLoading" :data="networkRows" stripe>
           <el-table-column :label="t('cluster.networkName')" min-width="150">
             <template #default="{ row }">
               <strong>{{ row.name }}</strong>
@@ -824,6 +846,14 @@ function openNodeUpgrade(member: ClusterMember): void {
             </template>
           </el-table-column>
           <el-table-column :label="t('cluster.networkType')" width="120" prop="type" />
+          <el-table-column :label="t('cluster.locations')" min-width="130">
+            <template #default="{ row }">
+              <!-- Managed networks exist on every member; physical NICs live
+                   on one node, so their member is the identity that matters. -->
+              <span v-if="row.managed" class="muted">{{ t('cluster.allMembers') }}</span>
+              <span v-else class="mono">{{ row.locations.join(', ') || t('cluster.unknownMember') }}</span>
+            </template>
+          </el-table-column>
           <el-table-column :label="t('cluster.managed')" width="110">
             <template #default="{ row }">
               <el-tag :type="row.managed ? 'success' : 'info'" size="small" effect="light">

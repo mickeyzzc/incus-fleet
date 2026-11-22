@@ -107,16 +107,37 @@ describe('useInstanceActions', () => {
     )
   })
 
-  it('deletes after confirmation and clears busy state', async () => {
+  it('deletes after the dialog confirms and clears busy state', async () => {
     const { result, refresh } = withSetup((refresh) => useInstanceActions(refresh))
     const instance = instanceSummary()
 
-    await result.confirmDelete(instance)
+    // confirmDelete only arms the dialog; nothing is sent until submit.
+    result.confirmDelete(instance)
+    await flushPromises()
+    expect(api.deleteInstance).not.toHaveBeenCalled()
+    expect(result.deleteTarget.value).toEqual(instance)
+
+    result.deleteVolumes.value = true
+    await result.submitDelete()
     await flushPromises()
 
-    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true)
+    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true, true)
     expect(ElMessage.success).toHaveBeenCalledWith('Deleted web.')
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(result.isBusy(instance)).toBe(false)
+    expect(result.deleteTarget.value).toBeNull()
+  })
+
+  it('cancelling the delete dialog sends nothing', async () => {
+    const { result, refresh } = withSetup((refresh) => useInstanceActions(refresh))
+    const instance = instanceSummary()
+
+    result.confirmDelete(instance)
+    result.cancelDelete()
+    await result.submitDelete()
+    await flushPromises()
+
+    expect(api.deleteInstance).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
   })
 })

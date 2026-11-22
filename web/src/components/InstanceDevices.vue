@@ -74,6 +74,38 @@ watch(
 const pools = computed(() => instances.resources(props.cluster)?.storage_pools ?? [])
 const networks = computed(() => instances.resources(props.cluster)?.networks ?? [])
 
+// Grouped NIC options: managed networks cluster-wide, physical NICs under
+// one group per member so cluster-level lists stay readable (#13 F6/F7).
+const networkGroups = computed(() => {
+  const managed = networks.value.filter((network) => network.managed)
+  const groups: { label: string; options: typeof networks.value }[] = []
+
+  if (managed.length > 0) {
+    groups.push({ label: t('form.managedNetworks'), options: managed })
+  }
+
+  const byLocation = new Map<string, typeof networks.value>()
+  for (const network of networks.value) {
+    if (network.managed) {
+      continue
+    }
+    const location =
+      network.locations.length > 0 ? network.locations.join(', ') : t('cluster.unknownMember')
+    const bucket = byLocation.get(location)
+    if (bucket) {
+      bucket.push(network)
+    } else {
+      byLocation.set(location, [network])
+    }
+  }
+  const physical = [...byLocation.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  for (const [location, options] of physical) {
+    groups.push({ label: t('form.physicalNetworksOn', { member: location }), options })
+  }
+
+  return groups
+})
+
 // A legacy NIC has no "network" key; its parent is offered as a selectable
 // option so the edit form can also migrate it onto a managed network.
 const editLegacyParent = computed(() =>
@@ -339,12 +371,14 @@ async function detach(name: string): Promise<void> {
         <template v-else>
           <el-form-item :label="t('form.network')">
             <el-select v-model="form.network" style="width: 100%">
-              <el-option
-                v-for="network in networks"
-                :key="network.name"
-                :label="`${network.name} · ${network.type}`"
-                :value="network.name"
-              />
+              <el-option-group v-for="group in networkGroups" :key="group.label" :label="group.label">
+                <el-option
+                  v-for="network in group.options"
+                  :key="network.name"
+                  :label="`${network.name} · ${network.type}`"
+                  :value="network.name"
+                />
+              </el-option-group>
             </el-select>
           </el-form-item>
           <el-form-item :label="t('form.ipv4')">
@@ -373,12 +407,14 @@ async function detach(name: string): Promise<void> {
         <template v-if="editingDevice.type === 'nic'">
           <el-form-item :label="t('form.network')">
             <el-select v-model="editForm.network" style="width: 100%">
-              <el-option
-                v-for="network in networks"
-                :key="network.name"
-                :label="`${network.name} · ${network.type}`"
-                :value="network.name"
-              />
+              <el-option-group v-for="group in networkGroups" :key="group.label" :label="group.label">
+                <el-option
+                  v-for="network in group.options"
+                  :key="network.name"
+                  :label="`${network.name} · ${network.type}`"
+                  :value="network.name"
+                />
+              </el-option-group>
               <el-option
                 v-if="editLegacyParent"
                 :label="`${editLegacyParent} · ${t('devices.customParent')}`"

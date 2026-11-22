@@ -204,7 +204,12 @@ describe('ClusterView', () => {
     await buttonByText(wrapper, 'Delete').trigger('click')
     await flushPromises()
 
-    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true)
+    const dialog = wrapper.findComponent({ name: 'InstanceDeleteDialog' })
+    expect(dialog.exists()).toBe(true)
+    await dialog.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true, false)
     expect(ElMessage.success).toHaveBeenCalledWith('Deleted web.')
   })
 
