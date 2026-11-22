@@ -378,6 +378,18 @@ describe('IsoLaunchDialog unattended', () => {
     expect(request?.spec).toBeUndefined()
   })
 
+  it('reports a preview failure', async () => {
+    vi.mocked(api.previewUnattendedAnswer).mockRejectedValueOnce(new Error('preview down'))
+    const wrapper = mountUnattended()
+    await flushPromises()
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+    const previewButton = wrapper.findAll('button').find((b) => b.text().includes('Preview'))
+    await previewButton!.trigger('click')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalled()
+  })
+
   it('auto-selects the stored default answer profile', async () => {
     vi.mocked(api.listAnswerProfiles).mockResolvedValue([{
       id: 'ap-def', name: 'lab-default', profile: 'debian-preseed',
