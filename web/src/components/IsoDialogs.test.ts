@@ -279,4 +279,48 @@ describe('IsoLaunchDialog unattended', () => {
     expect(wrapper.text()).toContain('preseed.cfg')
     expect(wrapper.text()).toContain('d-i debian-installer/locale')
   })
+
+  it('sends the extra spec fields (hostname, disk, locale, keyboard)', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    await wrapper.find('input[placeholder="fleet"]').setValue('ops')
+    await wrapper.find('input[placeholder="/dev/vda"]').setValue('/dev/vdb')
+    await wrapper.find('input[placeholder="en_US"]').setValue('zh_CN')
+    await wrapper.find('input[placeholder="us"]').setValue('fr')
+
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    const request = vi.mocked(api.launchUnattended).mock.calls[0]?.[3]
+    expect(request?.spec?.hostname).toBe('web-01')
+    expect(request?.spec?.disk).toBe('/dev/vdb')
+    expect(request?.spec?.locale).toBe('zh_CN')
+    expect(request?.spec?.keyboard).toBe('fr')
+  })
+
+  it('auto-selects the stored default answer profile', async () => {
+    vi.mocked(api.listAnswerProfiles).mockResolvedValue([{
+      id: 'ap-def', name: 'lab-default', profile: 'debian-preseed',
+      username: 'stored-user', is_default: true,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    }])
+    const wrapper = mountUnattended()
+    await flushPromises()
+
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    // The default profile was pre-selected on open; no local username needed.
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    const request = vi.mocked(api.launchUnattended).mock.calls[0]?.[3]
+    expect(request?.answer_profile_id).toBe('ap-def')
+  })
 })

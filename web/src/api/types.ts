@@ -305,10 +305,30 @@ export interface UnattendedLaunchRequest {
   profile: UnattendedProfile
   /** Overrides the built-in template with operator-provided content. */
   answer_file?: string
+  /** Selects a stored answer profile; the server resolves it when set. */
+  answer_profile_id?: string
   spec?: UnattendedAnswerSpec
   network?: string
   root_disk?: string
   start?: boolean
+}
+
+/** A reusable unattended-install answer configuration. */
+export interface AnswerProfile {
+  id: string
+  name: string
+  profile: UnattendedProfile
+  hostname?: string
+  username?: string
+  password?: string
+  timezone?: string
+  disk?: string
+  locale?: string
+  keyboard?: string
+  answer_file?: string
+  is_default: boolean
+  created_at: string
+  updated_at: string
 }
 
 export interface UnattendedMedia {

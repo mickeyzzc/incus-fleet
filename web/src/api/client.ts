@@ -48,6 +48,7 @@ import type {
   OpsRequest,
   OpsResult,
   SPICEPrepare,
+  AnswerProfile,
   UnattendedAnswerPreview,
   UnattendedLaunchRequest,
   UnattendedLaunchResult,
@@ -380,6 +381,23 @@ export class ApiClient {
 
   async deleteScript(id: string): Promise<void> {
     await this.request<void>('DELETE', `/api/v1/scripts/${encodeURIComponent(id)}`)
+  }
+
+  async listAnswerProfiles(): Promise<AnswerProfile[]> {
+    const data = await this.request<{ answer_profiles: AnswerProfile[] }>('GET', '/api/v1/answer-profiles')
+    return data.answer_profiles ?? []
+  }
+
+  async createAnswerProfile(request: Omit<AnswerProfile, 'id' | 'created_at' | 'updated_at'>): Promise<AnswerProfile> {
+    return this.request<AnswerProfile>('POST', '/api/v1/answer-profiles', request)
+  }
+
+  async updateAnswerProfile(id: string, request: Omit<AnswerProfile, 'id' | 'created_at' | 'updated_at'>): Promise<AnswerProfile> {
+    return this.request<AnswerProfile>('PATCH', `/api/v1/answer-profiles/${encodeURIComponent(id)}`, request)
+  }
+
+  async deleteAnswerProfile(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/answer-profiles/${encodeURIComponent(id)}`)
   }
 
   async batchKeys(request: BatchKeysRequest): Promise<BatchItem[]> {

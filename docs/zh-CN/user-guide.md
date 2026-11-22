@@ -179,8 +179,11 @@ fleet 支持上传 ISO 安装镜像(如 Debian/Ubuntu/CentOS 官方安装盘),�
    - **Ubuntu autoinstall(Subiquity)** —— Ubuntu Server 20.04+ 镜像;
    - **RHEL / Fedora kickstart** —— RHEL、Rocky、Alma、CentOS Stream、Fedora;
    - **通用 cloud-init(NoCloud 种子)** —— 支持 cloud-init 的自定义 ISO。
-3. 填写模板字段(用户账户、密码、时区;主机名默认取虚拟机名),或勾选
-   **使用自定义应答文件** 粘贴完整的 preseed.cfg / ks.cfg / user-data。
+3. 通过三种方式之一提供应答:
+   - 填写模板字段:主机名(默认取虚拟机名)、用户账户、密码、时区、目标磁盘、语言区域与键盘布局;
+   - 从下拉框选择已存的 **应答配置** —— 配置在 **应答配置** 页面管理,可按安装器类型设为默认,
+     启动安装时若未提供应答内容会自动套用默认配置;
+   - 勾选 **使用自定义应答文件** 粘贴完整的 preseed.cfg / ks.cfg / user-data。
    **预览应答文件** 会渲染出实际下发的内容。
 4. 点击 **开始无人值守安装**。接下来会发生:
    - Debian/RHEL 类型会**重制** ISO:应答文件写入 ISO 根目录,GRUB 配置注入无人值守

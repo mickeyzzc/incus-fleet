@@ -56,6 +56,12 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'titles.assets' },
   },
   {
+    path: '/answer-profiles',
+    name: 'answer-profiles',
+    component: () => import('@/views/AnswerProfilesView.vue'),
+    meta: { titleKey: 'titles.answerProfiles' },
+  },
+  {
     path: '/volumes',
     name: 'fleet-volumes',
     component: () => import('@/views/FleetVolumesView.vue'),

@@ -3,8 +3,9 @@ import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
-import { api, type UnattendedAnswerPreview, type UnattendedProfile } from '@/api'
+import { api, type UnattendedAnswerPreview, type UnattendedProfile, type UnattendedLaunchRequest } from '@/api'
 import { useInstancesStore } from '@/stores/instances'
+import { useAnswerProfilesStore } from '@/stores/answerProfiles'
 import { errorMessage } from '@/utils/errors'
 
 const props = defineProps<{
@@ -21,6 +22,7 @@ const emit = defineEmits<{
 }>()
 
 const instances = useInstancesStore()
+const answerProfiles = useAnswerProfilesStore()
 const { t } = useI18n()
 
 const form = reactive({
@@ -32,10 +34,14 @@ const form = reactive({
 const unattended = reactive({
   enabled: false,
   profile: 'debian-preseed' as UnattendedProfile,
+  profileId: '',
   hostname: '',
   username: '',
   password: '',
   timezone: 'UTC',
+  disk: '',
+  locale: '',
+  keyboard: '',
   custom: false,
   answer: '',
 })
@@ -54,6 +60,42 @@ const visible = computed({
   get: () => props.modelValue,
   set: (value: boolean) => emit('update:modelValue', value),
 })
+
+// Saved configurations for the selected installer family; the server also
+// resolves per-profile defaults, but showing them here keeps the UI honest.
+const availableProfiles = computed(() => answerProfiles.byProfile(unattended.profile))
+
+function applyProfile(id: string): void {
+  unattended.profileId = id
+  const selected = availableProfiles.value.find((p) => p.id === id)
+  if (!selected) {
+    // Empty selection means built-in template; clear back to editable fields.
+    unattended.custom = false
+    unattended.answer = ''
+    return
+  }
+  if (selected.answer_file) {
+    unattended.custom = true
+    unattended.answer = selected.answer_file
+  } else {
+    unattended.custom = false
+    unattended.answer = ''
+    unattended.hostname = selected.hostname ?? ''
+    unattended.username = selected.username ?? ''
+    unattended.password = selected.password ?? ''
+    unattended.timezone = selected.timezone ?? 'UTC'
+    unattended.disk = selected.disk ?? ''
+    unattended.locale = selected.locale ?? ''
+    unattended.keyboard = selected.keyboard ?? ''
+  }
+}
+
+function onProfileFamilyChange(): void {
+  // Switching installer family invalidates a configuration from another one.
+  unattended.profileId = ''
+  unattended.custom = false
+  unattended.answer = ''
+}
 
 // Guess the installer family from the ISO name so the common case is a
 // single click away; the operator can always override.
@@ -74,19 +116,33 @@ watch(
       form.rootDisk = ''
       unattended.enabled = false
       unattended.profile = guessProfile(props.isoName)
+      unattended.profileId = ''
       unattended.hostname = ''
       unattended.username = ''
       unattended.password = ''
       unattended.timezone = 'UTC'
+      unattended.disk = ''
+      unattended.locale = ''
+      unattended.keyboard = ''
       unattended.custom = false
       unattended.answer = ''
       preview.value = null
+      void answerProfiles.fetch().then(() => {
+        const def = answerProfiles.defaultFor(unattended.profile)
+        if (def) {
+          applyProfile(def.id)
+        }
+      })
     }
   },
   { immediate: true },
 )
 
 function validateUnattended(): string {
+  // A saved profile carries its own answer content; no local fields required.
+  if (unansweredProfileSelected()) {
+    return ''
+  }
   if (!unattended.custom && !unattended.username.trim()) {
     return t('iso.usernameRequired')
   }
@@ -96,22 +152,39 @@ function validateUnattended(): string {
   return ''
 }
 
+function unansweredProfileSelected(): boolean {
+  return !unattended.custom && unattended.profileId !== ''
+}
+
+function buildUnattendedRequest(name: string): UnattendedLaunchRequest {
+  const request: UnattendedLaunchRequest = {
+    name,
+    profile: unattended.profile,
+    ...(unattended.profileId ? { answer_profile_id: unattended.profileId } : {}),
+  }
+  if (unattended.custom) {
+    request.answer_file = unattended.answer
+  } else if (!unattended.profileId) {
+    request.spec = {
+      hostname: unattended.hostname || name,
+      username: unattended.username,
+      password: unattended.password,
+      timezone: unattended.timezone,
+      disk: unattended.disk,
+      locale: unattended.locale,
+      keyboard: unattended.keyboard,
+    }
+  }
+  return request
+}
+
 async function loadPreview(): Promise<void> {
   previewing.value = true
   try {
-    preview.value = await api.previewUnattendedAnswer(props.cluster, props.isoPool, props.isoName, {
-      name: form.name.trim() || 'preview',
-      profile: unattended.profile,
-      answer_file: unattended.custom ? unattended.answer : undefined,
-      spec: unattended.custom
-        ? undefined
-        : {
-            hostname: unattended.hostname || form.name.trim(),
-            username: unattended.username,
-            password: unattended.password,
-            timezone: unattended.timezone,
-          },
-    })
+    preview.value = await api.previewUnattendedAnswer(
+      props.cluster, props.isoPool, props.isoName,
+      buildUnattendedRequest(form.name.trim() || 'preview'),
+    )
   } catch (err) {
     ElMessage.error(t('iso.previewFailed', { error: errorMessage(err) }))
   } finally {
@@ -133,21 +206,14 @@ async function submit(): Promise<void> {
     }
 
     try {
-      const launch = await instances.launchUnattended(props.cluster, props.isoPool, props.isoName, {
-        name: form.name.trim(),
-        profile: unattended.profile,
-        answer_file: unattended.custom ? unattended.answer : undefined,
-        spec: unattended.custom
-          ? undefined
-          : {
-              hostname: unattended.hostname || form.name.trim(),
-              username: unattended.username,
-              password: unattended.password,
-              timezone: unattended.timezone,
-            },
-        network: form.network || undefined,
-        root_disk: form.rootDisk.trim() || undefined,
-      })
+      const launch = await instances.launchUnattended(
+        props.cluster, props.isoPool, props.isoName,
+        {
+          ...buildUnattendedRequest(form.name.trim()),
+          network: form.network || undefined,
+          root_disk: form.rootDisk.trim() || undefined,
+        },
+      )
       ElMessage.success(t('iso.unattendedLaunched', { name: launch?.name ?? form.name.trim() }))
       emit('launched', form.name.trim())
       visible.value = false
@@ -213,7 +279,7 @@ async function submit(): Promise<void> {
 
       <template v-if="unattended.enabled">
         <el-form-item :label="t('iso.unattendedProfile')">
-          <el-select v-model="unattended.profile" style="width: 100%">
+          <el-select v-model="unattended.profile" style="width: 100%" @change="onProfileFamilyChange">
             <el-option
               v-for="item in profiles"
               :key="item.value"
@@ -224,8 +290,29 @@ async function submit(): Promise<void> {
           <p class="field-hint">{{ t('iso.profileHint') }}</p>
         </el-form-item>
 
+        <el-form-item :label="t('iso.answerProfile')">
+          <el-select
+            v-model="unattended.profileId"
+            clearable
+            style="width: 100%"
+            :placeholder="t('iso.noProfile')"
+            @change="applyProfile(unattended.profileId)"
+          >
+            <el-option
+              v-for="item in availableProfiles"
+              :key="item.id"
+              :label="item.name + (item.is_default ? ' (default)' : '')"
+              :value="item.id"
+            />
+          </el-select>
+          <p v-if="availableProfiles.length === 0" class="field-hint">{{ t('iso.profileHintNone') }}</p>
+        </el-form-item>
+
         <el-form-item>
-          <el-checkbox v-model="unattended.custom">{{ t('iso.customAnswer') }}</el-checkbox>
+          <el-checkbox
+            v-model="unattended.custom"
+            @change="unattended.custom && (unattended.profileId = '')"
+          >{{ t('iso.customAnswer') }}</el-checkbox>
         </el-form-item>
 
         <el-form-item v-if="unattended.custom" :label="t('iso.answerFile')">
@@ -238,6 +325,9 @@ async function submit(): Promise<void> {
         </el-form-item>
 
         <template v-else>
+          <el-form-item :label="t('iso.specHostname')">
+            <el-input v-model="unattended.hostname" :placeholder="t('answerProfiles.hostnamePlaceholder')" />
+          </el-form-item>
           <el-form-item :label="t('iso.specUsername')">
             <el-input v-model="unattended.username" placeholder="fleet" />
           </el-form-item>
@@ -246,6 +336,15 @@ async function submit(): Promise<void> {
           </el-form-item>
           <el-form-item :label="t('iso.specTimezone')">
             <el-input v-model="unattended.timezone" placeholder="UTC" />
+          </el-form-item>
+          <el-form-item :label="t('iso.specDisk')">
+            <el-input v-model="unattended.disk" placeholder="/dev/vda" />
+          </el-form-item>
+          <el-form-item :label="t('iso.specLocale')">
+            <el-input v-model="unattended.locale" placeholder="en_US" />
+          </el-form-item>
+          <el-form-item :label="t('iso.specKeyboard')">
+            <el-input v-model="unattended.keyboard" placeholder="us" />
           </el-form-item>
         </template>
 

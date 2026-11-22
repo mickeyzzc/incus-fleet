@@ -202,9 +202,15 @@ installation media, forces the installer's default boot entry, and watches for c
    - **Ubuntu autoinstall (Subiquity)** — Ubuntu server 20.04+ ISOs;
    - **RHEL / Fedora kickstart** — RHEL, Rocky, Alma, CentOS Stream, Fedora;
    - **Generic cloud-init (NoCloud seed)** — custom ISOs that honor cloud-init.
-3. Either fill the template fields (user account, password, timezone; hostname defaults to the
-   VM name) or enable **Provide my own answer file** and paste a complete preseed.cfg / ks.cfg /
-   user-data. **Preview answer file** renders exactly what will be shipped.
+3. Supply the answers in one of three ways:
+   - Fill the template fields: hostname (defaults to the VM name), user account, password,
+     timezone, target disk, locale, and keyboard layout;
+   - Pick a saved **Answer profile** from the dropdown — configurations are managed under the
+     **Answer profiles** page, can be marked as the default for their installer, and are applied
+     automatically when a launch supplies no answer content;
+   - Enable **Provide my own answer file** and paste a complete preseed.cfg / ks.cfg / user-data.
+
+   **Preview answer file** renders exactly what will be shipped.
 4. Click **Start unattended install**. What happens next:
    - Debian/RHEL profiles are *remastered*: the answer file is added to the ISO and the GRUB
      configuration gains the unattended kernel arguments plus a 10-second default boot. The
