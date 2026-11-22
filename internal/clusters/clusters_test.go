@@ -486,25 +486,12 @@ func TestClusterWatchRetriesOffline(t *testing.T) {
 		attempts.Add(1)
 		return nil, errors.New("offline")
 	}
-	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")}, dial, testLogger())
+	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")}, dial, testLogger(), WithWatchInterval(10*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(m.Close)
-	m.watchInterval = 10 * time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		m.watch(ctx)
-		close(done)
-	}()
 	time.Sleep(80 * time.Millisecond)
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("watch did not stop")
-	}
 	if attempts.Load() < 2 {
 		t.Fatalf("watch attempts = %d", attempts.Load())
 	}
@@ -518,19 +505,15 @@ func TestClusterWatchSuccessBranch(t *testing.T) {
 		}
 		return &incusfake.Server{}, nil
 	}
-	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")}, dial, testLogger())
+	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")}, dial, testLogger(), WithWatchInterval(10*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(m.Close)
-	m.watchInterval = 10 * time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		m.watch(ctx)
-		close(done)
-	}()
-	deadline := time.Now().Add(2 * time.Second)
+	// Under -race with many packages testing in parallel the watcher goroutine
+	// can be starved well past the 10ms tick; a generous wall-clock deadline
+	// keeps the test from flaking while the early break keeps it fast.
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		conn, err := m.Connection("c1")
 		if err == nil {
@@ -546,12 +529,6 @@ func TestClusterWatchSuccessBranch(t *testing.T) {
 	}
 	if _, err := conn.Client(); err != nil {
 		t.Fatalf("watch did not reconnect: %v", err)
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("watch did not stop")
 	}
 }
 
@@ -595,7 +572,7 @@ func TestClusterWatchHealthCheckSwitchesEndpoint(t *testing.T) {
 		}
 		return &incusfake.Server{}, nil
 	}
-	m, err := NewWithDialer(context.Background(), []config.Cluster{cfg}, dial, testLogger())
+	m, err := NewWithDialer(context.Background(), []config.Cluster{cfg}, dial, testLogger(), WithWatchInterval(10*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -608,22 +585,16 @@ func TestClusterWatchHealthCheckSwitchesEndpoint(t *testing.T) {
 		t.Fatalf("initial endpoint = %q", conn.ActiveEndpoint())
 	}
 	first.fail.Store(true)
-	m.watchInterval = 10 * time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		m.watch(ctx)
-		close(done)
-	}()
-	deadline := time.Now().Add(2 * time.Second)
+	// Same starvation consideration as the reconnect test above: the deadline
+	// must tolerate a heavily loaded -race runner; the early break keeps the
+	// passing path fast.
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if conn.ActiveEndpoint() == cfg.Endpoints[1] {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	cancel()
-	<-done
 	if conn.ActiveEndpoint() != cfg.Endpoints[1] {
 		t.Fatalf("failover endpoint = %q", conn.ActiveEndpoint())
 	}

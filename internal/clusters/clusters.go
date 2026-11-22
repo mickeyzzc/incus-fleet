@@ -298,8 +298,18 @@ func New(ctx context.Context, cfgs []config.Cluster, logger *slog.Logger) (*Mana
 	return NewWithDialer(ctx, cfgs, DefaultDial, logger)
 }
 
+// DialOption customizes the manager before its watch goroutine starts.
+type DialOption func(*Manager)
+
+// WithWatchInterval sets the cluster health-check cadence. It exists for
+// tests: the watch goroutine reads the interval once at start, so the value
+// must be in place before construction returns, never written afterwards.
+func WithWatchInterval(d time.Duration) DialOption {
+	return func(m *Manager) { m.watchInterval = d }
+}
+
 // NewWithDialer builds a manager with an injectable dialer for tests.
-func NewWithDialer(ctx context.Context, cfgs []config.Cluster, dial DialFunc, logger *slog.Logger) (*Manager, error) {
+func NewWithDialer(ctx context.Context, cfgs []config.Cluster, dial DialFunc, logger *slog.Logger, opts ...DialOption) (*Manager, error) {
 	if dial == nil {
 		return nil, errors.New("clusters: dialer is required")
 	}
@@ -314,12 +324,15 @@ func NewWithDialer(ctx context.Context, cfgs []config.Cluster, dial DialFunc, lo
 		conns:         make(map[string]*Connection, len(cfgs)),
 		watchInterval: 10 * time.Second,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
 	watchCtx, cancel := context.WithCancel(context.Background())
 	m.watchCancel = cancel
-	go m.watch(watchCtx)
 
 	for _, cfg := range cfgs {
 		if _, exists := m.conns[cfg.Name]; exists {
+			cancel()
 			return nil, fmt.Errorf("clusters: duplicate cluster %q", cfg.Name)
 		}
 
@@ -331,6 +344,10 @@ func NewWithDialer(ctx context.Context, cfgs []config.Cluster, dial DialFunc, lo
 		m.order = append(m.order, cfg.Name)
 		m.conns[cfg.Name] = conn
 	}
+
+	// Start watching only once the connection map is fully populated: the
+	// watcher reads the map under a read lock, and these writes are unsynchronized.
+	go m.watch(watchCtx)
 
 	return m, nil
 }
