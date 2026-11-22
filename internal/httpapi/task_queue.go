@@ -25,6 +25,11 @@ func (a *API) enqueueHostTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "cluster manager is not configured")
 		return
 	}
+	if !a.taskWorker {
+		writeError(w, http.StatusServiceUnavailable, "no_worker",
+			"no task dispatcher is running; enable HA or a shared database so queued tasks can be claimed")
+		return
+	}
 
 	var req struct {
 		Cluster string          `json:"cluster"`

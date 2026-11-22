@@ -117,6 +117,7 @@ func newAPIFixtureWithDeps(t *testing.T, source, target *incusfake.Server, authe
 		NodeNet:        nodeAccess,
 		Auth:           authenticator,
 		StaticFS:       staticFS,
+		TaskWorker:     true,
 		Logger:         logger,
 		Version:        "test",
 	}

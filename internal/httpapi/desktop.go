@@ -180,5 +180,7 @@ func (a *API) writeConsoleError(w http.ResponseWriter, r *http.Request, err erro
 		return
 	}
 
-	a.serviceError(w, r, err)
+	// Host-command failures are operator diagnostics; keep their text even on
+	// a 500 instead of the generic internal-error message.
+	a.serviceError(w, r, operatorFacing(err))
 }
