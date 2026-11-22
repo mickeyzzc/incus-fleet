@@ -22,7 +22,8 @@ COVERPKG := $(shell $(GO) list ./internal/... 2>/dev/null | grep -v -E '/interna
 GO_FILES := $(shell find cmd internal web -name '*.go' -not -path '*/node_modules/*')
 
 .PHONY: help deps frontend backend build run test test-go test-web coverage coverage-go coverage-web \
-	lint lint-go lint-web fmt fmt-check vet tidy check release clean proto agent-test agent-lint agent-build agent-ebpf
+	lint lint-go lint-web fmt fmt-check vet tidy check release clean proto agent-test agent-lint agent-build agent-ebpf \
+	hooks secret-scan secret-scan-all secret-scan-history
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -101,7 +102,19 @@ vet: ## Run go vet
 tidy: ## Tidy Go modules
 	$(GO) mod tidy
 
-check: fmt-check vet lint test ## Full local verification
+hooks: ## Install the repository git hooks (run once after cloning)
+	./scripts/install-hooks.sh
+
+secret-scan: ## Scan staged changes for secrets and real infrastructure
+	./scripts/secret-scan.sh --staged
+
+secret-scan-all: ## Scan every tracked file
+	./scripts/secret-scan.sh --all
+
+secret-scan-history: ## Scan every reachable commit for private keys
+	./scripts/secret-scan.sh --history
+
+check: fmt-check vet lint test secret-scan-all ## Full local verification
 
 release: frontend ## Cross-compile Linux binaries into dist/
 	mkdir -p dist

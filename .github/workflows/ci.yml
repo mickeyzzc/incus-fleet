@@ -13,6 +13,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Runs first: a leaked credential must fail the build before any artifact is
+  # produced, and must fail on forks where hooks cannot be installed.
+  secrets:
+    name: Secret and infrastructure scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # history scan needs every commit
+
+      - name: Scan tracked files
+        run: ./scripts/secret-scan.sh --all
+
+      - name: Scan history for private keys
+        run: ./scripts/secret-scan.sh --history
+
   backend:
     name: Go build, test, coverage
     runs-on: ubuntu-latest

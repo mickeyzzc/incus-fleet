@@ -32,8 +32,8 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
 	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
 	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
-	"github.com/mickeyzzc/incus-fleet/internal/overlay"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
+	"github.com/mickeyzzc/incus-fleet/internal/overlay"
 	"github.com/mickeyzzc/incus-fleet/internal/remotewrite"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/taskrunner"
@@ -377,7 +377,6 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	}
 
 	handler := httpapi.New(httpapi.Deps{
-<<<<<<< HEAD
 		Clusters:       manager,
 		Instances:      instancesService,
 		Assets:         assetsService,
@@ -387,6 +386,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		NodeNet:        nodeAccess,
 		NodeJoin:       nodeJoin,
 		GuestAgent:     guestAgent,
+		Overlay:        overlayService,
 		Agent:          agentGW,
 		AgentInstall:   agentInstall,
 		Mesh:           centerMesh,
@@ -394,24 +394,6 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		CertIssuer:     agentGW,
 		Telemetry:      telemetryStore,
 		MetricsQuery:   queryProxy,
-=======
-		Clusters:     manager,
-		Instances:    instancesService,
-		Assets:       assetsService,
-		Migrations:   migrationsService,
-		Store:        st,
-		NodeNet:      nodeAccess,
-		NodeJoin:     nodeJoin,
-		GuestAgent:   guestAgent,
-		Overlay:      overlayService,
-		Agent:        agentGW,
-		AgentInstall: agentInstall,
-		Mesh:         centerMesh,
-		Bootstrap:    agentGW,
-		CertIssuer:   agentGW,
-		Telemetry:    telemetryStore,
-		MetricsQuery: queryProxy,
->>>>>>> 4ff0a8e (feat(network): add intra-cluster private interconnect overlay)
 		MetricsSD: httpapi.MetricsSDConfig{
 			Enabled: cfg.Metrics.HTTPSD.Enabled, Token: cfg.Metrics.HTTPSD.Token,
 			PublicURL: cfg.Metrics.HTTPSD.PublicURL, Mode: cfg.Metrics.HTTPSD.Mode,

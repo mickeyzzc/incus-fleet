@@ -79,8 +79,8 @@ make build
 生成客户端证书，在每个集群上信任它，然后写入配置：
 
 ```bash
-scripts/gen-client-cert.sh incus-fleet ./certs
-incus config trust add-certificate ./certs/incus-fleet.crt --name incus-fleet
+scripts/gen-client-cert.sh incus-fleet ~/.config/incus-fleet/certs
+incus config trust add-certificate ~/.config/incus-fleet/certs/incus-fleet.crt --name incus-fleet
 install -m 600 deploy/examples/config.sqlite.yaml config.local.yaml
 $EDITOR config.local.yaml
 INCUS_FLEET_AUTH_TOKEN="$(openssl rand -hex 32)" ./bin/incus-fleet -config config.local.yaml -check

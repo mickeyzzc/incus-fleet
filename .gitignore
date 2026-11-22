@@ -1,40 +1,135 @@
-# Local-only agent instructions and configuration process docs
-/AGENTS.md
-/docs/local/
+# incus-fleet .gitignore
+#
+# Layering principle: deny by location and by credential shape, not by a few
+# known filenames. A note copied out of docs/local/ must still be caught, so
+# every "local material" location below is ignored as a whole directory and
+# credential-shaped suffixes are ignored everywhere.
+#
+# Run `make hooks` once after cloning to install the pre-commit scanner that
+# backs these rules with a content check (see .githooks/pre-commit).
 
-# Secrets and local state
+# --- Local-only instructions and working notes ------------------------------
+# Never commit operator notes, audit trails, or agent instructions. They carry
+# real subnets, hostnames, and credentials by design.
+/AGENTS.md
+/local-notes/
+/docs/local/
+*.local.md
+*.local.yaml
+*.local.yml
+*.local.json
+*.private.md
+/notes/
+/scratch/
+/tmp/
+
+# --- Credentials, keys, and tokens (any location) ---------------------------
+# Private keys and certificates: Incus trusts are keyed on these, so a single
+# committed key grants cluster access.
 *.key
 *.pem
 *.crt
+*.cer
+*.der
 *.p12
 *.pfx
+*.jks
+*.keystore
+*.truststore
+*.csr
+*.srl
+# SSH material: authorized_keys and host keys are equally sensitive.
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+id_ecdsa
+id_ecdsa.*
+id_dsa
+id_dsa.*
+*.pub
+authorized_keys
+known_hosts
+# Cloud and kube credentials.
+.kube/
+*.kubeconfig
+kubeconfig
+.aws/
+.azure/
+.gcloud/
+*.tfstate
+*.tfstate.backup
+.terraform/
+*.ovpn
+# Generic tokens and password files.
+*.token
+*.secret
+*.secrets
+*_token
+*token.txt
+*password*.txt
+*passwd
+*credential*
+secrets/
+/secret/
+/private/
+# Environment files: these routinely hold admin tokens and DB passwords.
 *.env
 .env*
-config.local.yaml
-config.yaml
+!.env.example
+
+# --- Local runtime state ----------------------------------------------------
+# Certificates and trust material live outside the repository; see
+# docs/security.md for the environment variables that point at them.
+/certs/
+/state/
 /data/
 /backups/
 /logs/
-/coverage.out
-/coverage.html
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+coverage.out
+coverage.html
+coverage.txt
 
-# Go build artifacts
+# --- Local config overrides -------------------------------------------------
+config.local.yaml
+config.yaml
+config.postgres.local.yaml
+config.rqlite.local.yaml
+
+# --- Build artifacts --------------------------------------------------------
 /bin/
 /dist/
-
-# Rust agent build artifacts
 /agent/target/
 /agent/bpf/*.o
+*.exe
+*.dll
+*.so
+*.dylib
 
-# Frontend
+# --- Frontend ---------------------------------------------------------------
 /web/node_modules/
 /web/dist/*
 !/web/dist/.gitkeep
 /web/coverage/
 *.tsbuildinfo
+.vite/
+.eslintcache
+.stylelintcache
 
-# Editor/OS
+# --- Editor and OS noise ----------------------------------------------------
 .DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
 .idea/
 .vscode/
 *.swp
+*.swo
+*~

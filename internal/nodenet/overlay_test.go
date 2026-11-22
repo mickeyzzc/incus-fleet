@@ -73,7 +73,7 @@ func TestAddBridgeCreatesAndIsIdempotent(t *testing.T) {
 
 	// Simulate an existing bridge with the address already applied.
 	r2 := &fakeRunner{outputs: map[string]string{
-		"ip link show fleetbr0":       "3: fleetbr0: <BROADCAST> mtu 1450",
+		"ip link show fleetbr0":        "3: fleetbr0: <BROADCAST> mtu 1450",
 		"ip -j addr show dev fleetbr0": `[{"addr_info":[{"local":"198.51.100.1","prefixlen":24}]}]`,
 	}}
 	svc2 := NewService(r2)

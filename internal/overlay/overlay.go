@@ -78,20 +78,20 @@ type MemberStatus struct {
 
 // Status is the overlay as reported to the API.
 type Status struct {
-	Cluster       string          `json:"cluster"`
-	Name          string          `json:"name"`
-	Bridge        string          `json:"bridge"`
-	VNI           int             `json:"vni"`
-	Subnet        string          `json:"subnet"`
-	GatewayMember string          `json:"gateway_member"`
-	MTU           int             `json:"mtu"`
-	DHCPStart     string          `json:"dhcp_start,omitempty"`
-	DHCPEnd       string          `json:"dhcp_end,omitempty"`
-	Enabled       bool            `json:"enabled"`
-	Members       []MemberStatus  `json:"members"`
-	Tunnels       [][2]string     `json:"tunnels"`
-	Steps         []string        `json:"steps,omitempty"`
-	Detail        map[string]any  `json:"detail,omitempty"`
+	Cluster       string         `json:"cluster"`
+	Name          string         `json:"name"`
+	Bridge        string         `json:"bridge"`
+	VNI           int            `json:"vni"`
+	Subnet        string         `json:"subnet"`
+	GatewayMember string         `json:"gateway_member"`
+	MTU           int            `json:"mtu"`
+	DHCPStart     string         `json:"dhcp_start,omitempty"`
+	DHCPEnd       string         `json:"dhcp_end,omitempty"`
+	Enabled       bool           `json:"enabled"`
+	Members       []MemberStatus `json:"members"`
+	Tunnels       [][2]string    `json:"tunnels"`
+	Steps         []string       `json:"steps,omitempty"`
+	Detail        map[string]any `json:"detail,omitempty"`
 }
 
 // Request is one create or update of an overlay.

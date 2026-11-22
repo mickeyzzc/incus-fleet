@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Pre-commit guard: reject staged changes that carry credentials, private
+# keys, real LAN addressing, or operator hostnames.
+#
+# Install once per clone:
+#   make hooks          (or: scripts/install-hooks.sh)
+#
+# Bypass is deliberately awkward: use `git commit --no-verify` only when you
+# have read every finding. CI runs the same scan, so a bypass still fails the
+# build before merge.
+
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$repo_root" || exit 1
+
+scanner="$repo_root/scripts/secret-scan.sh"
+if [ ! -x "$scanner" ]; then
+	echo "pre-commit: $scanner is missing or not executable" >&2
+	echo "pre-commit: run 'make hooks' to install the scanner" >&2
+	exit 1
+fi
+
+echo "pre-commit: scanning staged changes for secrets and real infrastructure"
+if ! "$scanner" --staged; then
+	echo
+	echo "pre-commit: blocked. Fix the findings above, or stage a sanitised"
+	echo "pre-commit: version (RFC 5737 addresses, *.example hostnames)."
+	exit 1
+fi
+
+# Guard the other leak vector: a local-only note staged by accident. .gitignore
+# should already stop these, so a hit means someone used `git add -f`.
+local_only=$(git diff --cached --name-only | grep -E '(^|/)(AGENTS\.md|docs/local/|local-notes/|notes/|scratch/)' || true)
+if [ -n "$local_only" ]; then
+	echo "pre-commit: refusing to commit local-only material:" >&2
+	printf '  %s\n' $local_only >&2
+	echo "pre-commit: these paths hold operator notes and must stay local." >&2
+	exit 1
+fi
+
+exit 0

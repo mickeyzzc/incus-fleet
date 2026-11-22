@@ -29,8 +29,8 @@ func TestSchemaMigrations(t *testing.T) {
 	if err := s.db.QueryRowContext(context.Background(), `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if version != 8 {
-		t.Fatalf("schema version = %d, want 8", version)
+	if version != 9 {
+		t.Fatalf("schema version = %d, want 9", version)
 	}
 }
 
@@ -63,7 +63,7 @@ func TestSchemaMigrationFromLegacyDatabase(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	version, err := s.SchemaVersion(context.Background())
-	if err != nil || version != 8 {
+	if err != nil || version != 9 {
 		t.Fatalf("SchemaVersion() = %d, %v", version, err)
 	}
 	old, err := s.GetMigration(context.Background(), "old")
@@ -640,8 +640,8 @@ func TestApplyMigrationIsReRunnable(t *testing.T) {
 	}
 
 	version, err := s.SchemaVersion(ctx)
-	if err != nil || version != 8 {
-		t.Fatalf("SchemaVersion() = %d, %v; want 8", version, err)
+	if err != nil || version != 9 {
+		t.Fatalf("SchemaVersion() = %d, %v; want 9", version, err)
 	}
 }
 

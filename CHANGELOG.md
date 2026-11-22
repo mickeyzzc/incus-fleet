@@ -10,6 +10,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Leak prevention is now enforced rather than remembered: a hardened
+  `.gitignore` denies whole local-material directories and credential-shaped
+  files, `scripts/secret-scan.sh` inspects real content (private keys,
+  credential assignments, bearer tokens, operator subnets and hostnames) before
+  a commit, and a CI job runs the same scan over every tracked file and every
+  commit. Certificates moved out of the repository to
+  `~/.config/incus-fleet/certs`; see docs/security.md.
 - Cluster private interconnect networks: fleet creates a host bridge on every
   member, joins them with point-to-point VXLAN tunnels, and runs DHCP/NAT from
   one gateway member so instances on all nodes share a private network without
