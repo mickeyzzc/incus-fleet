@@ -301,19 +301,25 @@ func (s *Service) Update(ctx context.Context, clusterName, name string, req Upda
 			if network == "" {
 				return Detail{}, fmt.Errorf("%w: network is required", ErrInvalidRequest)
 			}
-			networks, err := client.GetNetworkNames()
+			networks, err := client.GetNetworks()
 			if err != nil {
 				return Detail{}, fmt.Errorf("instances: list networks for %s: %w", clusterName, err)
 			}
-			if !containsString(networks, network) {
-				return Detail{}, fmt.Errorf("%w: network %q does not exist on %s", ErrInvalidRequest, network, clusterName)
+			target, err := findNetwork(networks, network, clusterName)
+			if err != nil {
+				return Detail{}, err
 			}
-			nic["network"] = network
-			// "network" and "nictype"/"parent" are mutually exclusive in Incus;
-			// a legacy NIC (nictype+parent) must drop those keys on switch or
-			// the update is rejected outright.
-			delete(nic, "nictype")
-			delete(nic, "parent")
+			staticIPv4 := ""
+			if req.IPv4 != nil {
+				staticIPv4 = strings.TrimSpace(*req.IPv4)
+			}
+			staticIPv6 := ""
+			if req.IPv6 != nil {
+				staticIPv6 = strings.TrimSpace(*req.IPv6)
+			}
+			if err := applyNICNetwork(nic, target, network, staticIPv4, staticIPv6); err != nil {
+				return Detail{}, err
+			}
 		}
 
 		if req.IPv4 != nil {
@@ -369,8 +375,10 @@ func (s *Service) Action(ctx context.Context, clusterName, name string, req Acti
 	return waitOperation(ctx, op, action+" "+name)
 }
 
-// Delete stops a running instance before deleting it.
-func (s *Service) Delete(ctx context.Context, clusterName, name string, force bool) error {
+// Delete stops a running instance before deleting it. When deleteVolumes is
+// set, attached custom volumes (disk devices with pool+source) are removed
+// afterwards; shared ISO installer assets are kept.
+func (s *Service) Delete(ctx context.Context, clusterName, name string, force, deleteVolumes bool) error {
 	client, err := s.client(clusterName)
 	if err != nil {
 		return err
@@ -383,6 +391,11 @@ func (s *Service) Delete(ctx context.Context, clusterName, name string, force bo
 		}
 
 		return fmt.Errorf("instances: state %s:%s: %w", clusterName, name, err)
+	}
+
+	var attached []attachedVolume
+	if deleteVolumes {
+		attached = attachedCustomVolumes(client, name)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, deleteTimeout)
@@ -406,8 +419,63 @@ func (s *Service) Delete(ctx context.Context, clusterName, name string, force bo
 	if err != nil {
 		return fmt.Errorf("instances: delete %s:%s: %w", clusterName, name, err)
 	}
+	if err := waitOperation(ctx, op, "delete "+name); err != nil {
+		return err
+	}
 
-	return waitOperation(ctx, op, "delete "+name)
+	if len(attached) > 0 {
+		s.deleteAttachedVolumes(client, clusterName, name, attached)
+	}
+
+	return nil
+}
+
+// attachedVolume is one custom volume referenced by a disk device.
+type attachedVolume struct {
+	pool   string
+	volume string
+}
+
+// attachedCustomVolumes collects the pool+source pairs of the instance's
+// disk devices. Missing configs degrade to an empty list: the option then
+// simply has nothing to remove.
+func attachedCustomVolumes(client clusters.InstanceServer, name string) []attachedVolume {
+	inst, _, err := client.GetInstance(name)
+	if err != nil || inst == nil {
+		return nil
+	}
+
+	var out []attachedVolume
+	for _, device := range inst.Devices {
+		if device["type"] != "disk" || device["pool"] == "" || device["source"] == "" {
+			continue
+		}
+
+		out = append(out, attachedVolume{pool: device["pool"], volume: device["source"]})
+	}
+
+	return out
+}
+
+// deleteAttachedVolumes removes the instance's custom volumes, best effort.
+// ISO volumes are shared installer assets and are never deleted; anything
+// else that fails is logged so the deletion itself still counts as done.
+func (s *Service) deleteAttachedVolumes(client clusters.InstanceServer, clusterName, name string, attached []attachedVolume) {
+	for _, vol := range attached {
+		v, _, err := client.GetStoragePoolVolume(vol.pool, "custom", vol.volume)
+		if err != nil {
+			continue // volume already gone or inaccessible; nothing to clean
+		}
+		if v != nil && v.ContentType == "iso" {
+			continue // shared installer asset, not instance-owned storage
+		}
+
+		if err := client.DeleteStoragePoolVolume(vol.pool, "custom", vol.volume); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("failed to delete attached volume", "cluster", clusterName, "instance", name, "pool", vol.pool, "volume", vol.volume, "error", err)
+			}
+		}
+	}
 }
 
 // Images lists the local images available on a cluster.
@@ -521,6 +589,46 @@ func (s *Service) Resources(clusterName string) (Resources, error) {
 	})
 
 	return out, nil
+}
+
+// findNetwork locates one network by name in a listing.
+func findNetwork(networks []api.Network, name, clusterName string) (*api.Network, error) {
+	for i := range networks {
+		if networks[i].Name == name {
+			return &networks[i], nil
+		}
+	}
+
+	return nil, fmt.Errorf("%w: network %q does not exist on %s", ErrInvalidRequest, name, clusterName)
+}
+
+// applyNICNetwork translates a selected network into the right NIC device
+// shape: managed networks attach through the "network" key, unmanaged
+// physical parents through nictype=macvlan + parent — matching the create
+// path, so Incus never receives an unmanaged name in "network" ("Network not
+// found"). Static device addresses only apply to managed bridges.
+func applyNICNetwork(nic map[string]string, target *api.Network, network, staticIPv4, staticIPv6 string) error {
+	if target.Managed {
+		nic["network"] = network
+		// "network" and "nictype"/"parent" are mutually exclusive in Incus;
+		// a legacy NIC (nictype+parent) must drop those keys on switch or
+		// the update is rejected outright.
+		delete(nic, "nictype")
+		delete(nic, "parent")
+		return nil
+	}
+
+	if staticIPv4 != "" || staticIPv6 != "" {
+		return fmt.Errorf("%w: physical NIC %q takes addresses from the LAN DHCP server; configure a static address inside the instance instead", ErrInvalidRequest, network)
+	}
+
+	delete(nic, "network")
+	delete(nic, "ipv4.address")
+	delete(nic, "ipv6.address")
+	nic["nictype"] = "macvlan"
+	nic["parent"] = network
+
+	return nil
 }
 
 func (s *Service) client(clusterName string) (clusters.InstanceServer, error) {

@@ -271,9 +271,9 @@ describe('instances store', () => {
     store.items = [instanceSummary(), instanceSummary({ name: 'vm1' })]
     store.details = { 'c1/web': instanceDetail() }
 
-    await store.deleteInstance('c1', 'web', true)
+    await store.deleteInstance('c1', 'web', true, true)
 
-    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true)
+    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true, true)
     expect(store.items.map((item) => item.name)).toEqual(['vm1'])
     expect(store.detail('c1', 'web')).toBeUndefined()
   })

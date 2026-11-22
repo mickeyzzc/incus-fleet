@@ -167,7 +167,14 @@ describe('InstancesView', () => {
     await buttonByText(wrapper, 'Delete').trigger('click')
     await flushPromises()
 
-    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true)
+    // The delete dialog carries the volumes option (#13 F5); its footer
+    // button performs the deletion.
+    const dialog = wrapper.findComponent({ name: 'InstanceDeleteDialog' })
+    expect(dialog.exists()).toBe(true)
+    await dialog.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true, false)
     expect(ElMessage.success).toHaveBeenCalledWith('Deleted web.')
   })
 
@@ -193,6 +200,21 @@ describe('InstancesView', () => {
     await wrapper.find('input').setValue('nothing-here')
 
     expect(wrapper.text()).toContain('No instances match the filters')
+  })
+
+  it('configures the table to keep selections across polling refreshes', () => {
+    const wrapper = mountInstances()
+
+    // row-key + reserve-selection survive the 15s refresh instead of
+    // clearing the user's batch picks (#12).
+    const table = wrapper.findComponent({ name: 'ElTable' })
+    expect(typeof table.props('rowKey')).toBe('function')
+    const selectionColumn = wrapper
+      .findAllComponents({ name: 'ElTableColumn' })
+      .find((column) => column.props('type') === 'selection')
+    expect(selectionColumn?.props('reserveSelection')).toBe(true)
+
+    wrapper.unmount()
   })
 
   it('runs batch power on selected instances after confirmation', async () => {

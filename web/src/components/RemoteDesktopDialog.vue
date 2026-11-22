@@ -12,6 +12,9 @@ import { errorMessage } from '@/utils/errors'
 // second, so this keeps interactive latency acceptable without flooding the
 // host with SSH sessions.
 const POLL_INTERVAL_MS = 800
+// While the guest is stopped no frame can be served; poll slowly and only to
+// notice a power-on instead of hammering the screenshot endpoint.
+const STOPPED_POLL_INTERVAL_MS = 5000
 // Drag-motion throttle: one absolute move per tick while a button is held.
 const MOVE_THROTTLE_MS = 150
 // Keys that only modify other keys; sending them alone is wasted round trips.
@@ -137,6 +140,15 @@ async function pollFrame(session: number): Promise<void> {
     return
   }
 
+  if (!running.value) {
+    // A stopped guest cannot serve frames: skip the screenshot fetch
+    // entirely, re-check the power state, and slow-poll until a start is
+    // noticed (#13 F9).
+    void instances.fetchDetail(props.cluster, props.instance).catch(() => {})
+    schedulePoll(session, STOPPED_POLL_INTERVAL_MS)
+    return
+  }
+
   pollBusy = true
   try {
     const blob = await api.desktopScreenshot(props.cluster, props.instance)
@@ -151,6 +163,9 @@ async function pollFrame(session: number): Promise<void> {
       // A stopped guest cannot serve frames; the offline notice explains the
       // situation, so the raw host error would only add noise.
       status.value = running.value ? errorMessage(err) : ''
+      // A failed frame may mean the guest stopped; refresh the power state
+      // so the next poll takes the idle branch instead of hammering on.
+      void instances.fetchDetail(props.cluster, props.instance).catch(() => {})
     }
   } finally {
     pollBusy = false

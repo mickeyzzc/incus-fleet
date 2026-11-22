@@ -665,8 +665,17 @@ export class ApiClient {
     return data.metrics
   }
 
-  async deleteInstance(cluster: string, name: string, force = false): Promise<void> {
-    const query = force ? '?force=true' : ''
+  async deleteInstance(cluster: string, name: string, force = false, volumes = false): Promise<void> {
+    const params = new URLSearchParams()
+    if (force) {
+      params.set('force', 'true')
+    }
+    // volumes=true also removes attached custom volumes (shared ISO
+    // installer assets are kept server-side).
+    if (volumes) {
+      params.set('volumes', 'true')
+    }
+    const query = params.size > 0 ? `?${params.toString()}` : ''
     await this.request<void>(
       'DELETE',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(name)}${query}`,

@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import ElementPlus, { ElMessage } from 'element-plus'
+import ElementPlus, { ElMessage, ElMessageBox } from 'element-plus'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -60,6 +60,7 @@ function mockFleet() {
     instanceImage({ fingerprint: 'fedcba098765', aliases: ['ubuntu'], os: 'Ubuntu', cached: false }),
   ])
   vi.mocked(api.deleteImage).mockResolvedValue(undefined)
+  vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as never)
   vi.mocked(api.listISOs).mockResolvedValue([{ name: 'alpine', pool: 'default', description: 'installer' }])
   vi.mocked(api.deleteISO).mockResolvedValue(undefined)
   vi.mocked(api.refreshImage).mockResolvedValue(undefined)
@@ -204,11 +205,20 @@ describe('ClusterView', () => {
     await buttonByText(wrapper, 'Delete').trigger('click')
     await flushPromises()
 
-    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true)
+    const dialog = wrapper.findComponent({ name: 'InstanceDeleteDialog' })
+    expect(dialog.exists()).toBe(true)
+    await dialog.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteInstance).toHaveBeenCalledWith('c1', 'web', true, false)
     expect(ElMessage.success).toHaveBeenCalledWith('Deleted web.')
   })
 
-  it('refreshes, reconnects, and reports reconnect errors', async () => {    const { wrapper } = await mountCluster()
+  it('refreshes, reconnects, and reports reconnect errors', async () => {
+    // Freeze timers: the real 15s status loop would fire during slow
+    // coverage-mode runs and shift the call counts.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { wrapper } = await mountCluster()
     expect(api.listClusters).toHaveBeenCalledTimes(1)
 
     await buttonByText(wrapper, 'Refresh').trigger('click')
@@ -224,6 +234,9 @@ describe('ClusterView', () => {
     await buttonByText(wrapper, 'Reconnect').trigger('click')
     await flushPromises()
     expect(ElMessage.error).toHaveBeenCalledWith('still down')
+
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('reloads when the route cluster changes', async () => {
@@ -419,6 +432,9 @@ describe('ClusterView', () => {
     await imageRow?.findAll('button').find((b) => b.text().includes('Delete'))?.trigger('click')
     await flushPromises()
 
+    // Image deletion confirms before firing — it is instant and
+    // unrecoverable, unlike every other destructive action here (#12).
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
     expect(api.deleteImage).toHaveBeenCalledWith('c1', '053059ea4e28')
     expect(ElMessage.success).toHaveBeenCalledWith('Image deleted.')
   })

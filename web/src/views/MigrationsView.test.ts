@@ -63,6 +63,10 @@ describe('MigrationsView', () => {
     expect(wrapper.text()).toContain('Virtual machine')
     expect(wrapper.text()).toContain('Move')
     expect(wrapper.text()).toContain('copying disks')
+    // A completed migration renders the localized status, not the raw
+    // backend marker (#13 F3).
+    expect(wrapper.text()).toContain('Done')
+    expect(wrapper.text()).not.toContain('complete')
     expect(wrapper.text()).toContain('abcdef01…')
 
     wrapper.unmount()

@@ -78,6 +78,40 @@ const isPhysicalNetwork = computed(() => {
   return Boolean(selected && !selected.managed)
 })
 
+// Dropdown grouping: managed networks span the whole cluster, while a
+// physical NIC exists on one member only. Listing every member's NICs flat
+// turned the cluster-level form into an indistinguishable mix, so physical
+// NICs render under one group per member (#13 F6/F7 follow-up).
+const networkGroups = computed(() => {
+  const managed = networks.value.filter((network) => network.managed)
+  const groups: { label: string; options: typeof networks.value }[] = []
+
+  if (managed.length > 0) {
+    groups.push({ label: t('form.managedNetworks'), options: managed })
+  }
+
+  const byLocation = new Map<string, typeof networks.value>()
+  for (const network of networks.value) {
+    if (network.managed) {
+      continue
+    }
+    const location =
+      network.locations.length > 0 ? network.locations.join(', ') : t('cluster.unknownMember')
+    const bucket = byLocation.get(location)
+    if (bucket) {
+      bucket.push(network)
+    } else {
+      byLocation.set(location, [network])
+    }
+  }
+  const physical = [...byLocation.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  for (const [location, options] of physical) {
+    groups.push({ label: t('form.physicalNetworksOn', { member: location }), options })
+  }
+
+  return groups
+})
+
 let pendingCluster = ''
 
 const nicDevice = computed(() => {
@@ -418,16 +452,18 @@ async function submit(): Promise<void> {
             clearable
             style="width: 100%"
           >
-            <el-option
-              v-for="network in networks"
-              :key="network.name"
-              :label="
-                network.managed
-                  ? `${network.name} · ${network.type}`
-                  : t('form.networkPhysical', { name: network.name })
-              "
-              :value="network.name"
-            />
+            <el-option-group v-for="group in networkGroups" :key="group.label" :label="group.label">
+              <el-option
+                v-for="network in group.options"
+                :key="network.name"
+                :label="
+                  network.managed
+                    ? `${network.name} · ${network.type}`
+                    : t('form.networkPhysical', { name: network.name })
+                "
+                :value="network.name"
+              />
+            </el-option-group>
           </el-select>
           <p v-if="isPhysicalNetwork" class="field-hint">
             {{ t('form.networkPhysicalHint') }}

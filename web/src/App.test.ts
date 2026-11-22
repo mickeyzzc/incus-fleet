@@ -138,4 +138,17 @@ describe('App shell', () => {
     expect(wrapper.find('.topbar h1').text()).toBe('Instances')
     expect(wrapper.text()).toContain('Manage independent Incus clusters from one place.')
   })
+
+  it('routes to the login view with a redirect when the session expires mid-page', async () => {
+    const { router } = await mountApp('/instances')
+
+    // A background 401 flips the auth store; the shell must leave the broken
+    // page instead of letting every request fail in place (#12).
+    const auth = useAuthStore()
+    auth.authenticated = false
+    await flushPromises()
+
+    expect(router.currentRoute.value.name).toBe('login')
+    expect(router.currentRoute.value.query.redirect).toBe('/instances')
+  })
 })

@@ -77,7 +77,9 @@ describe('UsersView', () => {
     const passwordInput = wrapper.findAll('.el-dialog input')[1]!
     await passwordInput.setValue('correct-horse-9')
 
-    const save = wrapper.findAll('.el-dialog button').find((b) => b.text().includes('Save'))
+    // The create dialog submits with "Create", not "Save changes" (#13 F2).
+    const save = wrapper.findAll('.el-dialog button').find((b) => b.text().includes('Create'))
+    expect(save?.text()).toBe('Create')
     await save!.trigger('click')
     await flushPromises()
 
@@ -96,7 +98,7 @@ describe('UsersView', () => {
     await flushPromises()
     await wrapper.find('.el-dialog input').setValue('onlyname')
 
-    const save = wrapper.findAll('.el-dialog button').find((b) => b.text().includes('Save'))
+    const save = wrapper.findAll('.el-dialog button').find((b) => b.text().includes('Create'))
     await save!.trigger('click')
     await flushPromises()
 
@@ -112,7 +114,7 @@ describe('UsersView', () => {
     await wrapper.findAll('button').find((b) => b.text().includes('Add user'))!.trigger('click')
     await flushPromises()
 
-    const save = wrapper.findAll('.el-dialog button').find((b) => b.text().includes('Save'))
+    const save = wrapper.findAll('.el-dialog button').find((b) => b.text().includes('Create'))
     await save!.trigger('click')
     await flushPromises()
 
@@ -131,7 +133,7 @@ describe('UsersView', () => {
     await wrapper.find('.el-dialog input').setValue('dup')
     await wrapper.findAll('.el-dialog input')[1]!.setValue('correct-horse-9')
 
-    const save = wrapper.findAll('.el-dialog button').find((b) => b.text().includes('Save'))
+    const save = wrapper.findAll('.el-dialog button').find((b) => b.text().includes('Create'))
     await save!.trigger('click')
     await flushPromises()
 

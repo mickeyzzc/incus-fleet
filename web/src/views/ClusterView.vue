@@ -7,6 +7,7 @@ import { useI18n } from 'vue-i18n'
 
 import InstanceActions from '@/components/InstanceActions.vue'
 import AddClusterMemberDialog from '@/components/AddClusterMemberDialog.vue'
+import InstanceDeleteDialog from '@/components/InstanceDeleteDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import ImageDistributeDialog from '@/components/ImageDistributeDialog.vue'
@@ -76,6 +77,28 @@ const profiles = computed(() => instances.profiles(props.cluster))
 const clusterImages = computed(() => instances.images(props.cluster))
 const clusterISOs = computed(() => instances.isoCache[props.cluster] ?? [])
 const poolNames = computed(() => (resources.value?.storage_pools ?? []).map((pool) => pool.name))
+// Networks ordered for readability: managed networks are cluster-wide, then
+// physical NICs grouped by member — a flat mix of every node's NICs read as
+// one confusing list (#13 F6 follow-up).
+const networkRows = computed(() => {
+  const networks = [...(resources.value?.networks ?? [])]
+  networks.sort((a, b) => {
+    if (a.managed !== b.managed) {
+      return a.managed ? -1 : 1
+    }
+    if (!a.managed && !b.managed) {
+      const memberA = a.locations.join(',')
+      const memberB = b.locations.join(',')
+      if (memberA !== memberB) {
+        return memberA.localeCompare(memberB)
+      }
+    }
+
+    return a.name.localeCompare(b.name)
+  })
+
+  return networks
+})
 const isoImportOpen = ref(false)
 const isoLaunchOpen = ref(false)
 const isoTarget = ref({ name: '', pool: '' })
@@ -96,6 +119,9 @@ function memberStatusLabel(status: string): string {
 }
 
 async function load(force = false): Promise<void> {
+  // Store error flags surface failures in the UI; this catch only keeps the
+  // 15s polling loop alive when a fetcher rejects (e.g. fetchISOs while the
+  // member is down) instead of dying with an unhandled rejection (#12).
   await Promise.all([
     clusters.fetchAll(),
     instances.fetchCluster(props.cluster, typeFilter.value),
@@ -103,7 +129,7 @@ async function load(force = false): Promise<void> {
     instances.fetchProfiles(props.cluster, force),
     instances.fetchImages(props.cluster, force),
     instances.fetchISOs(props.cluster, force),
-  ])
+  ]).catch(() => {})
 }
 
 onMounted(() => load())
@@ -116,7 +142,7 @@ watch(
   },
 )
 
-const { act, confirmDelete, isBusy } = useInstanceActions(() => load())
+const { act, confirmDelete, isBusy, deleteTarget, deleting, cancelDelete, submitDelete } = useInstanceActions(() => load())
 
 watch(typeFilter, async (type) => {
   await instances.fetchCluster(props.cluster, type)
@@ -308,6 +334,22 @@ async function deleteISO(iso: { name: string; pool: string }): Promise<void> {
 }
 
 async function deleteImage(fingerprint: string): Promise<void> {
+  // Image deletion is instant and unrecoverable; every other destructive
+  // action on this page confirms first (#12).
+  try {
+    await ElMessageBox.confirm(
+      t('images.deleteConfirm', { fingerprint: fingerprint.slice(0, 12) }),
+      t('common.delete'),
+      {
+        type: 'warning',
+        confirmButtonText: t('common.delete'),
+        cancelButtonText: t('common.cancel'),
+      },
+    )
+  } catch {
+    return
+  }
+
   try {
     await instances.deleteImage(props.cluster, fingerprint)
     ElMessage.success(t('images.deleted'))
@@ -815,7 +857,7 @@ function openNodeUpgrade(member: ClusterMember): void {
           </div>
         </div>
 
-        <el-table v-loading="instances.resourcesLoading" :data="resources?.networks ?? []" stripe>
+        <el-table v-loading="instances.resourcesLoading" :data="networkRows" stripe>
           <el-table-column :label="t('cluster.networkName')" min-width="150">
             <template #default="{ row }">
               <strong>{{ row.name }}</strong>
@@ -823,6 +865,14 @@ function openNodeUpgrade(member: ClusterMember): void {
             </template>
           </el-table-column>
           <el-table-column :label="t('cluster.networkType')" width="120" prop="type" />
+          <el-table-column :label="t('cluster.locations')" min-width="130">
+            <template #default="{ row }">
+              <!-- Managed networks exist on every member; physical NICs live
+                   on one node, so their member is the identity that matters. -->
+              <span v-if="row.managed" class="muted">{{ t('cluster.allMembers') }}</span>
+              <span v-else class="mono">{{ row.locations.join(', ') || t('cluster.unknownMember') }}</span>
+            </template>
+          </el-table-column>
           <el-table-column :label="t('cluster.managed')" width="110">
             <template #default="{ row }">
               <el-tag :type="row.managed ? 'success' : 'info'" size="small" effect="light">
@@ -998,6 +1048,12 @@ function openNodeUpgrade(member: ClusterMember): void {
       :iso-pool="isoTarget.pool"
       :networks="(resources?.networks ?? []).map((network) => network.name)"
       @launched="instances.fetchCluster(cluster, typeFilter)"
+    />
+    <InstanceDeleteDialog
+      :target="deleteTarget"
+      :busy="deleting"
+      @cancel="cancelDelete"
+      @confirm="submitDelete"
     />
   </div>
 </template>

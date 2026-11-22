@@ -188,7 +188,7 @@ function onDevicesChanged(updated: InstanceDetail): void {
                 </div>
                 <div class="detail-item">
                   <div class="label">{{ t('detail.processes') }}</div>
-                  <div class="value">{{ detail.processes }}</div>
+                  <div class="value">{{ detail.processes < 0 ? '—' : detail.processes }}</div>
                 </div>
                 <div class="detail-item">
                   <div class="label">{{ t('detail.storagePool') }}</div>

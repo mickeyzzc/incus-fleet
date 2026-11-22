@@ -129,17 +129,24 @@ async function submitKey(): Promise<void> {
   }
 }
 
-function confirmDeleteKey(key: Keystone): void {
-  void ElMessageBox.confirm(t('assets.keyDeleteConfirm', { name: key.name }), t('common.delete'), {
-    type: 'warning',
-    confirmButtonText: t('common.delete'),
-    cancelButtonText: t('common.cancel'),
-  })
-    .then(async () => {
-      await assets.deleteKey(key.id)
-      ElMessage.success(t('assets.keyDeleted'))
+async function confirmDeleteKey(key: Keystone): Promise<void> {
+  try {
+    await ElMessageBox.confirm(t('assets.keyDeleteConfirm', { name: key.name }), t('common.delete'), {
+      type: 'warning',
+      confirmButtonText: t('common.delete'),
+      cancelButtonText: t('common.cancel'),
     })
-    .catch(() => {})
+  } catch {
+    return // user dismissed the dialog
+  }
+
+  try {
+    await assets.deleteKey(key.id)
+    ElMessage.success(t('assets.keyDeleted'))
+  } catch (err) {
+    // A swallowed failure left stale keys on screen with no explanation (#12).
+    ElMessage.error(t('assets.deleteFailed', { error: errorMessage(err) }))
+  }
 }
 
 function openScriptDialog(script: StoredScript | null): void {
@@ -169,17 +176,27 @@ async function submitScript(): Promise<void> {
   }
 }
 
-function confirmDeleteScript(script: StoredScript): void {
-  void ElMessageBox.confirm(t('assets.scriptDeleteConfirm', { name: script.name }), t('common.delete'), {
-    type: 'warning',
-    confirmButtonText: t('common.delete'),
-    cancelButtonText: t('common.cancel'),
-  })
-    .then(async () => {
-      await assets.deleteScript(script.id)
-      ElMessage.success(t('assets.scriptDeleted'))
-    })
-    .catch(() => {})
+async function confirmDeleteScript(script: StoredScript): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      t('assets.scriptDeleteConfirm', { name: script.name }),
+      t('common.delete'),
+      {
+        type: 'warning',
+        confirmButtonText: t('common.delete'),
+        cancelButtonText: t('common.cancel'),
+      },
+    )
+  } catch {
+    return // user dismissed the dialog
+  }
+
+  try {
+    await assets.deleteScript(script.id)
+    ElMessage.success(t('assets.scriptDeleted'))
+  } catch (err) {
+    ElMessage.error(t('assets.deleteFailed', { error: errorMessage(err) }))
+  }
 }
 
 function shortFingerprint(fingerprint: string): string {
@@ -328,6 +345,16 @@ function formattedSpeed(): string {
   }
 
   return `${formatBytes(task.speed)}/s`
+}
+
+/** ISO sizes arrive as raw byte strings from the volume config. */
+function sizeLabel(size: string): string {
+  const parsed = Number(size)
+  if (size && Number.isFinite(parsed) && parsed > 0) {
+    return formatBytes(parsed)
+  }
+
+  return t('common.unknown')
 }
 </script>
 
@@ -515,7 +542,7 @@ function formattedSpeed(): string {
           <el-table-column prop="pool" :label="t('cluster.storagePools')" width="130" />
           <el-table-column :label="t('common.size')" width="110">
             <template #default="{ row }">
-              {{ row.size || t('common.unknown') }}
+              {{ sizeLabel(row.size) }}
             </template>
           </el-table-column>
           <el-table-column :label="t('common.actions')" width="100" fixed="right">

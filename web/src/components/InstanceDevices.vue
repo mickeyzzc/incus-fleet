@@ -74,6 +74,38 @@ watch(
 const pools = computed(() => instances.resources(props.cluster)?.storage_pools ?? [])
 const networks = computed(() => instances.resources(props.cluster)?.networks ?? [])
 
+// Grouped NIC options: managed networks cluster-wide, physical NICs under
+// one group per member so cluster-level lists stay readable (#13 F6/F7).
+const networkGroups = computed(() => {
+  const managed = networks.value.filter((network) => network.managed)
+  const groups: { label: string; options: typeof networks.value }[] = []
+
+  if (managed.length > 0) {
+    groups.push({ label: t('form.managedNetworks'), options: managed })
+  }
+
+  const byLocation = new Map<string, typeof networks.value>()
+  for (const network of networks.value) {
+    if (network.managed) {
+      continue
+    }
+    const location =
+      network.locations.length > 0 ? network.locations.join(', ') : t('cluster.unknownMember')
+    const bucket = byLocation.get(location)
+    if (bucket) {
+      bucket.push(network)
+    } else {
+      byLocation.set(location, [network])
+    }
+  }
+  const physical = [...byLocation.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  for (const [location, options] of physical) {
+    groups.push({ label: t('form.physicalNetworksOn', { member: location }), options })
+  }
+
+  return groups
+})
+
 // A legacy NIC has no "network" key; its parent is offered as a selectable
 // option so the edit form can also migrate it onto a managed network.
 const editLegacyParent = computed(() =>
@@ -122,7 +154,10 @@ function request(): DeviceRequest {
     if (form.pool.trim()) payload.pool = form.pool.trim()
     if (form.source.trim()) payload.source = form.source.trim()
     if (form.path.trim()) payload.path = form.path.trim()
-    if (form.size.trim()) payload.size = form.size.trim()
+    // A size quota only applies to freshly created disks; sending one for an
+    // existing volume fails with "Only root or tmpfs disks can have a size
+    // quota".
+    if (form.size.trim() && !form.source.trim()) payload.size = form.size.trim()
   } else if (form.type === 'proxy') {
     if (form.listen.trim()) payload.listen = form.listen.trim()
     if (form.connect.trim()) payload.connect = form.connect.trim()
@@ -188,7 +223,7 @@ function editRequest(): DeviceRequest {
   if (editForm.pool.trim()) payload.pool = editForm.pool.trim()
   if (editForm.source.trim()) payload.source = editForm.source.trim()
   if (editForm.path.trim()) payload.path = editForm.path.trim()
-  if (editForm.size.trim()) payload.size = editForm.size.trim()
+  if (editForm.size.trim() && !editForm.source.trim()) payload.size = editForm.size.trim()
   if (device.type === 'proxy') {
     payload.type = 'proxy'
     if (editForm.listen.trim()) payload.listen = editForm.listen.trim()
@@ -313,7 +348,12 @@ async function detach(name: string): Promise<void> {
             <el-input v-model="form.path" />
           </el-form-item>
           <el-form-item :label="t('devices.size')">
-            <el-input v-model="form.size" :placeholder="t('form.rootDiskPlaceholder')" />
+            <el-input
+              v-model="form.size"
+              :placeholder="t('form.rootDiskPlaceholder')"
+              :disabled="!!form.source.trim()"
+            />
+            <p class="field-hint">{{ t('devices.sizeHint') }}</p>
           </el-form-item>
         </template>
 
@@ -331,12 +371,14 @@ async function detach(name: string): Promise<void> {
         <template v-else>
           <el-form-item :label="t('form.network')">
             <el-select v-model="form.network" style="width: 100%">
-              <el-option
-                v-for="network in networks"
-                :key="network.name"
-                :label="`${network.name} · ${network.type}`"
-                :value="network.name"
-              />
+              <el-option-group v-for="group in networkGroups" :key="group.label" :label="group.label">
+                <el-option
+                  v-for="network in group.options"
+                  :key="network.name"
+                  :label="`${network.name} · ${network.type}`"
+                  :value="network.name"
+                />
+              </el-option-group>
             </el-select>
           </el-form-item>
           <el-form-item :label="t('form.ipv4')">
@@ -365,12 +407,14 @@ async function detach(name: string): Promise<void> {
         <template v-if="editingDevice.type === 'nic'">
           <el-form-item :label="t('form.network')">
             <el-select v-model="editForm.network" style="width: 100%">
-              <el-option
-                v-for="network in networks"
-                :key="network.name"
-                :label="`${network.name} · ${network.type}`"
-                :value="network.name"
-              />
+              <el-option-group v-for="group in networkGroups" :key="group.label" :label="group.label">
+                <el-option
+                  v-for="network in group.options"
+                  :key="network.name"
+                  :label="`${network.name} · ${network.type}`"
+                  :value="network.name"
+                />
+              </el-option-group>
               <el-option
                 v-if="editLegacyParent"
                 :label="`${editLegacyParent} · ${t('devices.customParent')}`"
@@ -405,7 +449,11 @@ async function detach(name: string): Promise<void> {
             <el-input v-model="editForm.path" />
           </el-form-item>
           <el-form-item :label="t('devices.size')">
-            <el-input v-model="editForm.size" :placeholder="t('form.rootDiskPlaceholder')" />
+            <el-input
+              v-model="editForm.size"
+              :placeholder="t('form.rootDiskPlaceholder')"
+              :disabled="!!editForm.source.trim()"
+            />
             <p class="field-hint">{{ t('devices.sizeHint') }}</p>
           </el-form-item>
         </template>

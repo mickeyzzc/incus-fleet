@@ -8,6 +8,7 @@ import BatchOpsDialog from '@/components/BatchOpsDialog.vue'
 import CloneInstanceDialog from '@/components/CloneInstanceDialog.vue'
 import { useAssetsStore } from '@/stores/assets'
 import InstanceActions from '@/components/InstanceActions.vue'
+import InstanceDeleteDialog from '@/components/InstanceDeleteDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
@@ -85,7 +86,7 @@ watch(typeFilter, async (type) => {
   await instances.fetchAll(type)
 })
 
-const { act, confirmDelete, isBusy } = useInstanceActions(load)
+const { act, confirmDelete, isBusy, deleteTarget, deleting, cancelDelete, submitDelete } = useInstanceActions(load)
 
 const cloneOpen = ref(false)
 const cloneTarget = ref({ cluster: '', name: '' })
@@ -105,6 +106,11 @@ const batchTargets = computed(() =>
 
 function handleSelectionChange(rows: Array<{ cluster: string; name: string }>): void {
   selected.value = rows.map((row) => ({ cluster: row.cluster, name: row.name }))
+}
+
+/** Stable identity so reserve-selection survives polling refreshes. */
+function instanceRowKey(row: { cluster: string; name: string }): string {
+  return `${row.cluster}/${row.name}`
 }
 
 function openBatch(mode: 'keys' | 'script'): void {
@@ -284,7 +290,15 @@ async function onSaved(): Promise<void> {
             {{ t('batch.clearSelection') }}
           </el-button>
         </div>
-        <el-table v-loading="instances.loading" :data="paged" stripe @selection-change="handleSelectionChange">
+        <!-- row-key + reserve-selection keep the user's batch picks through
+             the 15s polling refresh instead of clearing them (#12). -->
+        <el-table
+          v-loading="instances.loading"
+          :data="paged"
+          :row-key="instanceRowKey"
+          stripe
+          @selection-change="handleSelectionChange"
+        >
           <el-table-column :label="t('common.name')" min-width="170">
             <template #default="{ row }">
               <el-button link type="primary" class="name-link" @click="openDetail(row)">
@@ -324,7 +338,7 @@ async function onSaved(): Promise<void> {
               <span v-else class="muted">{{ t('common.none') }}</span>
             </template>
           </el-table-column>
-          <el-table-column type="selection" width="42" />
+          <el-table-column type="selection" width="42" reserve-selection />
           <el-table-column :label="t('common.actions')" width="420" fixed="right">
             <template #default="{ row }">
               <InstanceActions
@@ -389,6 +403,12 @@ async function onSaved(): Promise<void> {
       :instance="migrateInstance"
       :clusters="clusters.items"
       @submitted="load"
+    />
+    <InstanceDeleteDialog
+      :target="deleteTarget"
+      :busy="deleting"
+      @cancel="cancelDelete"
+      @confirm="submitDelete"
     />
   </div>
 </template>
