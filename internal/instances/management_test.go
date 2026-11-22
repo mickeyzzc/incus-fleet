@@ -827,3 +827,22 @@ func TestActionKeepsGracefulPathWithAgent(t *testing.T) {
 		t.Fatalf("graceful timeout = %#v", args[0])
 	}
 }
+
+func TestDeleteForcesStopWithoutAgent(t *testing.T) {
+	srv := &incusfake.Server{
+		State: &api.InstanceState{Status: "Running", StatusCode: api.Running, Processes: -1},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if err := svc.Delete(context.Background(), "c1", "vm1", false, false); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	args := srv.UpdateStateArgs()
+	if len(args) != 1 {
+		t.Fatalf("UpdateStateArgs() = %#v", args)
+	}
+	if !args[0].Force || args[0].Timeout != 0 {
+		t.Fatalf("agent-less delete must force-stop: %#v", args[0])
+	}
+}

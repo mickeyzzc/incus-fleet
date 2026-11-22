@@ -417,10 +417,19 @@ func (s *Service) Delete(ctx context.Context, clusterName, name string, force, d
 	defer cancel()
 
 	if state != nil && (state.StatusCode == api.Running || strings.EqualFold(state.Status, "running")) {
+		// Same agent-less shortcut as Action: an ISO-booted installer cannot
+		// answer an elegant stop, so deleting it would otherwise stall on the
+		// graceful wait first.
+		stopForce := force
+		stopTimeout := 300
+		if !stopForce && state.Processes < 0 {
+			stopForce = true
+			stopTimeout = 0
+		}
 		op, err := client.UpdateInstanceState(name, api.InstanceStatePut{
 			Action:  "stop",
-			Timeout: 300,
-			Force:   force,
+			Timeout: stopTimeout,
+			Force:   stopForce,
 		}, "")
 		if err != nil {
 			return fmt.Errorf("instances: stop %s:%s before delete: %w", clusterName, name, err)
