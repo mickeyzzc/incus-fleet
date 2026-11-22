@@ -275,12 +275,12 @@ func writeCpioEntry(w *bytes.Buffer, name string, data []byte, mode int64) error
 	}
 
 	fields := fmt.Sprintf("%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X",
-		1,    // ino
+		1, // ino
 		mode,
-		0,    // uid
-		0,    // gid
-		1,    // nlink
-		0,    // mtime
+		0, // uid
+		0, // gid
+		1, // nlink
+		0, // mtime
 		len(data),
 		0, // devmajor
 		0, // devminor
