@@ -107,6 +107,21 @@ describe('AssetsView', () => {
     expect(useAssetsStore().keyCache).toHaveLength(0)
   })
 
+  it('reports a failed key deletion instead of swallowing it', async () => {
+    const error = vi.spyOn(ElMessage, 'error').mockImplementation(() => undefined as never)
+    vi.mocked(api.deleteKey).mockRejectedValueOnce(new Error('permission denied'))
+    const wrapper = await mountView()
+
+    const buttons = wrapper.findAll('button').filter((b) => b.text() !== '')
+    await buttons[2]!.trigger('click')
+    await flushPromises()
+
+    // The old `.catch(() => {})` hid real API failures (#12).
+    expect(error).toHaveBeenCalledWith('Delete failed: permission denied')
+    expect(useAssetsStore().keyCache).toHaveLength(1)
+    error.mockRestore()
+  })
+
   it('creates a script through the dialog', async () => {
     const wrapper = await mountView()
 

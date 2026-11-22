@@ -49,7 +49,20 @@ const activeMenu = computed(() => {
 watch(
   () => auth.authenticated,
   (authenticated) => {
-    if (authenticated && clusters.items.length === 0) {
+    if (!authenticated) {
+      // A 401 mid-page used to leave the user stranded with failing
+      // requests; route to the sign-in view and offer to come back (#12).
+      if (route.meta.public !== true) {
+        void router.push({
+          name: 'login',
+          query: route.fullPath === '/' ? {} : { redirect: route.fullPath },
+        })
+      }
+
+      return
+    }
+
+    if (clusters.items.length === 0) {
       void clusters.fetchAll()
     }
   },

@@ -202,6 +202,21 @@ describe('InstancesView', () => {
     expect(wrapper.text()).toContain('No instances match the filters')
   })
 
+  it('configures the table to keep selections across polling refreshes', () => {
+    const wrapper = mountInstances()
+
+    // row-key + reserve-selection survive the 15s refresh instead of
+    // clearing the user's batch picks (#12).
+    const table = wrapper.findComponent({ name: 'ElTable' })
+    expect(typeof table.props('rowKey')).toBe('function')
+    const selectionColumn = wrapper
+      .findAllComponents({ name: 'ElTableColumn' })
+      .find((column) => column.props('type') === 'selection')
+    expect(selectionColumn?.props('reserveSelection')).toBe(true)
+
+    wrapper.unmount()
+  })
+
   it('runs batch power on selected instances after confirmation', async () => {
     vi.mocked(api.batchPower).mockResolvedValue([
       { cluster: 'c1', instance: 'web', ok: true },

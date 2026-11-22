@@ -119,6 +119,9 @@ function memberStatusLabel(status: string): string {
 }
 
 async function load(force = false): Promise<void> {
+  // Store error flags surface failures in the UI; this catch only keeps the
+  // 15s polling loop alive when a fetcher rejects (e.g. fetchISOs while the
+  // member is down) instead of dying with an unhandled rejection (#12).
   await Promise.all([
     clusters.fetchAll(),
     instances.fetchCluster(props.cluster, typeFilter.value),
@@ -126,7 +129,7 @@ async function load(force = false): Promise<void> {
     instances.fetchProfiles(props.cluster, force),
     instances.fetchImages(props.cluster, force),
     instances.fetchISOs(props.cluster, force),
-  ])
+  ]).catch(() => {})
 }
 
 onMounted(() => load())
@@ -331,6 +334,22 @@ async function deleteISO(iso: { name: string; pool: string }): Promise<void> {
 }
 
 async function deleteImage(fingerprint: string): Promise<void> {
+  // Image deletion is instant and unrecoverable; every other destructive
+  // action on this page confirms first (#12).
+  try {
+    await ElMessageBox.confirm(
+      t('images.deleteConfirm', { fingerprint: fingerprint.slice(0, 12) }),
+      t('common.delete'),
+      {
+        type: 'warning',
+        confirmButtonText: t('common.delete'),
+        cancelButtonText: t('common.cancel'),
+      },
+    )
+  } catch {
+    return
+  }
+
   try {
     await instances.deleteImage(props.cluster, fingerprint)
     ElMessage.success(t('images.deleted'))
