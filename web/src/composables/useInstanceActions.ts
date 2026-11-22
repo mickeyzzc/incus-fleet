@@ -145,21 +145,51 @@ export function useInstanceActions(refresh: () => Promise<void>) {
   return { actionKey, isBusy, act, confirmDelete, deleteTarget, deleteVolumes, deleting, cancelDelete, submitDelete }
 }
 
-/** Runs a loader on an interval while the page stays visible. */
+/**
+ * Runs a loader on an interval while the page stays visible.
+ *
+ * Skips ticks in background tabs, skips ticks while the previous round is
+ * still in flight (so slow responses cannot stack requests), and backs off
+ * when the loader keeps rejecting (doubling per consecutive failure, capped
+ * at 8x the base interval) so a down backend is not hammered.
+ */
 export function useVisiblePolling(loader: () => Promise<void>, intervalMs = 15000): void {
   let timer: ReturnType<typeof setInterval> | undefined
+  let busy = false
+  let failures = 0
+
+  const tick = (): void => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      return
+    }
+    if (busy) {
+      return
+    }
+    busy = true
+    void loader()
+      .then(() => {
+        failures = 0
+      })
+      .catch(() => {
+        failures += 1
+        if (timer !== undefined) {
+          clearInterval(timer)
+          timer = setInterval(tick, Math.min(intervalMs * 2 ** failures, intervalMs * 8))
+        }
+      })
+      .finally(() => {
+        busy = false
+      })
+  }
 
   onMounted(() => {
-    timer = setInterval(() => {
-      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-        void loader()
-      }
-    }, intervalMs)
+    timer = setInterval(tick, intervalMs)
   })
 
   onUnmounted(() => {
     if (timer !== undefined) {
       clearInterval(timer)
+      timer = undefined
     }
   })
 }

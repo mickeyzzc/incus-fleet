@@ -124,9 +124,10 @@ function memberStatusLabel(status: string): string {
 }
 
 async function load(force = false): Promise<void> {
-  // Store error flags surface failures in the UI; this catch only keeps the
-  // 15s polling loop alive when a fetcher rejects (e.g. fetchISOs while the
-  // member is down) instead of dying with an unhandled rejection (#12).
+  // Store error flags surface failures in the UI. Rejections are left to
+  // propagate: useVisiblePolling catches them for the polling loop (and backs
+  // off while the member stays down); stray non-poll callers are logged by the
+  // global unhandledrejection handler.
   await Promise.all([
     clusters.fetchAll(),
     instances.fetchCluster(props.cluster, typeFilter.value),
@@ -135,7 +136,7 @@ async function load(force = false): Promise<void> {
     instances.fetchImages(props.cluster, force),
     instances.fetchISOs(props.cluster, force),
     loadOverlays(force),
-  ]).catch(() => {})
+  ])
 }
 
 onMounted(() => load())

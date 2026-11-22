@@ -82,6 +82,18 @@ watch([search, clusterFilter, typeFilter], () => {
   page.value = 1
 })
 
+// Deleting the last row of the last page must not strand the user on an empty
+// page beyond the new range.
+watch(
+  () => filtered.value.length,
+  (length) => {
+    const last = Math.max(1, Math.ceil(length / pageSize.value))
+    if (page.value > last) {
+      page.value = last
+    }
+  },
+)
+
 watch(typeFilter, async (type) => {
   await instances.fetchAll(type)
 })
