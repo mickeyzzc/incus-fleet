@@ -303,6 +303,39 @@ describe('IsoLaunchDialog unattended', () => {
     expect(request?.spec?.keyboard).toBe('fr')
   })
 
+  it('applies a selected custom-answer profile and clears on family change', async () => {
+    vi.mocked(api.listAnswerProfiles).mockResolvedValue([{
+      id: 'ap-custom', name: 'custom-userdata', profile: 'debian-preseed',
+      answer_file: '#cloud-config\nhostname: from-profile', is_default: false,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    }])
+    const wrapper = mountUnattended()
+    await flushPromises()
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    // Select order in the dialog: network, installer family, answer profile.
+    const selects = wrapper.findAllComponents({ name: 'ElSelect' })
+    expect(selects.length).toBeGreaterThanOrEqual(3)
+    const familySelect = selects[1]!
+    const profileSelect = selects[2]!
+    // Real ElSelect updates v-model before emitting change; the stub needs both.
+    profileSelect.vm.$emit('update:modelValue', 'ap-custom')
+    profileSelect.vm.$emit('change', 'ap-custom')
+    await flushPromises()
+
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+    const request = vi.mocked(api.launchUnattended).mock.calls[0]?.[3]
+    expect(request?.answer_profile_id).toBe('ap-custom')
+
+    // Switching installer family resets the selected profile.
+    familySelect.vm.$emit('change', 'kickstart')
+    await flushPromises()
+    expect(wrapper.find('input[placeholder="/dev/vda"]').exists()).toBe(true)
+  })
+
   it('auto-selects the stored default answer profile', async () => {
     vi.mocked(api.listAnswerProfiles).mockResolvedValue([{
       id: 'ap-def', name: 'lab-default', profile: 'debian-preseed',

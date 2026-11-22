@@ -22,7 +22,7 @@ const ElSelectStub = defineComponent({
     modelValue: { type: [String, Number, Array, Boolean], default: undefined },
     placeholder: { type: String, default: '' },
   },
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'change'],
   setup(_props, { slots }) {
     return () => h('div', { class: 'el-select-stub' }, slots.default?.())
   },
