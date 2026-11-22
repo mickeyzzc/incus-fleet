@@ -758,3 +758,23 @@ func TestUpdateUnmanagedNetworkRejectsStaticIP(t *testing.T) {
 		t.Fatalf("rejected update must not reach Incus")
 	}
 }
+
+func TestMemberNames(t *testing.T) {
+	srv := &incusfake.Server{
+		Members: []api.ClusterMember{{ServerName: "m2"}, {ServerName: "m1"}},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	names, err := svc.MemberNames("c1")
+	if err != nil {
+		t.Fatalf("MemberNames() error = %v", err)
+	}
+	if len(names) != 2 || names[0] != "m1" || names[1] != "m2" {
+		t.Fatalf("names = %#v", names)
+	}
+
+	srv.MembersErr = errors.New("cluster offline")
+	if _, err := svc.MemberNames("c1"); err == nil {
+		t.Fatal("MemberNames() expected error")
+	}
+}

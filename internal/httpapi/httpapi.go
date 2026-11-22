@@ -812,9 +812,15 @@ func (a *API) getResources(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Bond slaves cannot serve as macvlan parents while the bond owns them;
-	// hide them from the candidate lists. Node access may be unavailable, in
-	// which case the unfiltered list is served as before.
-	resources.Networks = filterBondSlaveNetworks(resources.Networks, a.bondSlavesLookup(r.Context(), r.PathValue("cluster")))
+	// hide them from the candidate lists. Unmanaged NICs often carry no
+	// locations in the Incus listing, so the member set is needed as the
+	// fallback scope. Node access may be unavailable, in which case the
+	// unfiltered list is served as before.
+	members, memberErr := a.instances.MemberNames(r.PathValue("cluster"))
+	if memberErr != nil {
+		members = nil
+	}
+	resources.Networks = filterBondSlaveNetworks(resources.Networks, members, a.bondSlavesLookup(r.Context(), r.PathValue("cluster")))
 
 	writeJSON(w, http.StatusOK, resources)
 }
@@ -835,9 +841,10 @@ func (a *API) bondSlavesLookup(ctx context.Context, cluster string) func(member 
 }
 
 // filterBondSlaveNetworks drops unmanaged NICs that are bonding members on
-// any of their locations. Managed networks are never touched, and a failing
-// lookup degrades to keeping the entry.
-func filterBondSlaveNetworks(networks []instances.Network, lookup func(member string) (map[string]string, error)) []instances.Network {
+// any member that exposes them — a NIC's own locations when present, the
+// full member set otherwise. Managed networks are never touched, and a
+// failing lookup degrades to keeping the entry.
+func filterBondSlaveNetworks(networks []instances.Network, members []string, lookup func(member string) (map[string]string, error)) []instances.Network {
 	out := make([]instances.Network, 0, len(networks))
 	for _, network := range networks {
 		if network.Managed {
@@ -845,7 +852,7 @@ func filterBondSlaveNetworks(networks []instances.Network, lookup func(member st
 			continue
 		}
 
-		if isBondSlave(network.Name, network.Locations, lookup) {
+		if isBondSlave(network.Name, network.Locations, members, lookup) {
 			continue
 		}
 
@@ -858,12 +865,13 @@ func filterBondSlaveNetworks(networks []instances.Network, lookup func(member st
 // isBondSlave reports whether the NIC is a bond member on any member that
 // exposes it. Lookup errors are swallowed: filtering is a best-effort
 // improvement, not a gate.
-func isBondSlave(name string, locations []string, lookup func(member string) (map[string]string, error)) bool {
-	if len(locations) == 0 {
-		locations = []string{""}
+func isBondSlave(name string, locations []string, members []string, lookup func(member string) (map[string]string, error)) bool {
+	scope := locations
+	if len(scope) == 0 {
+		scope = members
 	}
 
-	for _, member := range locations {
+	for _, member := range scope {
 		slaves, err := lookup(member)
 		if err != nil || slaves == nil {
 			continue

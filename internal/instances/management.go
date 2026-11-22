@@ -523,6 +523,29 @@ func (s *Service) Images(clusterName string) ([]Image, error) {
 	return list, nil
 }
 
+// MemberNames lists the cluster member names; used by callers that must
+// contact every member (bond-slave detection on unmanaged NICs whose Incus
+// listing carries no locations).
+func (s *Service) MemberNames(clusterName string) ([]string, error) {
+	client, err := s.client(clusterName)
+	if err != nil {
+		return nil, err
+	}
+
+	members, err := client.GetClusterMembers()
+	if err != nil {
+		return nil, fmt.Errorf("instances: list members %s: %w", clusterName, err)
+	}
+
+	names := make([]string, 0, len(members))
+	for _, member := range members {
+		names = append(names, member.ServerName)
+	}
+	sort.Strings(names)
+
+	return names, nil
+}
+
 // Resources returns storage pools and networks with usage details.
 func (s *Service) Resources(clusterName string) (Resources, error) {
 	client, err := s.client(clusterName)
