@@ -28,6 +28,8 @@ import type {
   SnapshotRequest,
   StoragePoolRequest,
   StorageVolume,
+  UnattendedLaunchRequest,
+  UnattendedLaunchResult,
   UpdateInstanceRequest,
   VolumeRequest,
 } from '@/api/types'
@@ -542,7 +544,32 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
-  /** Runs a guest-side maintenance action inside an instance. */
+    /** Launches an unattended-install VM from an ISO and refreshes instances. */
+  async function launchUnattended(
+    cluster: string,
+    pool: string,
+    isoName: string,
+    request: UnattendedLaunchRequest,
+  ): Promise<UnattendedLaunchResult | null> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const { instance, launch } = await api.launchUnattended(cluster, pool, isoName, request)
+      delete imageCache.value[cluster]
+      if (instance) {
+        items.value = [instance, ...items.value.filter((it) => !(it.cluster === cluster && it.name === instance.name))]
+      }
+      return launch
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
+/** Runs a guest-side maintenance action inside an instance. */
   async function runOps(cluster: string, instance: string, request: OpsRequest): Promise<OpsResult> {
     saving.value = true
     error.value = ''
@@ -981,6 +1008,7 @@ export const useInstancesStore = defineStore('instances', () => {
     importISO,
     deleteISO,
     launchFromISO,
+    launchUnattended,
     runOps,
     rebuildInstance,
     cloneInstance,

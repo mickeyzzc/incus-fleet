@@ -66,6 +66,11 @@ type InstanceServer interface {
 	CreateStoragePoolVolume(pool string, volume api.StorageVolumesPost) error
 	DeleteStoragePoolVolume(pool string, volType string, name string) error
 	CreateStoragePoolVolumeFromISO(pool string, args incus.StorageVolumeBackupArgs) (incus.Operation, error)
+	// Volume backup export slice used to fetch raw ISO bytes for the
+	// unattended-install pipeline.
+	CreateStorageVolumeBackup(pool string, volName string, backup api.StorageVolumeBackupsPost) (incus.Operation, error)
+	GetStorageVolumeBackupFile(pool string, volName string, name string, req *incus.BackupFileRequest) (*incus.BackupFileResponse, error)
+	DeleteStorageVolumeBackup(pool string, volName string, name string) (incus.Operation, error)
 	RebuildInstance(instanceName string, req api.InstanceRebuildPost) (incus.Operation, error)
 	RefreshImage(fingerprint string) (incus.Operation, error)
 	GetStoragePoolNames() ([]string, error)

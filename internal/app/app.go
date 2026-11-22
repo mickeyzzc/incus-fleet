@@ -19,6 +19,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/agentinstall"
 	"github.com/mickeyzzc/incus-fleet/internal/agentops"
 	"github.com/mickeyzzc/incus-fleet/internal/agentpb"
+	"github.com/mickeyzzc/incus-fleet/internal/answerprofiles"
 	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
@@ -128,7 +129,11 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		return nil, err
 	}
 
-	instancesService := instances.New(manager)
+	instancesService := instances.New(manager,
+		instances.WithUnattendedWorkDir(cfg.Unattended.WorkDir),
+		instances.WithXorriso(cfg.Unattended.XorrisoPath),
+		instances.WithLogger(logger),
+	)
 	// The instance ops service runs commands inside a guest; the migration
 	// service uses it to renew the DHCP lease after a cross-cluster move.
 	networkFixer := migrations.NewNetworkFixer(
@@ -149,6 +154,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		migrations.WithNetworkFixer(networkFixer),
 	)
 	assetsService := assets.New(st, instancesService)
+	answerProfilesService := answerprofiles.New(st)
 	localNodeNet := nodenet.NewService(nodenet.SudoRunner{})
 	nodeOptions := []nodeaccess.Option{}
 	if cfg.LocalMember != "" {
@@ -369,21 +375,22 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	}
 
 	handler := httpapi.New(httpapi.Deps{
-		Clusters:     manager,
-		Instances:    instancesService,
-		Assets:       assetsService,
-		Migrations:   migrationsService,
-		Store:        st,
-		NodeNet:      nodeAccess,
-		NodeJoin:     nodeJoin,
-		GuestAgent:   guestAgent,
-		Agent:        agentGW,
-		AgentInstall: agentInstall,
-		Mesh:         centerMesh,
-		Bootstrap:    agentGW,
-		CertIssuer:   agentGW,
-		Telemetry:    telemetryStore,
-		MetricsQuery: queryProxy,
+		Clusters:       manager,
+		Instances:      instancesService,
+		Assets:         assetsService,
+		AnswerProfiles: answerProfilesService,
+		Migrations:     migrationsService,
+		Store:          st,
+		NodeNet:        nodeAccess,
+		NodeJoin:       nodeJoin,
+		GuestAgent:     guestAgent,
+		Agent:          agentGW,
+		AgentInstall:   agentInstall,
+		Mesh:           centerMesh,
+		Bootstrap:      agentGW,
+		CertIssuer:     agentGW,
+		Telemetry:      telemetryStore,
+		MetricsQuery:   queryProxy,
 		MetricsSD: httpapi.MetricsSDConfig{
 			Enabled: cfg.Metrics.HTTPSD.Enabled, Token: cfg.Metrics.HTTPSD.Token,
 			PublicURL: cfg.Metrics.HTTPSD.PublicURL, Mode: cfg.Metrics.HTTPSD.Mode,

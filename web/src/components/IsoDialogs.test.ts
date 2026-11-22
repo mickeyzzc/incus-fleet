@@ -194,3 +194,242 @@ describe('CloneInstanceDialog', () => {
     expect(ElMessage.error).toHaveBeenCalledWith('Enter a target name first.')
   })
 })
+
+describe('IsoLaunchDialog unattended', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.mocked(api.launchFromISO).mockResolvedValue({
+      name: 'installer-01',
+      cluster: 'c1',
+      type: 'virtual-machine',
+      status: 'Running',
+    } as never)
+    vi.mocked(api.launchUnattended).mockResolvedValue({
+      instance: { name: 'web-01', cluster: 'c1', type: 'virtual-machine', status: 'Running' } as never,
+      launch: {
+        name: 'web-01',
+        media: [{ device: 'iso0', volume: 'debian-auto', pool: 'default', seed: false }],
+        profile: 'debian-preseed',
+        answer_file_name: 'preseed.cfg',
+      },
+    } as never)
+    vi.mocked(api.previewUnattendedAnswer).mockResolvedValue({
+      content: 'd-i debian-installer/locale string en_US',
+      file_name: 'preseed.cfg',
+      profile: 'debian-preseed',
+    })
+  })
+
+  function mountUnattended() {
+    return mount(IsoLaunchDialog, {
+      props: { modelValue: true, cluster: 'c1', isoName: 'debian-13.7.0-amd64-DVD-1', isoPool: 'default', networks: ['incusbr0'] },
+      global: { plugins: [ElementPlus] },
+    })
+  }
+
+  it('guesses the debian profile and launches unattended', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    await wrapper.find('input[placeholder="fleet"]').setValue('ops')
+    await wrapper.find('input[type=password]').setValue('s3cret')
+
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.launchUnattended).toHaveBeenCalledTimes(1)
+    const request = vi.mocked(api.launchUnattended).mock.calls[0]?.[3]
+    expect(request?.profile).toBe('debian-preseed')
+    expect(request?.spec?.hostname).toBe('web-01')
+    expect(wrapper.emitted('launched')?.[0]).toEqual(['web-01'])
+    expect(api.launchFromISO).not.toHaveBeenCalled()
+  })
+
+  it('requires a user account for the template path', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.launchUnattended).not.toHaveBeenCalled()
+    expect(ElMessage.error).toHaveBeenCalledWith('Enter the user account name first.')
+  })
+
+  it('previews the rendered answer file', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    const previewButton = wrapper.findAll('button').find((b) => b.text().includes('Preview'))
+    await previewButton?.trigger('click')
+    await flushPromises()
+
+    expect(api.previewUnattendedAnswer).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('preseed.cfg')
+    expect(wrapper.text()).toContain('d-i debian-installer/locale')
+  })
+
+  it('sends the extra spec fields (hostname, disk, locale, keyboard)', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    await wrapper.find('input[placeholder="fleet"]').setValue('ops')
+    await wrapper.find('input[placeholder="/dev/vda"]').setValue('/dev/vdb')
+    await wrapper.find('input[placeholder="en_US"]').setValue('zh_CN')
+    await wrapper.find('input[placeholder="us"]').setValue('fr')
+
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    const request = vi.mocked(api.launchUnattended).mock.calls[0]?.[3]
+    expect(request?.spec?.hostname).toBe('web-01')
+    expect(request?.spec?.disk).toBe('/dev/vdb')
+    expect(request?.spec?.locale).toBe('zh_CN')
+    expect(request?.spec?.keyboard).toBe('fr')
+  })
+
+  it('applies a selected custom-answer profile and clears on family change', async () => {
+    vi.mocked(api.listAnswerProfiles).mockResolvedValue([{
+      id: 'ap-custom', name: 'custom-userdata', profile: 'debian-preseed',
+      answer_file: '#cloud-config\nhostname: from-profile', is_default: false,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    }])
+    const wrapper = mountUnattended()
+    await flushPromises()
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    // Select order in the dialog: network, installer family, answer profile.
+    const selects = wrapper.findAllComponents({ name: 'ElSelect' })
+    expect(selects.length).toBeGreaterThanOrEqual(3)
+    const familySelect = selects[1]!
+    const profileSelect = selects[2]!
+    // Real ElSelect updates v-model before emitting change; the stub needs both.
+    profileSelect.vm.$emit('update:modelValue', 'ap-custom')
+    profileSelect.vm.$emit('change', 'ap-custom')
+    await flushPromises()
+
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+    const request = vi.mocked(api.launchUnattended).mock.calls[0]?.[3]
+    expect(request?.answer_profile_id).toBe('ap-custom')
+
+    // Switching installer family resets the selected profile.
+    familySelect.vm.$emit('change', 'kickstart')
+    await flushPromises()
+    expect(wrapper.find('input[placeholder="/dev/vda"]').exists()).toBe(true)
+  })
+
+  it('guesses non-debian profiles from the ISO name', async () => {
+    const cases: [string, string][] = [
+      ['devuan-5.0-amd64', 'debian-preseed'],
+      ['ubuntu-24.04-live-server', 'ubuntu-autoinstall'],
+      ['Rocky-9-latest', 'kickstart'],
+      ['my-custom-image', 'nocloud'],
+    ]
+    for (const [iso, expected] of cases) {
+      const wrapper = mount(IsoLaunchDialog, {
+        props: { modelValue: true, cluster: 'c1', isoName: iso, isoPool: 'default', networks: [] },
+        global: { plugins: [ElementPlus] },
+      })
+      await flushPromises()
+      await wrapper.find('input').setValue('guessed-01')
+      await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+      await flushPromises()
+      await wrapper.find('input[placeholder="fleet"]').setValue('ops')
+      await wrapper.findAll('button').at(-1)?.trigger('click')
+      await flushPromises()
+      const request = vi.mocked(api.launchUnattended).mock.calls.at(-1)?.[3]
+      expect(request?.profile).toBe(expected)
+    }
+  })
+
+  it('sends a custom answer file verbatim', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+    await wrapper.find('.el-checkbox input[type=checkbox]').setValue(true)
+    await flushPromises()
+    const textarea = wrapper.find('textarea')
+    expect(textarea.exists()).toBe(true)
+    await textarea.setValue('#cloud-config\nhostname: inline')
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+    const request = vi.mocked(api.launchUnattended).mock.calls.at(-1)?.[3]
+    expect(request?.answer_file).toBe('#cloud-config\nhostname: inline')
+    expect(request?.spec).toBeUndefined()
+  })
+
+  it('touches every editable field and the cancel action', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+    // network select
+    const networkSelect = wrapper.findAllComponents({ name: 'ElSelect' })[0]!
+    networkSelect.vm.$emit('update:modelValue', 'incusbr0')
+    await flushPromises()
+    // root disk
+    await wrapper.find('input[placeholder="20GiB"]').setValue('40GiB')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+    // hostname + timezone on the template path
+    await wrapper.find('input[placeholder="defaults to VM name"]').setValue('extra-host')
+    await wrapper.find('input[placeholder="UTC"]').setValue('Europe/Berlin')
+    await flushPromises()
+    // cancel button closes the dialog
+    const cancel = wrapper.findAll('button').find((b) => b.text().includes('Cancel'))
+    await cancel!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeTruthy()
+  })
+
+  it('reports a preview failure', async () => {
+    vi.mocked(api.previewUnattendedAnswer).mockRejectedValueOnce(new Error('preview down'))
+    const wrapper = mountUnattended()
+    await flushPromises()
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+    const previewButton = wrapper.findAll('button').find((b) => b.text().includes('Preview'))
+    await previewButton!.trigger('click')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalled()
+  })
+
+  it('auto-selects the stored default answer profile', async () => {
+    vi.mocked(api.listAnswerProfiles).mockResolvedValue([{
+      id: 'ap-def', name: 'lab-default', profile: 'debian-preseed',
+      username: 'stored-user', is_default: true,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    }])
+    const wrapper = mountUnattended()
+    await flushPromises()
+
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+
+    // The default profile was pre-selected on open; no local username needed.
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    const request = vi.mocked(api.launchUnattended).mock.calls[0]?.[3]
+    expect(request?.answer_profile_id).toBe('ap-def')
+  })
+})

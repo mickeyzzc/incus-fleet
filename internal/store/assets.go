@@ -186,9 +186,13 @@ func (s *SQLStore) UpdateScript(ctx context.Context, script *Script) error {
 		return fmt.Errorf("store: script id required")
 	}
 
+	updated := time.Now().UTC().Truncate(time.Nanosecond)
+	if !updated.After(script.CreatedAt) {
+		updated = script.CreatedAt.Add(time.Nanosecond)
+	}
 	const query = `UPDATE scripts SET name = ?, description = ?, body = ?, updated_at = ? WHERE id = ?`
 	res, err := s.db.ExecContext(ctx, s.rebind(query),
-		script.Name, script.Description, script.Body, time.Now().UTC().UnixNano(), script.ID)
+		script.Name, script.Description, script.Body, updated.UnixNano(), script.ID)
 	if err != nil {
 		return err
 	}

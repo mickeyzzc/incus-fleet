@@ -48,6 +48,10 @@ import type {
   OpsRequest,
   OpsResult,
   SPICEPrepare,
+  AnswerProfile,
+  UnattendedAnswerPreview,
+  UnattendedLaunchRequest,
+  UnattendedLaunchResult,
   DesktopPrepare,
   DesktopInputEvent,
   Profile,
@@ -295,6 +299,32 @@ export class ApiClient {
     )
   }
 
+  async previewUnattendedAnswer(
+    cluster: string,
+    pool: string,
+    name: string,
+    request: UnattendedLaunchRequest,
+  ): Promise<UnattendedAnswerPreview> {
+    return this.request<UnattendedAnswerPreview>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/iso/${encodeURIComponent(pool)}/${encodeURIComponent(name)}/launch-unattended/preview`,
+      request,
+    )
+  }
+
+  async launchUnattended(
+    cluster: string,
+    pool: string,
+    name: string,
+    request: UnattendedLaunchRequest,
+  ): Promise<{ instance: InstanceSummary; launch: UnattendedLaunchResult }> {
+    return this.request<{ instance: InstanceSummary; launch: UnattendedLaunchResult }>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/iso/${encodeURIComponent(pool)}/${encodeURIComponent(name)}/launch-unattended`,
+      request,
+    )
+  }
+
   async runOps(cluster: string, instance: string, request: OpsRequest): Promise<OpsResult> {
     return this.request<OpsResult>(
       'POST',
@@ -351,6 +381,23 @@ export class ApiClient {
 
   async deleteScript(id: string): Promise<void> {
     await this.request<void>('DELETE', `/api/v1/scripts/${encodeURIComponent(id)}`)
+  }
+
+  async listAnswerProfiles(): Promise<AnswerProfile[]> {
+    const data = await this.request<{ answer_profiles: AnswerProfile[] }>('GET', '/api/v1/answer-profiles')
+    return data.answer_profiles ?? []
+  }
+
+  async createAnswerProfile(request: Omit<AnswerProfile, 'id' | 'created_at' | 'updated_at'>): Promise<AnswerProfile> {
+    return this.request<AnswerProfile>('POST', '/api/v1/answer-profiles', request)
+  }
+
+  async updateAnswerProfile(id: string, request: Omit<AnswerProfile, 'id' | 'created_at' | 'updated_at'>): Promise<AnswerProfile> {
+    return this.request<AnswerProfile>('PATCH', `/api/v1/answer-profiles/${encodeURIComponent(id)}`, request)
+  }
+
+  async deleteAnswerProfile(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/answer-profiles/${encodeURIComponent(id)}`)
   }
 
   async batchKeys(request: BatchKeysRequest): Promise<BatchItem[]> {

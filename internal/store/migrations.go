@@ -104,6 +104,12 @@ var schemaMigrations = []schemaMigration{
 			`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
 		},
 	},
+	{
+		// Reusable unattended-install answer configurations: named templates
+		// with at most one default per installer profile.
+		version:    8,
+		statements: []string{answerProfileSchema()},
+	},
 }
 
 // userSchema holds local accounts. Usernames are compared case-insensitively by

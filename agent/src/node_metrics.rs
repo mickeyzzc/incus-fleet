@@ -157,10 +157,7 @@ fn series(
         name: name.to_string(),
         labels,
         r#type: kind as i32,
-        samples: vec![Sample {
-            at_ms,
-            value,
-        }],
+        samples: vec![Sample { at_ms, value }],
     }
 }
 
@@ -234,7 +231,6 @@ mod tests {
 
 #[cfg(test)]
 mod integration {
-    use super::*;
     use crate::metrics::Collector;
 
     #[test]

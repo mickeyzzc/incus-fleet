@@ -22,7 +22,7 @@ const ElSelectStub = defineComponent({
     modelValue: { type: [String, Number, Array, Boolean], default: undefined },
     placeholder: { type: String, default: '' },
   },
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'change'],
   setup(_props, { slots }) {
     return () => h('div', { class: 'el-select-stub' }, slots.default?.())
   },
@@ -100,6 +100,8 @@ vi.mock('@/api', async (importOriginal) => {
       importISO: vi.fn(),
       deleteISO: vi.fn(),
       launchFromISO: vi.fn(),
+      previewUnattendedAnswer: vi.fn(),
+      launchUnattended: vi.fn(),
       runOps: vi.fn(),
       rebuildInstance: vi.fn(),
       cloneInstance: vi.fn(),
@@ -117,6 +119,10 @@ vi.mock('@/api', async (importOriginal) => {
       createScript: vi.fn(),
       updateScript: vi.fn(),
       deleteScript: vi.fn(),
+      listAnswerProfiles: vi.fn(),
+      createAnswerProfile: vi.fn(),
+      updateAnswerProfile: vi.fn(),
+      deleteAnswerProfile: vi.fn(),
       batchKeys: vi.fn(),
       batchScripts: vi.fn(),
       batchPower: vi.fn(),

@@ -9,6 +9,7 @@ import {
   Switch as SwitchIcon,
   SwitchButton,
   Collection,
+  Document,
   UserFilled,
   Coin,
 } from '@element-plus/icons-vue'
@@ -125,6 +126,11 @@ async function logout(): Promise<void> {
           <el-menu-item index="/assets">
             <el-icon><Collection /></el-icon>
             <span>{{ t('nav.assets') }}</span>
+          </el-menu-item>
+
+          <el-menu-item index="/answer-profiles">
+            <el-icon><Document /></el-icon>
+            <span>{{ t('nav.answerProfiles') }}</span>
           </el-menu-item>
 
           <el-menu-item v-if="auth.canAdmin" index="/users">
