@@ -338,6 +338,7 @@ describe('IsoLaunchDialog unattended', () => {
 
   it('guesses non-debian profiles from the ISO name', async () => {
     const cases: [string, string][] = [
+      ['devuan-5.0-amd64', 'debian-preseed'],
       ['ubuntu-24.04-live-server', 'ubuntu-autoinstall'],
       ['Rocky-9-latest', 'kickstart'],
       ['my-custom-image', 'nocloud'],

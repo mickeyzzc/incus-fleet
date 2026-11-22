@@ -120,6 +120,18 @@ describe('AnswerProfilesView', () => {
     await refresh!.trigger('click')
     await flushPromises()
     expect(api.listAnswerProfiles).toHaveBeenCalledTimes(2)
+
+    // Editing a custom profile renders the answer textarea; the installer
+    // profile select and custom checkbox are interactive too.
+    const edit = wrapper.findAll('button').find((b) => b.text().includes('Edit'))
+    await edit!.trigger('click')
+    await flushPromises()
+    const dialog = wrapper.find('.el-dialog')
+    expect(dialog.findAll('textarea').length).toBeGreaterThan(0)
+    const selects = dialog.findAllComponents({ name: 'ElSelect' })
+    expect(selects.length).toBeGreaterThan(0)
+    selects[0]!.vm.$emit('update:modelValue', 'kickstart')
+    await flushPromises()
   })
 
   it('shows the empty state when no profiles are saved', async () => {
