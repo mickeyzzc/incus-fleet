@@ -210,6 +210,8 @@ export default {
       service: 'Incus 服务',
       storage: '存储源',
       token: '加入令牌',
+      preseed: 'Preseed 配置',
+      ready: 'Incus 就绪',
       join: '加入集群',
       online: '成员上线',
       sudoers: 'sudo 规则',

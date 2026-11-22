@@ -38,7 +38,23 @@ const traffic = reactive<Record<string, TrafficState>>({})
 let trafficTimer: number | null = null
 const prevSamples: Record<string, { at: number; traffic: ClusterTraffic }> = {}
 
+let trafficPollBusy = false
+
 async function pollTraffic(): Promise<void> {
+  // Background tabs neither need live rates nor should they accumulate
+  // requests; a still-running round skips the next tick.
+  if (trafficPollBusy || (typeof document !== 'undefined' && document.visibilityState !== 'visible')) {
+    return
+  }
+  trafficPollBusy = true
+  try {
+    await collectTrafficSamples()
+  } finally {
+    trafficPollBusy = false
+  }
+}
+
+async function collectTrafficSamples(): Promise<void> {
   const now = performance.now()
   for (const cluster of clusters.items) {
     if (!cluster.online) {
