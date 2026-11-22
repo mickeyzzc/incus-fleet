@@ -7,6 +7,7 @@ import { useI18n } from 'vue-i18n'
 
 import InstanceActions from '@/components/InstanceActions.vue'
 import AddClusterMemberDialog from '@/components/AddClusterMemberDialog.vue'
+import InstanceDeleteDialog from '@/components/InstanceDeleteDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import ImageDistributeDialog from '@/components/ImageDistributeDialog.vue'
@@ -116,7 +117,7 @@ watch(
   },
 )
 
-const { act, confirmDelete, isBusy } = useInstanceActions(() => load())
+const { act, confirmDelete, isBusy, deleteTarget, deleting, cancelDelete, submitDelete } = useInstanceActions(() => load())
 
 watch(typeFilter, async (type) => {
   await instances.fetchCluster(props.cluster, type)
@@ -998,6 +999,12 @@ function openNodeUpgrade(member: ClusterMember): void {
       :iso-pool="isoTarget.pool"
       :networks="(resources?.networks ?? []).map((network) => network.name)"
       @launched="instances.fetchCluster(cluster, typeFilter)"
+    />
+    <InstanceDeleteDialog
+      :target="deleteTarget"
+      :busy="deleting"
+      @cancel="cancelDelete"
+      @confirm="submitDelete"
     />
   </div>
 </template>

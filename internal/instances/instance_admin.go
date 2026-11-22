@@ -532,17 +532,17 @@ func mergeDevice(
 	case "nic":
 		merged["type"] = "nic"
 		if network := strings.TrimSpace(req.Network); network != "" {
-			networks, err := client.GetNetworkNames()
+			networks, err := client.GetNetworks()
 			if err != nil {
 				return nil, fmt.Errorf("instances: list networks for %s: %w", clusterName, err)
 			}
-			if !containsString(networks, network) {
-				return nil, fmt.Errorf("%w: network %q does not exist on %s", ErrInvalidRequest, network, clusterName)
+			target, err := findNetwork(networks, network, clusterName)
+			if err != nil {
+				return nil, err
 			}
-
-			merged["network"] = network
-			delete(merged, "nictype")
-			delete(merged, "parent")
+			if err := applyNICNetwork(merged, target, network, strings.TrimSpace(req.IPv4), strings.TrimSpace(req.IPv6)); err != nil {
+				return nil, err
+			}
 		}
 
 		if err := validateIP("ipv4", req.IPv4, false); err != nil {
@@ -660,12 +660,13 @@ func buildDevice(
 			return nil, fmt.Errorf("%w: nic device %q requires a network", ErrInvalidRequest, deviceName)
 		}
 
-		networks, err := client.GetNetworkNames()
+		networks, err := client.GetNetworks()
 		if err != nil {
 			return nil, fmt.Errorf("instances: list networks for %s: %w", clusterName, err)
 		}
-		if !containsString(networks, network) {
-			return nil, fmt.Errorf("%w: network %q does not exist on %s", ErrInvalidRequest, network, clusterName)
+		target, err := findNetwork(networks, network, clusterName)
+		if err != nil {
+			return nil, err
 		}
 
 		if err := validateIP("ipv4", req.IPv4, false); err != nil {
@@ -675,7 +676,10 @@ func buildDevice(
 			return nil, err
 		}
 
-		device := map[string]string{"type": "nic", "network": network}
+		device := map[string]string{"type": "nic"}
+		if err := applyNICNetwork(device, target, network, strings.TrimSpace(req.IPv4), strings.TrimSpace(req.IPv6)); err != nil {
+			return nil, err
+		}
 		if ip := strings.TrimSpace(req.IPv4); ip != "" {
 			device["ipv4.address"] = ip
 		}

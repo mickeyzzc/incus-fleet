@@ -210,6 +210,41 @@ func isWireless(ifname string) bool {
 	return err == nil
 }
 
+// CommandRunner runs one whole shell command on a host. nodeaccess's
+// CommandRunner satisfies this shape; the structural match avoids an import
+// cycle.
+type CommandRunner interface {
+	Run(ctx context.Context, command string) (string, error)
+}
+
+// BondSlaves maps bonding member interfaces to their master, read from the
+// member's link table (`ip -j link show`). The instance forms use this to
+// keep bond slaves out of the macvlan parent candidates: a macvlan over a
+// slave cannot come up while the bond owns it.
+func BondSlaves(ctx context.Context, run CommandRunner) (map[string]string, error) {
+	out, err := run.Run(ctx, "ip -j link show")
+	if err != nil {
+		return nil, fmt.Errorf("%w: ip link show: %v", ErrUnavailable, err)
+	}
+
+	var links []struct {
+		Ifname string `json:"ifname"`
+		Master string `json:"master"`
+	}
+	if err := json.Unmarshal([]byte(out), &links); err != nil {
+		return nil, fmt.Errorf("%w: parse ip link output: %v", ErrUnavailable, err)
+	}
+
+	slaves := make(map[string]string)
+	for _, link := range links {
+		if link.Master != "" && link.Ifname != "" {
+			slaves[link.Ifname] = link.Master
+		}
+	}
+
+	return slaves, nil
+}
+
 // ListNICs returns every interface with its state and addresses.
 func (s *Service) ListNICs(_ context.Context) ([]NIC, error) {
 	out, err := s.run.Run("ip", "-j", "addr", "show")

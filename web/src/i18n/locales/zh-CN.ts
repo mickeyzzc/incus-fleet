@@ -114,6 +114,8 @@ export default {
     },
     deleteTitle: '删除实例',
     deleteConfirm: '确定删除实例 {name}？此操作无法撤销。',
+    deleteVolumes: '同时删除已挂载的存储卷',
+    deleteVolumesHint: '将删除该实例挂载的自定义卷；共享的 ISO 安装镜像资产会保留。',
     deleteSuccess: '已删除 {name}。',
     actionFailed: '操作失败：{error}',
     filterType: '按类型筛选',

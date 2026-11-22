@@ -349,7 +349,10 @@ func TestUpdateDeviceMergesAndPreservesKeys(t *testing.T) {
 				"iso0": {"type": "disk", "pool": "default", "source": "installer", "boot.priority": "1"},
 			},
 		},
-		NetworkNames: []string{"incusbr0", "lanbr"},
+		Networks: []api.Network{
+			{Name: "incusbr0", Type: "bridge", Managed: true},
+			{Name: "lanbr", Type: "bridge", Managed: true},
+		},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 	ctx := context.Background()
@@ -742,4 +745,29 @@ func TestImageTransfer(t *testing.T) {
 		t.Fatal("CopyImageTo() expected context cancellation error")
 	}
 	target.RemoteOperation = nil
+}
+
+// Attaching a NIC to an unmanaged physical parent produces a macvlan device
+// with parent= — never network=<unmanaged>, which Incus rejects.
+func TestAttachNICUnmanagedParent(t *testing.T) {
+	srv := &incusfake.Server{
+		Instance: manageInstance("vm1"),
+		Networks: []api.Network{
+			{Name: "wan0", Type: "physical", Managed: false},
+		},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+	ctx := context.Background()
+
+	if _, err := svc.AttachDevice(ctx, "c1", "vm1", DeviceRequest{Name: "eth1", Type: "nic", Network: "wan0"}); err != nil {
+		t.Fatalf("AttachDevice() error = %v", err)
+	}
+
+	nic := srv.UpdateArgs()[0].Instance.Devices["eth1"]
+	if nic["nictype"] != "macvlan" || nic["parent"] != "wan0" {
+		t.Fatalf("nic = %#v", nic)
+	}
+	if _, has := nic["network"]; has {
+		t.Fatalf("unmanaged parent must not use the network key: %#v", nic)
+	}
 }

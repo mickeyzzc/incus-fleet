@@ -8,6 +8,7 @@ import BatchOpsDialog from '@/components/BatchOpsDialog.vue'
 import CloneInstanceDialog from '@/components/CloneInstanceDialog.vue'
 import { useAssetsStore } from '@/stores/assets'
 import InstanceActions from '@/components/InstanceActions.vue'
+import InstanceDeleteDialog from '@/components/InstanceDeleteDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
@@ -85,7 +86,7 @@ watch(typeFilter, async (type) => {
   await instances.fetchAll(type)
 })
 
-const { act, confirmDelete, isBusy } = useInstanceActions(load)
+const { act, confirmDelete, isBusy, deleteTarget, deleting, cancelDelete, submitDelete } = useInstanceActions(load)
 
 const cloneOpen = ref(false)
 const cloneTarget = ref({ cluster: '', name: '' })
@@ -389,6 +390,12 @@ async function onSaved(): Promise<void> {
       :instance="migrateInstance"
       :clusters="clusters.items"
       @submitted="load"
+    />
+    <InstanceDeleteDialog
+      :target="deleteTarget"
+      :busy="deleting"
+      @cancel="cancelDelete"
+      @confirm="submitDelete"
     />
   </div>
 </template>

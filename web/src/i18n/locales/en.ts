@@ -114,6 +114,9 @@ export default {
     },
     deleteTitle: 'Delete instance',
     deleteConfirm: 'Delete instance {name}? This cannot be undone.',
+    deleteVolumes: 'Also delete attached storage volumes',
+    deleteVolumesHint:
+      'Removes the custom volumes attached to this instance. Shared ISO installer assets are kept.',
     deleteSuccess: 'Deleted {name}.',
     actionFailed: 'Action failed: {error}',
     filterType: 'Filter by type',

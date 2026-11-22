@@ -584,8 +584,15 @@ func (a *API) deleteInstance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	// volumes=true also removes the instance's attached custom volumes;
+	// shared ISO installer assets are kept.
+	volumes, err := parseForce(r.URL.Query().Get("volumes"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 
-	if err := a.instances.Delete(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), force); err != nil {
+	if err := a.instances.Delete(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), force, volumes); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}
@@ -804,7 +811,69 @@ func (a *API) getResources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Bond slaves cannot serve as macvlan parents while the bond owns them;
+	// hide them from the candidate lists. Node access may be unavailable, in
+	// which case the unfiltered list is served as before.
+	resources.Networks = filterBondSlaveNetworks(resources.Networks, a.bondSlavesLookup(r.Context(), r.PathValue("cluster")))
+
 	writeJSON(w, http.StatusOK, resources)
+}
+
+// bondSlavesLookup builds a member→bond-slaves resolver over node access.
+// Members whose lookup fails (SSH unconfigured, node offline) contribute no
+// map; the caller keeps their NICs visible.
+func (a *API) bondSlavesLookup(ctx context.Context, cluster string) func(member string) (map[string]string, error) {
+	return func(member string) (map[string]string, error) {
+		runner, closeNode, err := a.nodenet.HostRunner(ctx, cluster, member)
+		if err != nil {
+			return nil, err
+		}
+		defer closeNode()
+
+		return nodenet.BondSlaves(ctx, runner)
+	}
+}
+
+// filterBondSlaveNetworks drops unmanaged NICs that are bonding members on
+// any of their locations. Managed networks are never touched, and a failing
+// lookup degrades to keeping the entry.
+func filterBondSlaveNetworks(networks []instances.Network, lookup func(member string) (map[string]string, error)) []instances.Network {
+	out := make([]instances.Network, 0, len(networks))
+	for _, network := range networks {
+		if network.Managed {
+			out = append(out, network)
+			continue
+		}
+
+		if isBondSlave(network.Name, network.Locations, lookup) {
+			continue
+		}
+
+		out = append(out, network)
+	}
+
+	return out
+}
+
+// isBondSlave reports whether the NIC is a bond member on any member that
+// exposes it. Lookup errors are swallowed: filtering is a best-effort
+// improvement, not a gate.
+func isBondSlave(name string, locations []string, lookup func(member string) (map[string]string, error)) bool {
+	if len(locations) == 0 {
+		locations = []string{""}
+	}
+
+	for _, member := range locations {
+		slaves, err := lookup(member)
+		if err != nil || slaves == nil {
+			continue
+		}
+		if _, slave := slaves[name]; slave {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (a *API) createStoragePool(w http.ResponseWriter, r *http.Request) {

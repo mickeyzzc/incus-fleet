@@ -247,11 +247,11 @@ export const useInstancesStore = defineStore('instances', () => {
   }
 
   /** Deletes an instance and removes it from cached state. */
-  async function deleteInstance(cluster: string, name: string, force = false): Promise<void> {
+  async function deleteInstance(cluster: string, name: string, force = false, volumes = false): Promise<void> {
     error.value = ''
 
     try {
-      await api.deleteInstance(cluster, name, force)
+      await api.deleteInstance(cluster, name, force, volumes)
       items.value = items.value.filter(
         (instance) => !(instance.cluster === cluster && instance.name === name),
       )
