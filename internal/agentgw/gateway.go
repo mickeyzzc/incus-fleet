@@ -392,7 +392,7 @@ func (g *Gateway) connect(w http.ResponseWriter, r *http.Request) {
 			g.logger.Warn("agent sent invalid envelope", "agent", agentID, "error", err)
 			continue
 		}
-		g.handleEnvelope(r.Context(), agent, &env)
+		g.handleEnvelope(r.Context(), conn, agent, &env)
 	}
 
 	g.markOffline(agent)
@@ -422,7 +422,9 @@ func (c *agentConn) writeLoop() {
 func (c *agentConn) close() {
 	c.once.Do(func() {
 		close(c.done)
-		_ = c.ws.Close()
+		if c.ws != nil {
+			_ = c.ws.Close()
+		}
 	})
 }
 
@@ -437,7 +439,7 @@ func (c *agentConn) enqueue(env *agentpb.Envelope) bool {
 	}
 }
 
-func (g *Gateway) handleEnvelope(_ context.Context, agent *store.Agent, env *agentpb.Envelope) {
+func (g *Gateway) handleEnvelope(_ context.Context, c *agentConn, agent *store.Agent, env *agentpb.Envelope) {
 	switch body := env.Body.(type) {
 	case *agentpb.Envelope_Hello:
 		if body.Hello.AgentId != "" && body.Hello.AgentId != agent.ID {
@@ -454,7 +456,9 @@ func (g *Gateway) handleEnvelope(_ context.Context, agent *store.Agent, env *age
 		agent.UpdatedAt = agent.LastSeen
 		caps, _ := json.Marshal(body.Hello.Capabilities)
 		agent.Capabilities = string(caps)
-		g.saveAgent(agent)
+		if !g.saveLiveAgent(c, agent) {
+			return
+		}
 		g.send(agent.ID, &agentpb.Envelope{Body: &agentpb.Envelope_HelloAck{HelloAck: &agentpb.HelloAck{
 			ServerTimeMs:        time.Now().UTC().UnixMilli(),
 			ProtocolVersion:     1,
@@ -463,7 +467,9 @@ func (g *Gateway) handleEnvelope(_ context.Context, agent *store.Agent, env *age
 	case *agentpb.Envelope_Heartbeat:
 		agent.LastSeen = time.Now().UTC()
 		agent.UpdatedAt = agent.LastSeen
-		g.saveAgent(agent)
+		if !g.saveLiveAgent(c, agent) {
+			return
+		}
 		if g.onHeartbeat != nil {
 			g.onHeartbeat(agent.ID)
 		}
@@ -474,14 +480,18 @@ func (g *Gateway) handleEnvelope(_ context.Context, agent *store.Agent, env *age
 		agent.Facts = marshalFacts(body.Facts)
 		agent.LastSeen = time.Now().UTC()
 		agent.UpdatedAt = agent.LastSeen
-		g.saveAgent(agent)
+		if !g.saveLiveAgent(c, agent) {
+			return
+		}
 	case *agentpb.Envelope_Telemetry:
 		if g.telemetry != nil {
 			g.telemetry.Ingest(body.Telemetry, agent.Cluster, agent.Member)
 		}
 		agent.LastSeen = time.Now().UTC()
 		agent.UpdatedAt = agent.LastSeen
-		g.saveAgent(agent)
+		if !g.saveLiveAgent(c, agent) {
+			return
+		}
 	case *agentpb.Envelope_Result:
 		g.complete(body.Result)
 	case *agentpb.Envelope_Error:
@@ -508,11 +518,31 @@ func (g *Gateway) saveAgent(agent *store.Agent) {
 	}
 }
 
+// saveLiveAgent persists live agent updates unless the stored record was
+// revoked in the meantime: heartbeats must never write a revoked agent back to
+// online, and a disconnect must not erase the revocation either. It closes the
+// connection and reports false when revocation wins.
+func (g *Gateway) saveLiveAgent(c *agentConn, agent *store.Agent) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if current, err := g.store.GetAgent(ctx, agent.ID); err == nil && current.Status == store.AgentRevoked {
+		g.logger.Info("agent revoked; closing connection", "agent", agent.ID)
+		if c != nil {
+			c.close()
+		}
+
+		return false
+	}
+	g.saveAgent(agent)
+
+	return true
+}
+
 func (g *Gateway) markOffline(agent *store.Agent) {
 	agent.Status = store.AgentOffline
 	agent.LastSeen = time.Now().UTC()
 	agent.UpdatedAt = agent.LastSeen
-	g.saveAgent(agent)
+	g.saveLiveAgent(nil, agent)
 }
 
 func (g *Gateway) register(conn *agentConn) {

@@ -74,10 +74,15 @@ type App struct {
 	metricsQuery *metricsquery.Proxy
 	taskRunner   *taskrunner.Runner
 	mesh         *mesh.Mesh
+	auth         *auth.Authenticator
 }
 
 // agentDispatch is the transport used by both async tasks and sync node ops.
 const meshOwnerTTL = 60 * time.Second
+
+// sessionCleanupInterval is how often expired sessions are swept from the
+// store (or the in-process session cache).
+const sessionCleanupInterval = 10 * time.Minute
 
 type agentDispatch interface {
 	Dispatch(ctx context.Context, agentID string, typ agentpb.TaskType, payload []byte, timeout time.Duration) (*agentpb.TaskResult, error)
@@ -400,8 +405,11 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		},
 		Auth:     authenticator,
 		StaticFS: o.staticFS,
-		Logger:   logger,
-		Version:  version.String(),
+		// This instance's dispatcher, or any instance's dispatcher through a
+		// shared database, can claim queued host tasks.
+		TaskWorker: taskRunner != nil || cfg.Database.IsShared(),
+		Logger:     logger,
+		Version:    version.String(),
 	}).Handler()
 
 	server := &http.Server{
@@ -432,6 +440,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		metricsQuery: queryProxy,
 		taskRunner:   taskRunner,
 		mesh:         centerMesh,
+		auth:         authenticator,
 	}, nil
 }
 
@@ -452,6 +461,24 @@ func (a *App) Run(ctx context.Context) error {
 	if a.taskRunner != nil {
 		go a.taskRunner.Run(ctx)
 		a.logger.Info("host task dispatcher running", "worker", a.taskRunner.Worker())
+	}
+
+	// Expired sessions otherwise linger forever in the shared store; sweep
+	// them on a fixed interval for the lifetime of the process.
+	if a.auth != nil {
+		go func() {
+			ticker := time.NewTicker(sessionCleanupInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					a.auth.Cleanup(ctx)
+				}
+			}
+		}()
+		a.logger.Info("session cleanup loop running", "interval", sessionCleanupInterval)
 	}
 
 	serverCount := 1

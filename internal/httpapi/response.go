@@ -23,6 +23,24 @@ import (
 	"github.com/lxc/incus/v7/shared/api"
 )
 
+// operatorError marks an error that is safe and useful to show to the caller
+// verbatim even on a 5xx: host-command diagnostics (SSH, script exit, QEMU
+// monitor failures) tell the operator what to fix, unlike raw store or
+// encoding internals.
+type operatorError interface {
+	error
+	operatorMarker()
+}
+
+type opError struct{ err error }
+
+func (e *opError) Error() string   { return e.err.Error() }
+func (e *opError) Unwrap() error   { return e.err }
+func (e *opError) operatorMarker() {}
+
+// operatorFacing tags an error as caller-visible diagnostics.
+func operatorFacing(err error) error { return &opError{err: err} }
+
 func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 	status := http.StatusInternalServerError
 	code := "internal_error"
@@ -54,8 +72,24 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code = http.StatusServiceUnavailable, "node_unavailable"
 	}
 
+	// Mapped errors are classified diagnostics and stay caller-visible; an
+	// unclassified 500 is an internal failure (store, HTTP client, encoding)
+	// whose raw text must not leak, unless it is explicitly marked as
+	// operator-facing (host-command paths hand back such diagnostics).
+	facing := status != http.StatusInternalServerError
+	var opErr operatorError
+	if errors.As(err, &opErr) {
+		facing = true
+	}
+
 	if status >= 500 {
 		a.logger.Error("request failed", "method", r.Method, "path", r.URL.Path, "error", err)
+	}
+
+	if !facing && status >= 500 {
+		writeError(w, status, code, "internal server error")
+
+		return
 	}
 
 	writeError(w, status, code, err.Error())

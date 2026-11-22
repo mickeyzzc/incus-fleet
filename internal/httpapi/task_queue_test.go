@@ -91,6 +91,28 @@ func TestEnqueueHostTaskDisabled(t *testing.T) {
 	}
 }
 
+// Without a dispatcher (and without a shared database another instance could
+// claim from) the endpoint must refuse the work instead of accepting it into
+// a queue no one drains.
+func TestEnqueueHostTaskWithoutWorker(t *testing.T) {
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	cookie := f.login(t)
+	deps := Deps{Auth: f.auth, Store: f.store, Clusters: f.manager, Version: "test"}
+	f.handler = New(deps).Handler()
+
+	rec := f.request(t, http.MethodPost, "/api/v1/tasks", map[string]any{
+		"cluster": "c1", "member": "test-node",
+		"plan": map[string]any{"action": "link-state", "interface": "eth0", "up": false},
+	}, cookie, "")
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "no_worker") {
+		t.Fatalf("no worker = %d body=%s", rec.Code, rec.Body.String())
+	}
+	tasks, err := f.store.ListHostTasks(context.Background(), "c1", "test-node", 10)
+	if err != nil || len(tasks) != 0 {
+		t.Fatalf("tasks = %#v, %v", tasks, err)
+	}
+}
+
 func TestEnqueueHostTaskValidation(t *testing.T) {
 	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
 	cookie := f.login(t)

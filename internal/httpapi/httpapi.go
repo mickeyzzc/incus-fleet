@@ -54,6 +54,11 @@ type Deps struct {
 	StaticFS       fs.FS
 	Logger         *slog.Logger
 	Version        string
+	// TaskWorker reports whether queued host tasks can actually be picked up:
+	// this instance runs a dispatcher, or a shared database lets another
+	// instance's dispatcher claim them. Without it POST /tasks would accept
+	// work no one will ever execute.
+	TaskWorker bool
 	// DesktopRunner overrides the host-command backend of the graphical
 	// console. Production leaves it nil, which uses the nodeaccess SSH path.
 	DesktopRunner DesktopRunnerFunc
@@ -87,6 +92,7 @@ type API struct {
 	logger         *slog.Logger
 	version        string
 	static         fs.FS
+	taskWorker     bool
 	desktopRun     DesktopRunnerFunc
 }
 
@@ -119,6 +125,7 @@ func New(deps Deps) *API {
 		auth:           deps.Auth,
 		logger:         logger,
 		version:        deps.Version,
+		taskWorker:     deps.TaskWorker,
 		desktopRun:     deps.DesktopRunner,
 	}
 

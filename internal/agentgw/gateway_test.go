@@ -518,7 +518,7 @@ func TestGatewayIngestsTelemetry(t *testing.T) {
 	if err := st.UpsertAgent(context.Background(), agent); err != nil {
 		t.Fatal(err)
 	}
-	gw.handleEnvelope(context.Background(), agent, &agentpb.Envelope{Body: &agentpb.Envelope_Telemetry{
+	gw.handleEnvelope(context.Background(), nil, agent, &agentpb.Envelope{Body: &agentpb.Envelope_Telemetry{
 		Telemetry: &agentpb.TelemetryBatch{AgentId: "agent-1", Series: []*agentpb.Series{{
 			Name: "fleet_host_load", Type: agentpb.MetricType_METRIC_TYPE_GAUGE,
 			Samples: []*agentpb.Sample{{AtMs: now.UnixMilli(), Value: 1.5}},
@@ -527,6 +527,52 @@ func TestGatewayIngestsTelemetry(t *testing.T) {
 	series := ts.Query(telemetry.Filter{Cluster: "c1", Member: "node-a"})
 	if len(series) != 1 || series[0].Points[0].Value != 1.5 {
 		t.Fatalf("telemetry = %#v", series)
+	}
+}
+
+// A revoked agent must not be resurrected by its own heartbeat: the live save
+// refuses the write, closes the connection, and the record stays revoked.
+func TestHeartbeatDoesNotOverwriteRevocation(t *testing.T) {
+	ca := mustTestCA(t)
+	st := openAgentStore(t)
+	gw := New(st, ca, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	now := time.Now().UTC()
+	agent := &store.Agent{ID: "agent-1", Cluster: "c1", Member: "node-a", Status: store.AgentOnline,
+		CreatedAt: now, UpdatedAt: now}
+	if err := st.UpsertAgent(context.Background(), agent); err != nil {
+		t.Fatal(err)
+	}
+	revoked := &store.Agent{ID: agent.ID, Cluster: agent.Cluster, Member: agent.Member,
+		Status: store.AgentRevoked, CreatedAt: now, UpdatedAt: time.Now().UTC()}
+	if err := st.UpsertAgent(context.Background(), revoked); err != nil {
+		t.Fatal(err)
+	}
+
+	conn := &agentConn{id: agent.ID, send: make(chan *agentpb.Envelope, 1), done: make(chan struct{})}
+	gw.handleEnvelope(context.Background(), conn, agent, &agentpb.Envelope{Body: &agentpb.Envelope_Heartbeat{
+		Heartbeat: &agentpb.Heartbeat{},
+	}})
+
+	stored, err := st.GetAgent(context.Background(), agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != store.AgentRevoked {
+		t.Fatalf("status = %q after heartbeat, want revoked", stored.Status)
+	}
+	select {
+	case <-conn.done:
+	default:
+		t.Fatal("revoked agent connection was not closed")
+	}
+
+	// A disconnect after revocation must not erase the revoked status either.
+	gw.markOffline(agent)
+	if stored, err = st.GetAgent(context.Background(), agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != store.AgentRevoked {
+		t.Fatalf("status = %q after disconnect, want revoked", stored.Status)
 	}
 }
 
