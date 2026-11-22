@@ -108,6 +108,26 @@ describe('AnswerProfilesView', () => {
     expect(api.deleteAnswerProfile).not.toHaveBeenCalled()
   })
 
+  it('renders custom-answer profiles and refreshes the list', async () => {
+    vi.mocked(api.listAnswerProfiles).mockResolvedValue([{
+      ...fixture, answer_file: '#cloud-config\nhostname: x', username: '', is_default: false,
+    }])
+    const wrapper = await mountView()
+    expect(wrapper.text()).toContain('Custom answer')
+    // Refresh button triggers a forced fetch.
+    const refresh = wrapper.findAll('button').find((b) => b.text().includes('Refresh'))
+    expect(refresh).toBeTruthy()
+    await refresh!.trigger('click')
+    await flushPromises()
+    expect(api.listAnswerProfiles).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the empty state when no profiles are saved', async () => {
+    vi.mocked(api.listAnswerProfiles).mockResolvedValue([])
+    const wrapper = await mountView()
+    expect(wrapper.text()).toContain('No answer profiles saved yet.')
+  })
+
   it('reports save and delete failures', async () => {
     vi.mocked(api.createAnswerProfile).mockRejectedValue(new Error('boom'))
     vi.mocked(api.deleteAnswerProfile).mockRejectedValue(new Error('boom'))

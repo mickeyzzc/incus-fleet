@@ -336,6 +336,46 @@ describe('IsoLaunchDialog unattended', () => {
     expect(wrapper.find('input[placeholder="/dev/vda"]').exists()).toBe(true)
   })
 
+  it('guesses non-debian profiles from the ISO name', async () => {
+    for (const [iso, expected] of [
+      ['ubuntu-24.04-live-server', 'ubuntu-autoinstall'],
+      ['Rocky-9-latest', 'kickstart'],
+      ['my-custom-image', 'nocloud'],
+    ]) {
+      const wrapper = mount(IsoLaunchDialog, {
+        props: { modelValue: true, cluster: 'c1', isoName: iso, isoPool: 'default', networks: [] },
+        global: { plugins: [ElementPlus] },
+      })
+      await flushPromises()
+      await wrapper.find('input').setValue('guessed-01')
+      await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+      await flushPromises()
+      await wrapper.find('input[placeholder="fleet"]').setValue('ops')
+      await wrapper.findAll('button').at(-1)?.trigger('click')
+      await flushPromises()
+      const request = vi.mocked(api.launchUnattended).mock.calls.at(-1)?.[3]
+      expect(request?.profile).toBe(expected)
+    }
+  })
+
+  it('sends a custom answer file verbatim', async () => {
+    const wrapper = mountUnattended()
+    await flushPromises()
+    await wrapper.find('input').setValue('web-01')
+    await wrapper.find('.el-switch input[type=checkbox]').setValue(true)
+    await flushPromises()
+    await wrapper.find('.el-checkbox input[type=checkbox]').setValue(true)
+    await flushPromises()
+    const textarea = wrapper.find('textarea')
+    expect(textarea.exists()).toBe(true)
+    await textarea.setValue('#cloud-config\nhostname: inline')
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+    const request = vi.mocked(api.launchUnattended).mock.calls.at(-1)?.[3]
+    expect(request?.answer_file).toBe('#cloud-config\nhostname: inline')
+    expect(request?.spec).toBeUndefined()
+  })
+
   it('auto-selects the stored default answer profile', async () => {
     vi.mocked(api.listAnswerProfiles).mockResolvedValue([{
       id: 'ap-def', name: 'lab-default', profile: 'debian-preseed',
