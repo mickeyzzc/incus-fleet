@@ -45,8 +45,8 @@ func (s *SQLStore) CreateAnswerProfile(ctx context.Context, p *AnswerProfile) er
 	// Clear any previous default in this family before inserting a new one:
 	// the partial unique index rejects two defaults even momentarily.
 	if p.IsDefault {
-		const clear = `UPDATE answer_profiles SET is_default = 0 WHERE profile = ?`
-		if _, err := s.db.ExecContext(ctx, s.rebind(clear), p.Profile); err != nil {
+		const clearStmt = `UPDATE answer_profiles SET is_default = 0 WHERE profile = ?`
+		if _, err := s.db.ExecContext(ctx, s.rebind(clearStmt), p.Profile); err != nil {
 			return err
 		}
 	}
@@ -160,8 +160,8 @@ func (s *SQLStore) UpdateAnswerProfile(ctx context.Context, p *AnswerProfile) er
 	// Clear any previous default in this family before setting the new one:
 	// the partial unique index rejects two defaults even momentarily.
 	if p.IsDefault {
-		const clear = `UPDATE answer_profiles SET is_default = 0 WHERE profile = ? AND id <> ?`
-		if _, err := s.db.ExecContext(ctx, s.rebind(clear), p.Profile, p.ID); err != nil {
+		const clearStmt = `UPDATE answer_profiles SET is_default = 0 WHERE profile = ? AND id <> ?`
+		if _, err := s.db.ExecContext(ctx, s.rebind(clearStmt), p.Profile, p.ID); err != nil {
 			return err
 		}
 	}
