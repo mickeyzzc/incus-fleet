@@ -214,7 +214,11 @@ describe('ClusterView', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('Deleted web.')
   })
 
-  it('refreshes, reconnects, and reports reconnect errors', async () => {    const { wrapper } = await mountCluster()
+  it('refreshes, reconnects, and reports reconnect errors', async () => {
+    // Freeze timers: the real 15s status loop would fire during slow
+    // coverage-mode runs and shift the call counts.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { wrapper } = await mountCluster()
     expect(api.listClusters).toHaveBeenCalledTimes(1)
 
     await buttonByText(wrapper, 'Refresh').trigger('click')
@@ -230,6 +234,9 @@ describe('ClusterView', () => {
     await buttonByText(wrapper, 'Reconnect').trigger('click')
     await flushPromises()
     expect(ElMessage.error).toHaveBeenCalledWith('still down')
+
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('reloads when the route cluster changes', async () => {
