@@ -778,3 +778,52 @@ func TestMemberNames(t *testing.T) {
 		t.Fatal("MemberNames() expected error")
 	}
 }
+
+// A guest without the incus agent (ISO-booted installer) cannot answer an
+// elegant stop/restart: Incus would block until the full graceful timeout
+// before failing, leaving the console buttons dead for minutes. Those
+// actions force immediately when the state reports no agent activity.
+func TestActionForcesWithoutAgent(t *testing.T) {
+	srv := &incusfake.Server{
+		State: &api.InstanceState{Status: "Running", StatusCode: api.Running, Processes: -1},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if err := svc.Action(context.Background(), "c1", "vm1", ActionRequest{Action: "restart"}); err != nil {
+		t.Fatalf("Action() error = %v", err)
+	}
+
+	args := srv.UpdateStateArgs()
+	if len(args) != 1 {
+		t.Fatalf("UpdateStateArgs() = %#v", args)
+	}
+	if !args[0].Force {
+		t.Fatalf("agent-less restart must force: %#v", args[0])
+	}
+	if args[0].Timeout != 0 {
+		t.Fatalf("agent-less restart must not wait: %#v", args[0])
+	}
+}
+
+func TestActionKeepsGracefulPathWithAgent(t *testing.T) {
+	processes := int64(42)
+	srv := &incusfake.Server{
+		State: &api.InstanceState{Status: "Running", StatusCode: api.Running, Processes: processes},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if err := svc.Action(context.Background(), "c1", "vm1", ActionRequest{Action: "restart"}); err != nil {
+		t.Fatalf("Action() error = %v", err)
+	}
+
+	args := srv.UpdateStateArgs()
+	if len(args) != 1 {
+		t.Fatalf("UpdateStateArgs() = %#v", args)
+	}
+	if args[0].Force {
+		t.Fatalf("agent-backed restart must stay graceful: %#v", args[0])
+	}
+	if args[0].Timeout != 300 {
+		t.Fatalf("graceful timeout = %#v", args[0])
+	}
+}

@@ -347,6 +347,12 @@ func (s *Service) Update(ctx context.Context, clusterName, name string, req Upda
 }
 
 // Action starts, stops, or restarts an instance.
+//
+// A guest without the incus agent (an ISO-booted installer, for example)
+// cannot answer an elegant stop/restart, so Incus would block until the full
+// graceful timeout before failing — the console buttons then appear dead for
+// minutes. When the state reports no agent activity, stop/restart skip the
+// wait and force immediately.
 func (s *Service) Action(ctx context.Context, clusterName, name string, req ActionRequest) error {
 	action := strings.TrimSpace(req.Action)
 	switch action {
@@ -360,13 +366,22 @@ func (s *Service) Action(ctx context.Context, clusterName, name string, req Acti
 		return err
 	}
 
+	force := req.Force
+	timeout := 300
+	if action != "start" && !force {
+		if state, _, err := client.GetInstanceState(name); err == nil && state != nil && state.Processes < 0 {
+			force = true
+			timeout = 0
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, actionTimeout)
 	defer cancel()
 
 	op, err := client.UpdateInstanceState(name, api.InstanceStatePut{
 		Action:  action,
-		Timeout: 300,
-		Force:   req.Force,
+		Timeout: timeout,
+		Force:   force,
 	}, "")
 	if err != nil {
 		return fmt.Errorf("instances: %s %s:%s: %w", action, clusterName, name, err)
