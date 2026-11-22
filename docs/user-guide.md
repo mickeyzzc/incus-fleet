@@ -34,7 +34,9 @@ Prerequisites:
 ## Sign in and choose a language
 
 1. Open the fleet URL, enter your **username and password**, and sign in. Sessions last 12
-   hours; sign in again after they expire. The current account name appears in the top bar.
+   hours; sign in again after they expire. If a session expires mid-page, fleet routes to the
+   sign-in view automatically and returns you to the original page afterwards. The current
+   account name appears in the top bar.
 2. Create the first administrator in one of two ways:
    - set `INCUS_FLEET_BOOTSTRAP_ADMIN_USERNAME` and `INCUS_FLEET_BOOTSTRAP_ADMIN_PASSWORD`
      in `incus-fleet.env` and restart the service; or
@@ -113,6 +115,9 @@ The dashboard opens after sign-in and shows:
 - Total instances and the running/stopped split;
 - Resource overview (CPU, memory, storage).
 
+The status refreshes automatically every 15 seconds while the tab is visible, so a member
+coming back online appears without a manual reload.
+
 ![Fleet dashboard](images-en/05-dashboard-resources.png)
 
 *Dashboard in the Simplified Chinese UI; switch languages from the gear menu.*
@@ -123,7 +128,8 @@ profiles, and members.
 ## Images: import and distribute
 
 Fleet uploads a local image file to one cluster, then distributes it to other clusters with
-one click: upload once, use everywhere.
+one click: upload once, use everywhere. Deleting an image on a cluster asks for confirmation
+first — it cannot be undone.
 
 ### Step 1: prepare the image files
 
@@ -267,16 +273,22 @@ Open a cluster → **Instances** → **Create instance**. Key fields:
 
 ### Choosing a network: same-subnet IPs
 
+The network dropdown groups its options so heterogeneous clusters stay readable: managed
+networks (usable on every member) come first, then one group of physical NICs per member.
+The cluster network table shows a **Members** column with the same information; bond member
+NICs are hidden from the parent candidates because a macvlan over a bond slave cannot come
+up.
+
 The instance address depends on the selected network:
 
 - **Managed bridge** (for example `incusbr0`): the instance joins the Incus internal NAT
   subnet (for example `10.x.x.x`). Outbound traffic is NATed and the instance is not directly
   reachable from outside.
 - **Physical NIC (macvlan)**: NICs without the managed marker (for example the host NIC
-  `eth0`). The instance is bridged directly onto the physical LAN via macvlan and **gets a
-  DHCP address from the same subnet as the host** (for example, if the host is on
-  `198.51.100.0/24`, the instance receives `198.51.100.x`). Other LAN devices can reach the
-  instance directly.
+  `eth0`, listed under the member that owns it). The instance is bridged directly onto the
+  physical LAN via macvlan and **gets a DHCP address from the same subnet as the host** (for
+  example, if the host is on `198.51.100.0/24`, the instance receives `198.51.100.x`). Other
+  LAN devices can reach the instance directly.
 
 To give an instance an address on the host subnet, select the **physical NIC** (parent is the
 host NIC name) when creating it. Do not enter a static IP: macvlan addresses come from the LAN
@@ -304,8 +316,8 @@ From the instance list or the detail drawer you can:
   form does not manage, such as boot priority); expand a row to see the full device
   configuration; detach devices in the same panel. Clearing a NIC address falls back to DHCP.
   Switching a NIC to a managed network rewrites legacy `nictype`/`parent` devices.
-- **Delete instance**: asks for confirmation and can delete the instance's storage volumes at
-  the same time.
+- **Delete instance**: asks for confirmation and offers a checkbox to delete the instance's
+  attached storage volumes in the same step (shared ISO installer assets are kept).
 
 ## Remote desktop
 
@@ -507,6 +519,9 @@ appears:
 | Batch inject keys | Choose one or more keys from the library and inject them into the target account on each instance; shows success/failure and exit code per instance |
 | Batch run script | Choose a script and run it as root on every instance; captures output per instance |
 | Batch start / stop / restart | Power operations on the selected instances |
+
+Selections survive the automatic list refresh — ticks stay where you put them until you
+clear them yourself.
 
 Typical flow: create a batch of instances → select all → batch inject a public key → SSH in
 with the matching private key → batch run the bootstrap script. Key injection and scripts run
