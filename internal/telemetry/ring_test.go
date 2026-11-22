@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -124,6 +125,17 @@ func TestRingBoundsAndValidationHelpers(t *testing.T) {
 	}
 	if len(store.Query(Filter{})) != 1 {
 		t.Fatal("empty filter should match")
+	}
+}
+
+func TestSanitizeLabelsCapsCardinality(t *testing.T) {
+	labels := map[string]string{}
+	for i := 0; i < 24; i++ {
+		labels[fmt.Sprintf("label_%02d", i)] = "value"
+	}
+	got := sanitizeLabels(labels)
+	if len(got) != maxSeriesLabels {
+		t.Fatalf("label count = %d, want %d", len(got), maxSeriesLabels)
 	}
 }
 

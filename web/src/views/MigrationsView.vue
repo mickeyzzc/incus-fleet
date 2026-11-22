@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Refresh, Search } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import MigrationStatusTag from '@/components/MigrationStatusTag.vue'
 import type { Migration } from '@/api/types'
 import { useMigrationsStore } from '@/stores/migrations'
+import { errorMessage } from '@/utils/errors'
 import { formatDateTime, formatDuration, shortID } from '@/utils/format'
 
 const migrations = useMigrationsStore()
@@ -15,6 +17,7 @@ const search = ref('')
 const statusFilter = ref('')
 const drawerOpen = ref(false)
 const selectedId = ref('')
+const actionBusy = ref('')
 
 const filtered = computed(() => {
   const needle = search.value.trim().toLowerCase()
@@ -103,6 +106,62 @@ function instanceTypeLabel(type: string): string {
 function modeLabel(mode: string): string {
   return t(mode === 'copy' ? 'migrate.modeCopy' : 'migrate.modeMove')
 }
+
+const TERMINAL_STATUSES: readonly string[] = ['done', 'failed', 'canceled']
+
+function canCancel(migration: Migration): boolean {
+  return !TERMINAL_STATUSES.includes(migration.status)
+}
+
+function canRetry(migration: Migration): boolean {
+  return TERMINAL_STATUSES.includes(migration.status)
+}
+
+/** Cancels a running migration after a confirmation. */
+async function onCancel(migration: Migration): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      t('migrations.cancelConfirm', { instance: migration.instance }),
+      t('migrations.cancelTitle'),
+      { type: 'warning', confirmButtonText: t('migrations.cancel'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
+
+  actionBusy.value = migration.id
+  try {
+    await migrations.cancel(migration.id)
+    ElMessage.success(t('migrations.cancelRequested'))
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  } finally {
+    actionBusy.value = ''
+  }
+}
+
+/** Resubmits a terminal migration after a confirmation. */
+async function onRetry(migration: Migration): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      t('migrations.retryConfirm', { instance: migration.instance }),
+      t('migrations.retryTitle'),
+      { type: 'info', confirmButtonText: t('migrations.retry'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
+
+  actionBusy.value = migration.id
+  try {
+    await migrations.retry(migration.id)
+    ElMessage.success(t('migrations.retrySubmitted'))
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  } finally {
+    actionBusy.value = ''
+  }
+}
 </script>
 
 <template>
@@ -162,6 +221,7 @@ function modeLabel(mode: string): string {
             <el-option :label="t('migrationStatus.verifying')" value="verifying" />
             <el-option :label="t('migrationStatus.done')" value="done" />
             <el-option :label="t('migrationStatus.failed')" value="failed" />
+            <el-option :label="t('migrationStatus.canceled')" value="canceled" />
           </el-select>
           <span class="muted">{{ t('common.shown', { count: filtered.length }) }}</span>
         </div>
@@ -225,6 +285,30 @@ function modeLabel(mode: string): string {
           </el-table-column>
           <el-table-column :label="t('common.created')" width="180">
             <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" width="150" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                v-if="canCancel(row)"
+                size="small"
+                type="warning"
+                plain
+                :loading="actionBusy === row.id"
+                @click.stop="onCancel(row)"
+              >
+                {{ t('migrations.cancel') }}
+              </el-button>
+              <el-button
+                v-if="canRetry(row)"
+                size="small"
+                type="primary"
+                plain
+                :loading="actionBusy === row.id"
+                @click.stop="onRetry(row)"
+              >
+                {{ t('migrations.retry') }}
+              </el-button>
+            </template>
           </el-table-column>
           <template #empty>
             <el-empty :description="t('migrations.empty')" />

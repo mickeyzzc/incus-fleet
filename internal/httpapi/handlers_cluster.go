@@ -229,3 +229,23 @@ func (a *API) getMigration(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, migration)
 }
+
+func (a *API) cancelMigration(w http.ResponseWriter, r *http.Request) {
+	migration, err := a.migrations.Cancel(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, migration)
+}
+
+func (a *API) retryMigration(w http.ResponseWriter, r *http.Request) {
+	migration, err := a.migrations.Retry(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, migration)
+}

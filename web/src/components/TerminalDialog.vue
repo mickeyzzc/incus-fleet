@@ -138,6 +138,12 @@ function decodePayload(data: unknown): string {
   return new TextDecoder().decode(data as ArrayBuffer)
 }
 
+/** Reopens the session after a disconnect, keeping the scrollback. */
+function reconnect(): void {
+  statusMessage.value = ''
+  connect(mode.value)
+}
+
 function switchMode(next: 'console' | 'exec'): void {
   if (mode.value === next) {
     return
@@ -246,9 +252,14 @@ onBeforeUnmount(closeSession)
         <el-radio-button value="console">{{ t('terminal.console') }}</el-radio-button>
         <el-radio-button value="exec">{{ t('terminal.exec') }}</el-radio-button>
       </el-radio-group>
-      <el-tag :type="connected ? 'success' : 'info'" size="small" effect="light">
-        {{ statusMessage || (connected ? t('terminal.connected') : t('terminal.disconnected')) }}
-      </el-tag>
+      <div class="terminal-status">
+        <el-tag :type="connected ? 'success' : 'info'" size="small" effect="light">
+          {{ statusMessage || (connected ? t('terminal.connected') : t('terminal.disconnected')) }}
+        </el-tag>
+        <el-button v-if="!connected" size="small" type="primary" plain @click="reconnect">
+          {{ t('terminal.reconnect') }}
+        </el-button>
+      </div>
     </div>
 
     <div id="terminal-host" class="terminal-host" />
@@ -282,6 +293,12 @@ onBeforeUnmount(closeSession)
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
+}
+
+.terminal-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .terminal-host {

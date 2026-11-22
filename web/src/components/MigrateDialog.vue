@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Right } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
@@ -101,6 +101,20 @@ async function submit(): Promise<void> {
   if (!form.target) {
     ElMessage.error(t('migrate.targetRequired'))
     return
+  }
+
+  // A move deletes the source instance once the copy lands; that deserves a
+  // final, explicit confirmation instead of a hint buried in the form.
+  if (form.mode === 'move') {
+    try {
+      await ElMessageBox.confirm(
+        t('migrate.moveConfirm', { name: props.instance.name, target: form.target }),
+        t('migrate.moveConfirmTitle'),
+        { type: 'warning', confirmButtonText: t('migrate.confirmMove'), cancelButtonText: t('common.cancel') },
+      )
+    } catch {
+      return
+    }
   }
 
   try {

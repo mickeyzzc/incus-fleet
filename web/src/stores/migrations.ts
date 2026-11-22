@@ -80,6 +80,35 @@ export const useMigrationsStore = defineStore('migrations', () => {
     }
   }
 
+  /** Cancels a pending or in-flight migration. */
+  async function cancel(id: string): Promise<Migration | null> {
+    error.value = ''
+    try {
+      const migration = await api.cancelMigration(id)
+      const index = items.value.findIndex((item) => item.id === id)
+      if (index !== -1) {
+        items.value[index] = migration
+      }
+      return migration
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    }
+  }
+
+  /** Resubmits a terminal migration with the same parameters. */
+  async function retry(id: string): Promise<Migration> {
+    error.value = ''
+    try {
+      const migration = await api.retryMigration(id)
+      items.value = [migration, ...items.value]
+      return migration
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    }
+  }
+
   /** Starts periodic polling while migrations are active. */
   function startPolling(intervalMs = 2000): void {
     pollIntervalMs = intervalMs
@@ -118,6 +147,8 @@ export const useMigrationsStore = defineStore('migrations', () => {
     fetchAll,
     submit,
     refresh,
+    cancel,
+    retry,
     startPolling,
     stopPolling,
   }

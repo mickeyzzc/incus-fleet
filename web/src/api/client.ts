@@ -826,6 +826,14 @@ export class ApiClient {
     return this.request<Migration>('POST', '/api/v1/migrations', request)
   }
 
+  async cancelMigration(id: string): Promise<Migration> {
+    return this.request<Migration>('POST', `/api/v1/migrations/${encodeURIComponent(id)}/cancel`)
+  }
+
+  async retryMigration(id: string): Promise<Migration> {
+    return this.request<Migration>('POST', `/api/v1/migrations/${encodeURIComponent(id)}/retry`)
+  }
+
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (this.bearerToken) {

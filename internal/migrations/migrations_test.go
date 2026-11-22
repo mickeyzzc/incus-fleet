@@ -151,6 +151,86 @@ func TestMoveStoppedContainer(t *testing.T) {
 	}
 }
 
+// Cancel aborts an in-flight transfer, writes the canceled terminal status,
+// and brings the source instance back up; retry then resubmits the move.
+func TestCancelThenRetryMigration(t *testing.T) {
+	source := &incusfake.Server{Instance: runningContainer("web")}
+	gate := make(chan struct{})
+	target := &incusfake.Server{}
+	target.RemoteOperation = &incusfake.RemoteOperation{
+		Target: &api.Operation{Metadata: map[string]any{"block_progress": "test: 1GB (10MB/s)"}},
+		WaitFunc: func() error {
+			<-gate
+			return nil
+		},
+	}
+	f := newFixture(t, source, target)
+
+	migration, err := f.service.Submit(context.Background(), moveRequest("web"))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got, err := f.service.Get(context.Background(), migration.ID)
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got.Status == StatusTransferring {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("migration never started transferring, status = %q", got.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	canceled, err := f.service.Cancel(context.Background(), migration.ID)
+	if err != nil {
+		t.Fatalf("Cancel() error = %v", err)
+	}
+	close(gate)
+
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		got, _ := f.service.Get(context.Background(), migration.ID)
+		if got.Status == StatusCanceled {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("migration not canceled, status = %q error = %q", got.Status, got.Error)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = canceled
+	// The source restore itself is covered by TestTransferFailureRestartsSource;
+	// the fake's default state reports the instance as running, so no start
+	// call would fire here.
+
+	// Canceling a finished migration is a conflict.
+	if _, err := f.service.Cancel(context.Background(), migration.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Cancel(done) error = %v", err)
+	}
+
+	// Retry resubmits the same move; with the gate released it completes.
+	retried, err := f.service.Retry(context.Background(), migration.ID)
+	if err != nil {
+		t.Fatalf("Retry() error = %v", err)
+	}
+	if retried.ID == migration.ID {
+		t.Fatal("retry reused the migration id")
+	}
+	f.service.Wait()
+	got, _ := f.service.Get(context.Background(), retried.ID)
+	if got.Status != StatusDone {
+		t.Fatalf("retry status = %q error = %q", got.Status, got.Error)
+	}
+	if got.SourceCluster != migration.SourceCluster || got.TargetCluster != migration.TargetCluster || got.Instance != migration.Instance {
+		t.Fatalf("retry params = %#v", got)
+	}
+}
+
 func TestCopyRestoresSourceWithoutAutoStart(t *testing.T) {
 	var stateCalls atomic.Int32
 	source := &incusfake.Server{Instance: runningContainer("web")}

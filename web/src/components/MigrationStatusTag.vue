@@ -21,6 +21,7 @@ const TYPES: Record<string, TagType> = {
   verifying: 'warning',
   done: 'success',
   failed: 'danger',
+  canceled: 'info',
 }
 
 const tagType = computed<TagType>(() => TYPES[props.status] ?? 'info')

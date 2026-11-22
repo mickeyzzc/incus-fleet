@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
@@ -28,7 +28,39 @@ const clusterList = ref<ClusterSummary[]>([])
 const imagesLoading = ref(false)
 const isosLoading = ref(false)
 const imageRows = ref<ClusterImage[]>([])
+
 const isoRows = ref<ISOSummary[]>([])
+
+// Image and ISO inventories can grow past one screen; paginate client-side.
+const imagePage = ref(1)
+const imagePageSize = ref(10)
+const isoPage = ref(1)
+const isoPageSize = ref(10)
+
+const pagedImageRows = computed(() => {
+  const start = (imagePage.value - 1) * imagePageSize.value
+  return imageRows.value.slice(start, start + imagePageSize.value)
+})
+
+const pagedIsoRows = computed(() => {
+  const start = (isoPage.value - 1) * isoPageSize.value
+  return isoRows.value.slice(start, start + isoPageSize.value)
+})
+
+// Deleting the last row of the last page must not strand an empty page.
+watch(
+  () => [imageRows.value.length, isoRows.value.length],
+  () => {
+    const lastImage = Math.max(1, Math.ceil(imageRows.value.length / imagePageSize.value))
+    if (imagePage.value > lastImage) {
+      imagePage.value = lastImage
+    }
+    const lastIso = Math.max(1, Math.ceil(isoRows.value.length / isoPageSize.value))
+    if (isoPage.value > lastIso) {
+      isoPage.value = lastIso
+    }
+  },
+)
 
 const copyDialogOpen = ref(false)
 const copySource = ref<ClusterImage | null>(null)
@@ -87,7 +119,7 @@ async function fetchClusters(): Promise<void> {
 async function fetchImages(): Promise<void> {
   imagesLoading.value = true
   try {
-    imageRows.value = await api.listAllImages()
+    imageRows.value = (await api.listAllImages()) ?? []
   } catch {
     imageRows.value = []
   } finally {
@@ -98,7 +130,7 @@ async function fetchImages(): Promise<void> {
 async function fetchISOs(): Promise<void> {
   isosLoading.value = true
   try {
-    isoRows.value = await api.listAllISOs()
+    isoRows.value = (await api.listAllISOs()) ?? []
   } catch {
     isoRows.value = []
   } finally {
@@ -467,7 +499,7 @@ function sizeLabel(size: string): string {
           </div>
         </div>
 
-        <el-table v-loading="imagesLoading" :data="imageRows" size="small" stripe>
+        <el-table v-loading="imagesLoading" :data="pagedImageRows" size="small" stripe>
           <el-table-column :label="t('common.cluster')" width="110">
             <template #default="{ row }">
               <el-tag size="small" effect="plain">{{ row.cluster }}</el-tag>
@@ -510,6 +542,14 @@ function sizeLabel(size: string): string {
             <el-empty :description="t('images.empty')" />
           </template>
         </el-table>
+        <el-pagination
+          v-model:current-page="imagePage"
+          v-model:page-size="imagePageSize"
+          class="table-pagination"
+          layout="total, sizes, prev, pager, next"
+          :total="imageRows.length"
+          :page-sizes="[10, 20, 50]"
+        />
       </div>
     </section>
 
@@ -527,7 +567,7 @@ function sizeLabel(size: string): string {
           </div>
         </div>
 
-        <el-table v-loading="isosLoading" :data="isoRows" size="small" stripe>
+        <el-table v-loading="isosLoading" :data="pagedIsoRows" size="small" stripe>
           <el-table-column :label="t('common.cluster')" width="110">
             <template #default="{ row }">
               <el-tag size="small" effect="plain">{{ row.cluster }}</el-tag>
@@ -556,6 +596,14 @@ function sizeLabel(size: string): string {
             <el-empty :description="t('iso.empty')" />
           </template>
         </el-table>
+        <el-pagination
+          v-model:current-page="isoPage"
+          v-model:page-size="isoPageSize"
+          class="table-pagination"
+          layout="total, sizes, prev, pager, next"
+          :total="isoRows.length"
+          :page-sizes="[10, 20, 50]"
+        />
       </div>
     </section>
 
@@ -723,6 +771,11 @@ function sizeLabel(size: string): string {
 </template>
 
 <style scoped>
+.table-pagination {
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+
 .key-text {
   overflow: hidden;
   text-overflow: ellipsis;
