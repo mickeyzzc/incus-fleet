@@ -337,11 +337,12 @@ describe('IsoLaunchDialog unattended', () => {
   })
 
   it('guesses non-debian profiles from the ISO name', async () => {
-    for (const [iso, expected] of [
+    const cases: [string, string][] = [
       ['ubuntu-24.04-live-server', 'ubuntu-autoinstall'],
       ['Rocky-9-latest', 'kickstart'],
       ['my-custom-image', 'nocloud'],
-    ]) {
+    ]
+    for (const [iso, expected] of cases) {
       const wrapper = mount(IsoLaunchDialog, {
         props: { modelValue: true, cluster: 'c1', isoName: iso, isoPool: 'default', networks: [] },
         global: { plugins: [ElementPlus] },
