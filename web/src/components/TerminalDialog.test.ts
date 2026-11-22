@@ -295,18 +295,26 @@ describe('TerminalDialog', () => {
 
     expect(MockWebSocket.instances.length).toBe(1)
     const first = MockWebSocket.instances[0]
+    if (!first) {
+      throw new Error('console socket missing')
+    }
 
     const reconnect = wrapper.findAll('button').find((item) => item.text().includes('Reconnect'))
-    expect(reconnect).toBeDefined()
+    if (!reconnect) {
+      throw new Error('reconnect button missing')
+    }
 
     first.onclose?.({ code: 1000, reason: '' })
     await settle()
 
-    await reconnect!.trigger('click')
+    await reconnect.trigger('click')
     await settle()
 
-    expect(MockWebSocket.instances.length).toBe(2)
-    expect(MockWebSocket.instances[1].url).toContain('/console')
+    const second = MockWebSocket.instances[1]
+    if (!second) {
+      throw new Error('reconnected socket missing')
+    }
+    expect(second.url).toContain('/console')
   })
 })
 
