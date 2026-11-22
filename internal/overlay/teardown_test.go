@@ -3,7 +3,15 @@ package overlay
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"testing"
+
+	"github.com/lxc/incus/v7/shared/api"
+
+	"github.com/mickeyzzc/incus-fleet/internal/clusters"
+	"github.com/mickeyzzc/incus-fleet/internal/config"
+	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
 
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 )
@@ -164,5 +172,44 @@ func TestApplyToleratesGatewayResolveFailureForTeardown(t *testing.T) {
 	}
 	if err := service.teardown(context.Background(), "c62", stored, []string{"node-a", "node-b"}); err != nil {
 		t.Fatalf("teardown() error = %v", err)
+	}
+}
+
+// TestClusterResolverSuccess covers the adapter's happy path with a real
+// cluster manager backed by a fake Incus server.
+func TestClusterResolverSuccess(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := &incusfake.Server{
+		Clustered: true,
+		Server: &api.Server{Environment: api.ServerEnvironment{
+			ServerName: "node-a", ServerVersion: "7.0.2", ServerClustered: true,
+		}},
+		Members: []api.ClusterMember{
+			{ServerName: "node-a", Status: "Online", URL: "https://192.0.2.11:8443"},
+			{ServerName: "node-b", Status: "Online", URL: "https://192.0.2.12:8443"},
+		},
+	}
+	manager, err := clusters.NewWithDialer(ctx,
+		[]config.Cluster{{Name: "c62", Endpoint: "https://192.0.2.11:8443"}},
+		func(context.Context, config.Cluster) (clusters.InstanceServer, error) { return server, nil },
+		logger)
+	if err != nil {
+		t.Fatalf("NewWithDialer() error = %v", err)
+	}
+	t.Cleanup(manager.Close)
+
+	resolver := &ClusterResolver{Manager: manager}
+	members, err := resolver.Members(ctx, "c62")
+	if err != nil {
+		t.Fatalf("Members() error = %v", err)
+	}
+	if len(members) != 2 || members[0].Name != "node-a" {
+		t.Fatalf("members = %#v", members)
+	}
+
+	// An unknown cluster surfaces the manager's error.
+	if _, err := resolver.Members(ctx, "missing"); err == nil {
+		t.Fatal("Members(unknown) should fail")
 	}
 }

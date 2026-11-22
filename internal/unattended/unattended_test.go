@@ -35,7 +35,7 @@ func TestValidateAnswerSpec(t *testing.T) {
 	if err := ValidateAnswerSpec(AnswerSpec{Username: "1user"}); err == nil {
 		t.Fatal("invalid username accepted")
 	}
-	if err := ValidateAnswerSpec(AnswerSpec{Password: "multi\nline"}); err == nil {
+	if err := ValidateAnswerSpec(AnswerSpec{Password: "test-multi\nline"}); err == nil {
 		t.Fatal("multi-line password accepted")
 	}
 }

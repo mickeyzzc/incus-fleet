@@ -141,3 +141,31 @@ func TestOverlayPersistencePath(t *testing.T) {
 		t.Fatalf("non-networkd path = %q", got)
 	}
 }
+
+// TestOverlayPersistErrorBranches covers the failure paths of the persistence
+// writers so a broken filesystem cannot look like a successful apply.
+func TestOverlayPersistErrorBranches(t *testing.T) {
+	// A path under a regular file cannot be created.
+	blocker := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil { //nolint:gosec // test fixture
+		t.Fatal(err)
+	}
+
+	cfg := BridgeConfig{Name: "fleetbr0", MTU: 1450}
+	if err := PersistBridge(&persistRunner{}, blocker, ManagerNetworkd, cfg); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("PersistBridge under a file = %v", err)
+	}
+
+	link := VXLANLink{Name: "vx1", Bridge: "fleetbr0", VNI: 1, LocalIP: "192.0.2.1", RemoteIP: "192.0.2.2"}
+	if err := PersistVXLAN(&persistRunner{}, blocker, ManagerNetworkd, link); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("PersistVXLAN under a file = %v", err)
+	}
+}
+
+// TestRemoveFleetFileMissingIsNotAnError pins the idempotent teardown.
+func TestRemoveFleetFileMissingIsNotAnError(t *testing.T) {
+	root := t.TempDir()
+	if err := RemoveOverlayPersistence(root, "never-created"); err != nil {
+		t.Fatalf("RemoveOverlayPersistence() error = %v", err)
+	}
+}

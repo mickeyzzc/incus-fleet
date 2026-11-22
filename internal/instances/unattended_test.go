@@ -172,7 +172,7 @@ func TestLaunchUnattendedPreseedRemaster(t *testing.T) {
 		PoolNames:      []string{"default"},
 		ISOExportBytes: []byte("original-iso-bytes"),
 		Instance:       &api.Instance{Name: "web-01"},
-		Volumes:        []api.StorageVolume{{Name: "debian-13.7.0-amd64-DVD-1", Type: "custom", ContentType: "iso", Location: "n305-server"}},
+		Volumes:        []api.StorageVolume{{Name: "debian-13.7.0-amd64-DVD-1", Type: "custom", ContentType: "iso", Location: "member-a"}},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": source},
 		withIsoTool(&stubISOTool{}),
@@ -240,7 +240,7 @@ func TestLaunchUnattendedNoCloudSeed(t *testing.T) {
 	source := &incusfake.Server{
 		PoolNames: []string{"default"},
 		Instance:  &api.Instance{Name: "u-01"},
-		Volumes:   []api.StorageVolume{{Name: "ubuntu-24.04-live-server", Type: "custom", ContentType: "iso", Location: "n305-server"}},
+		Volumes:   []api.StorageVolume{{Name: "ubuntu-24.04-live-server", Type: "custom", ContentType: "iso", Location: "member-a"}},
 	}
 	tool := &stubISOTool{}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": source},
@@ -286,7 +286,7 @@ func TestLaunchUnattendedCustomAnswerReachesSeed(t *testing.T) {
 	source := &incusfake.Server{
 		PoolNames: []string{"default"},
 		Instance:  &api.Instance{Name: "u-custom"},
-		Volumes:   []api.StorageVolume{{Name: "ubuntu-24.04-live-server", Type: "custom", ContentType: "iso", Location: "n305-server"}},
+		Volumes:   []api.StorageVolume{{Name: "ubuntu-24.04-live-server", Type: "custom", ContentType: "iso", Location: "member-a"}},
 	}
 	tool := &stubISOTool{}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": source},
@@ -313,7 +313,7 @@ func TestLaunchUnattendedCustomAnswerReachesSeed(t *testing.T) {
 	}
 }
 
-func TestLaunchUnattendedValidation(t *testing.T) {
+func TestLaunchUnattendedValidationPaths2(t *testing.T) {
 	source := &incusfake.Server{
 		PoolNames: []string{"default"},
 		Instance:  &api.Instance{Name: "u-01"},
@@ -349,7 +349,7 @@ func TestLaunchUnattendedValidation(t *testing.T) {
 	// Missing xorriso-equivalent tool.
 	toolSource := &incusfake.Server{
 		PoolNames: []string{"default"},
-		Volumes:   []api.StorageVolume{{Name: "iso", Type: "custom", ContentType: "iso", Location: "n305-server"}},
+		Volumes:   []api.StorageVolume{{Name: "iso", Type: "custom", ContentType: "iso", Location: "member-a"}},
 	}
 	failing := &stubISOTool{availableErr: errors.New("no xorriso")}
 	svc2 := newTestService(t, map[string]*incusfake.Server{"c1": toolSource},
@@ -366,7 +366,7 @@ func TestLaunchUnattendedCustomAnswerFile(t *testing.T) {
 		PoolNames:      []string{"default"},
 		ISOExportBytes: []byte("iso"),
 		Instance:       &api.Instance{Name: "cust-01"},
-		Volumes:        []api.StorageVolume{{Name: "debian", Type: "custom", ContentType: "iso", Location: "n305-server"}},
+		Volumes:        []api.StorageVolume{{Name: "debian", Type: "custom", ContentType: "iso", Location: "member-a"}},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": source},
 		withIsoTool(&stubISOTool{}),
@@ -491,4 +491,247 @@ func withUnattendedWorkDirForTest(t *testing.T) Option {
 	t.Helper()
 
 	return WithUnattendedWorkDir(t.TempDir())
+}
+
+// TestLaunchUnattendedVMDeviceLayout covers the VM creation path directly: the
+// installer ISO boots first, an optional seed becomes a second read-only media,
+// and the requested network is resolved against the cluster.
+func TestLaunchUnattendedVMDeviceLayout(t *testing.T) {
+	srv := &incusfake.Server{
+		Instance: &api.Instance{Name: "auto-vm", Type: "virtual-machine", StatusCode: api.Stopped},
+		Networks: []api.Network{{Name: "incusbr0", Managed: true}},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	req := UnattendedRequest{Name: "auto-vm", Profile: "debian-preseed", Network: "incusbr0", RootDisk: "20GiB"}
+	detail, err := svc.launchUnattendedVM(context.Background(), "c1", "m1", "default", "installer-iso", "seed-iso", req)
+	if err != nil {
+		t.Fatalf("launchUnattendedVM() error = %v", err)
+	}
+	if detail.Name != "auto-vm" {
+		t.Fatalf("detail = %#v", detail)
+	}
+
+	args := srv.CreateArgs()
+	if len(args) != 1 {
+		t.Fatalf("create args = %#v", args)
+	}
+	devices := args[0].Devices
+	if devices["iso0"]["boot.priority"] != "1" || devices["iso0"]["source"] != "installer-iso" {
+		t.Fatalf("iso0 = %#v", devices["iso0"])
+	}
+	if devices["iso1"]["source"] != "seed-iso" {
+		t.Fatalf("iso1 = %#v", devices["iso1"])
+	}
+	if devices["root"]["size"] != "20GiB" {
+		t.Fatalf("root = %#v", devices["root"])
+	}
+	if devices["eth0"]["network"] != "incusbr0" {
+		t.Fatalf("eth0 = %#v", devices["eth0"])
+	}
+}
+
+// TestLaunchUnattendedVMUnknownNetwork rejects a network the cluster lacks
+// before any VM is created.
+func TestLaunchUnattendedVMUnknownNetwork(t *testing.T) {
+	srv := &incusfake.Server{
+		Instance: &api.Instance{Name: "auto-vm", Type: "virtual-machine", StatusCode: api.Stopped},
+		Networks: []api.Network{{Name: "incusbr0", Managed: true}},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	req := UnattendedRequest{Name: "auto-vm", Profile: "debian-preseed", Network: "missing-net"}
+	if _, err := svc.launchUnattendedVM(context.Background(), "c1", "", "default", "iso", "", req); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+}
+
+// TestLaunchUnattendedVMMacvlanAndNoStart covers the unmanaged-network branch
+// and the explicit no-start flag.
+func TestLaunchUnattendedVMMacvlanAndNoStart(t *testing.T) {
+	srv := &incusfake.Server{
+		Instance: &api.Instance{Name: "auto-vm2", Type: "virtual-machine", StatusCode: api.Stopped},
+		Networks: []api.Network{{Name: "enp1s0", Managed: false}},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	start := false
+	req := UnattendedRequest{Name: "auto-vm2", Profile: "debian-preseed", Network: "enp1s0", Start: &start}
+	if _, err := svc.launchUnattendedVM(context.Background(), "c1", "", "default", "iso", "", req); err != nil {
+		t.Fatalf("launchUnattendedVM() error = %v", err)
+	}
+
+	post := srv.CreateArgs()[0]
+	if post.Devices["eth0"]["nictype"] != "macvlan" || post.Devices["eth0"]["parent"] != "enp1s0" {
+		t.Fatalf("unmanaged NIC = %#v", post.Devices["eth0"])
+	}
+	if post.Start {
+		t.Fatal("Start must be false when the request disables it")
+	}
+	if post.Config["security.secureboot"] != "false" {
+		t.Fatalf("config = %#v", post.Config)
+	}
+}
+
+// TestLaunchUnattendedValidation covers the reject paths that run before any
+// media work: bad profile, empty/invalid name, unknown pool, unknown cluster.
+func TestLaunchUnattendedValidationPaths(t *testing.T) {
+	srv := &incusfake.Server{Pools: []api.StoragePool{{Name: "default"}}}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+	ctx := context.Background()
+
+	cases := []struct {
+		name               string
+		cluster, pool, iso string
+		req                UnattendedRequest
+	}{
+		{"bad profile", "c1", "default", "iso", UnattendedRequest{Name: "vm", Profile: "nope"}},
+		{"empty name", "c1", "default", "iso", UnattendedRequest{Profile: "debian-preseed"}},
+		{"invalid name", "c1", "default", "iso", UnattendedRequest{Name: "Bad Name", Profile: "debian-preseed"}},
+		{"unknown pool", "c1", "nope", "iso", UnattendedRequest{Name: "vm", Profile: "debian-preseed"}},
+		{"unknown cluster", "zz", "default", "iso", UnattendedRequest{Name: "vm", Profile: "debian-preseed"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := svc.LaunchUnattended(ctx, tc.cluster, tc.pool, tc.iso, tc.req); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}
+
+// TestRemasterFailureBranches covers the tool-availability and extraction
+// failures that abort a remaster before any volume is imported.
+func TestRemasterFailureBranches(t *testing.T) {
+	newSource := func() *incusfake.Server {
+		return &incusfake.Server{
+			PoolNames:      []string{"default"},
+			ISOExportBytes: []byte("original-iso-bytes"),
+			Instance:       &api.Instance{Name: "u-01"},
+			Volumes:        []api.StorageVolume{{Name: "debian.iso", Type: "custom", ContentType: "iso", Location: "m1"}},
+		}
+	}
+	ctx := context.Background()
+
+	t.Run("tool unavailable", func(t *testing.T) {
+		tool := &stubISOTool{availableErr: errors.New("xorriso missing")}
+		svc := newTestService(t, map[string]*incusfake.Server{"c1": newSource()},
+			withIsoTool(tool), withUnattendedWorkDirForTest(t))
+		_, _, err := svc.LaunchUnattended(ctx, "c1", "default", "debian.iso", UnattendedRequest{
+			Name: "u-01", Profile: string(unattended.ProfileDebianPreseed),
+		})
+		if !errors.Is(err, ErrUnattended) {
+			t.Fatalf("expected ErrUnattended, got %v", err)
+		}
+	})
+
+	t.Run("extract fails", func(t *testing.T) {
+		tool := &stubISOTool{extractErr: errors.New("osirrox failed")}
+		svc := newTestService(t, map[string]*incusfake.Server{"c1": newSource()},
+			withIsoTool(tool), withUnattendedWorkDirForTest(t))
+		_, _, err := svc.LaunchUnattended(ctx, "c1", "default", "debian.iso", UnattendedRequest{
+			Name: "u-01", Profile: string(unattended.ProfileDebianPreseed),
+		})
+		if err == nil {
+			t.Fatal("expected an extraction error")
+		}
+	})
+
+	t.Run("build seed fails", func(t *testing.T) {
+		tool := &stubISOTool{seedErr: errors.New("mkisofs failed")}
+		svc := newTestService(t, map[string]*incusfake.Server{"c1": newSource()},
+			withIsoTool(tool), withUnattendedWorkDirForTest(t))
+		_, _, err := svc.LaunchUnattended(ctx, "c1", "default", "ubuntu.iso", UnattendedRequest{
+			Name: "u-01", Profile: string(unattended.ProfileUbuntuAutoinstall),
+		})
+		if err == nil {
+			t.Fatal("expected a seed-build error")
+		}
+	})
+}
+
+// TestBuildAndImportSeedISORequiresTool covers the early guard: without
+// xorriso the seed build fails before creating any work directory.
+func TestBuildAndImportSeedISORequiresTool(t *testing.T) {
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": {}},
+		withIsoTool(&stubISOTool{availableErr: errors.New("no xorriso")}),
+		withUnattendedWorkDirForTest(t),
+	)
+	_, err := svc.buildAndImportSeedISO(context.Background(), "c1", "m1", "default", "vm",
+		[]unattended.SeedFile{{Name: "user-data", Content: "x"}}, t.TempDir())
+	if !errors.Is(err, ErrUnattended) {
+		t.Fatalf("buildAndImportSeedISO() = %v, want ErrUnattended", err)
+	}
+}
+
+// TestImportISOToMemberUnknownCluster covers the client lookup failure.
+func TestImportISOToMemberUnknownCluster(t *testing.T) {
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": {}})
+	_, err := svc.importISOToMember(context.Background(), "zz", "m1", "default", "x.iso", strings.NewReader("x"))
+	if err == nil {
+		t.Fatal("importISOToMember(unknown cluster) should fail")
+	}
+}
+
+// TestRemasterPatchesBootConfig covers the successful remaster path with an
+// unrecognised boot configuration, which must be skipped rather than failing.
+func TestRemasterPatchesBootConfigSkipsUnknown(t *testing.T) {
+	tool := &stubISOTool{}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": {
+		PoolNames:      []string{"default"},
+		ISOExportBytes: []byte("no recognisable boot config here"),
+		Instance:       &api.Instance{Name: "u-01"},
+		Volumes:        []api.StorageVolume{{Name: "debian.iso", Type: "custom", ContentType: "iso", Location: "m1"}},
+	}}, withIsoTool(tool), withUnattendedWorkDirForTest(t))
+
+	derived, err := svc.remasterInstallerISO(context.Background(), "c1", "m1", "default", "debian.iso",
+		unattended.ProfileDebianPreseed, "answer", t.TempDir())
+	if err != nil {
+		t.Fatalf("remasterInstallerISO() error = %v", err)
+	}
+	if derived == "" {
+		t.Fatal("remastered volume name is empty")
+	}
+}
+
+// TestCleanupUnattendedMedia covers both the success and failure branches of
+// media cleanup, including the nil-logger guard.
+func TestCleanupUnattendedMedia(t *testing.T) {
+	srv := &incusfake.Server{}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	media := []UnattendedMedia{
+		{Device: "iso0", Volume: "derived-iso", Pool: "default"},
+		{Device: "iso1", Volume: "seed-iso", Pool: "default", Seed: true},
+	}
+	svc.cleanupUnattendedMedia(srv, "default", media)
+	deleted := 0
+	for _, call := range srv.Calls() {
+		if strings.HasPrefix(call, "DeleteStoragePoolVolume:") {
+			deleted++
+		}
+	}
+	if deleted != 2 {
+		t.Fatalf("delete calls = %#v", srv.Calls())
+	}
+
+	// A failing delete must not panic and must not stop the loop.
+	failing := &incusfake.Server{DeleteVolumeErr: errors.New("volume busy")}
+	svc.cleanupUnattendedMedia(failing, "default", media)
+
+	// Without a logger the failure is silently tolerated.
+	svc.logger = nil
+	svc.cleanupUnattendedMedia(failing, "default", media)
+}
+
+// TestUnattendedWorkDirDefaultAndOverride covers the scratch-dir resolution.
+func TestUnattendedWorkDirDefaultAndOverride(t *testing.T) {
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": {}}, withUnattendedWorkDirForTest(t))
+	dir, err := svc.unattendedWorkDir()
+	if err != nil {
+		t.Fatalf("unattendedWorkDir() error = %v", err)
+	}
+	if dir == "" {
+		t.Fatal("work dir is empty")
+	}
 }

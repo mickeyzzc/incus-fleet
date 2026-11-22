@@ -69,6 +69,8 @@ is_fixture_value() {
 	local line="$1"
 	# Documented command substitution: the value is generated at runtime.
 	printf '%s' "$line" | grep -Eq '\$\(|\$\{' && return 0
+	# Go template placeholders: the value is a variable, not a literal.
+	printf '%s' "$line" | grep -Eq '` *\+|\+ *`' && return 0
 	printf '%s' "$line" | grep -Eqi '(test-|-test|example\.|localhost|127\.0\.0\.1|fake|dummy|placeholder|passw0rd)' && return 0
 	# A short value made of one repeated character or one plain word.
 	printf '%s' "$line" | grep -Eq '"[A-Za-z0-9_-]{0,12}"' && return 0

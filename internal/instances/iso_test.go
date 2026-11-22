@@ -3,6 +3,7 @@ package instances
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -174,5 +175,70 @@ func TestLaunchFromISOMissingVolume(t *testing.T) {
 	})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("LaunchFromISO() with a missing volume = %v, want ErrNotFound", err)
+	}
+}
+
+// TestDeleteISOValidationAndMissing covers the guard clauses and the
+// not-found mapping on ISO deletion.
+func TestDeleteISOValidationAndMissing(t *testing.T) {
+	srv := &incusfake.Server{DeleteVolumeErr: api.StatusErrorf(http.StatusNotFound, "no such volume")}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if err := svc.DeleteISO("c1", "default", "  "); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("DeleteISO(empty name) = %v", err)
+	}
+	if err := svc.DeleteISO("c1", "", "iso"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("DeleteISO(empty pool) = %v", err)
+	}
+	if err := svc.DeleteISO("zz", "default", "iso"); err == nil {
+		t.Fatal("DeleteISO(unknown cluster) should fail")
+	}
+	if err := svc.DeleteISO("c1", "default", "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DeleteISO(missing volume) = %v", err)
+	}
+}
+
+// TestISOVolumeMemberErrors covers both failure modes of member resolution:
+// a missing volume and a generic lookup error.
+func TestISOVolumeMemberErrors(t *testing.T) {
+	missing := &incusfake.Server{VolumeErr: api.StatusErrorf(http.StatusNotFound, "missing")}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": missing})
+	if _, err := svc.isoVolumeMember(missing, "default", "gone"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("isoVolumeMember(missing) = %v", err)
+	}
+
+	broken := &incusfake.Server{VolumeErr: errors.New("boom")}
+	svc2 := newTestService(t, map[string]*incusfake.Server{"c1": broken})
+	if _, err := svc2.isoVolumeMember(broken, "default", "x"); err == nil {
+		t.Fatal("isoVolumeMember(generic error) should fail")
+	}
+}
+
+// TestCreateISOInstanceCreateFailure covers the error wrap when the cluster
+// rejects the VM creation.
+func TestCreateISOInstanceCreateFailure(t *testing.T) {
+	srv := &incusfake.Server{CreateErr: errors.New("quota exceeded")}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	_, err := svc.createISOInstance(context.Background(), srv, "c1",
+		LaunchISORequest{Name: "vm1", ISOName: "iso"}, api.InstancesPost{Name: "vm1", Type: api.InstanceTypeVM})
+	if err == nil || !strings.Contains(err.Error(), "quota exceeded") {
+		t.Fatalf("createISOInstance() = %v", err)
+	}
+}
+
+// TestLaunchFromISOValidation covers the required-field guards.
+func TestLaunchFromISOValidation(t *testing.T) {
+	srv := &incusfake.Server{}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if _, err := svc.LaunchFromISO(context.Background(), "c1", LaunchISORequest{}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("LaunchFromISO(empty) = %v", err)
+	}
+	if _, err := svc.LaunchFromISO(context.Background(), "c1", LaunchISORequest{Name: "vm1"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("LaunchFromISO(no iso) = %v", err)
+	}
+	if _, err := svc.LaunchFromISO(context.Background(), "zz", LaunchISORequest{Name: "vm1", ISOName: "iso"}); err == nil {
+		t.Fatal("LaunchFromISO(unknown cluster) should fail")
 	}
 }

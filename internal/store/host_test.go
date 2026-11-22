@@ -740,3 +740,32 @@ func TestColumnExistsUnknownTable(t *testing.T) {
 		t.Fatal("columnExists() reported a column on a missing table")
 	}
 }
+
+// TestHostTaskNilAndMissingGuards covers the defensive branches on the host
+// task and audit accessors.
+func TestHostTaskNilAndMissingGuards(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+
+	if err := s.CreateHostTask(ctx, nil); err == nil {
+		t.Fatal("CreateHostTask(nil) should fail")
+	}
+	if err := s.UpdateHostTask(ctx, nil); err == nil {
+		t.Fatal("UpdateHostTask(nil) should fail")
+	}
+	if err := s.UpdateHostTask(ctx, &HostTask{ID: "missing"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateHostTask(missing) = %v", err)
+	}
+	if _, err := s.GetHostTask(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetHostTask(missing) = %v", err)
+	}
+	if _, err := s.ClaimHostTask(ctx, "owner", time.Minute); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ClaimHostTask(empty queue) = %v", err)
+	}
+	if err := s.AppendHostTaskEvent(ctx, nil); err == nil {
+		t.Fatal("AppendHostTaskEvent(nil) should fail")
+	}
+	if err := s.RecordHostAudit(ctx, nil); err == nil {
+		t.Fatal("RecordHostAudit(nil) should fail")
+	}
+}

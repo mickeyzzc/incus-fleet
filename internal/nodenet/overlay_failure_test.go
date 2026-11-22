@@ -187,3 +187,31 @@ func (existingErrRunner) Run(name string, args ...string) (string, error) {
 	return "File exists", errors.New("file exists")
 }
 func (existingErrRunner) RunStdin(string, []string, string) error { return nil }
+
+// TestEnsureFleetTableFailureBranches covers table discovery and creation
+// failures, which must surface rather than silently leaving the firewall
+// unmanaged.
+func TestEnsureFleetTableFailureBranches(t *testing.T) {
+	t.Run("list fails", func(t *testing.T) {
+		svc := NewService(&fakeRunner{failOn: "nft list tables"})
+		if err := svc.AddFirewallRule(FirewallRequest{Port: 22, Proto: "tcp", Action: "accept"}); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("expected unavailable, got %v", err)
+		}
+	})
+
+	t.Run("create table fails", func(t *testing.T) {
+		r := &fakeRunner{outputs: map[string]string{"nft list tables": ""}, failOn: "add table"}
+		svc := NewService(r)
+		if err := svc.AddFirewallRule(FirewallRequest{Port: 22, Proto: "tcp", Action: "accept"}); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("expected unavailable, got %v", err)
+		}
+	})
+
+	t.Run("create chain fails", func(t *testing.T) {
+		r := &fakeRunner{outputs: map[string]string{"nft list tables": ""}, failOn: "add chain"}
+		svc := NewService(r)
+		if err := svc.AddFirewallRule(FirewallRequest{Port: 22, Proto: "tcp", Action: "accept"}); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("expected unavailable, got %v", err)
+		}
+	})
+}

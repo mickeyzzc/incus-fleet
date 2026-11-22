@@ -202,3 +202,57 @@ func TestSudoersContent(t *testing.T) {
 		t.Fatalf("sudoers must not end with a continuation: %q", content)
 	}
 }
+
+// TestNetmaskDefault covers the empty-netmask fallback.
+func TestNetmaskDefault(t *testing.T) {
+	if got := netmaskOr24(""); got != "255.255.255.0" {
+		t.Fatalf("netmaskOr24(\"\") = %q", got)
+	}
+	if got := netmaskOr24("255.255.0.0"); got != "255.255.0.0" {
+		t.Fatalf("netmaskOr24(custom) = %q", got)
+	}
+}
+
+// TestLinkExistsNonExistent covers the missing-link branch, which callers rely
+// on for idempotent apply.
+func TestLinkExistsNonExistent(t *testing.T) {
+	// iproute2 reports a missing link on stderr with "does not exist", which
+	// LinkExists turns into a clean false rather than an error.
+	exists, err := NewService(missingLinkRunner{}).LinkExists("fleetbr0")
+	if exists || err != nil {
+		t.Fatalf("LinkExists() = %v, %v", exists, err)
+	}
+}
+
+// missingLinkRunner mimics `ip link show <missing>`.
+type missingLinkRunner struct{}
+
+func (missingLinkRunner) Run(string, ...string) (string, error) {
+	return `Device "fleetbr0" does not exist.`, errors.New("exit status 1")
+}
+func (missingLinkRunner) RunStdin(string, []string, string) error { return nil }
+
+// TestValidateOverlayNameRejectsTrailingDash covers the name-boundary rule.
+func TestValidateOverlayNameRejectsTrailingDash(t *testing.T) {
+	for _, name := range []string{"a-", "-a", "a b", "A"} {
+		if err := ValidateOverlayName(name); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("ValidateOverlayName(%q) = %v", name, err)
+		}
+	}
+}
+
+// TestValidateBridgeAddressBoundaries covers the MTU range edges.
+func TestValidateBridgeAddressBoundaries(t *testing.T) {
+	if err := ValidateBridge(BridgeConfig{Name: "fleetbr0", MTU: 576}); err != nil {
+		t.Fatalf("MTU 576 should be accepted: %v", err)
+	}
+	if err := ValidateBridge(BridgeConfig{Name: "fleetbr0", MTU: 9000}); err != nil {
+		t.Fatalf("MTU 9000 should be accepted: %v", err)
+	}
+	if err := ValidateBridge(BridgeConfig{Name: "fleetbr0", MTU: 575}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("MTU 575 should be rejected: %v", err)
+	}
+	if err := ValidateBridge(BridgeConfig{Name: "fleetbr0", MTU: 9001}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("MTU 9001 should be rejected: %v", err)
+	}
+}

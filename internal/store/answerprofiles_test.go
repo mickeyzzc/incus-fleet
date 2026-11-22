@@ -127,3 +127,22 @@ func TestAnswerProfileDuplicateNameConflict(t *testing.T) {
 		t.Fatalf("duplicate name error = %v, want ErrConflict", err)
 	}
 }
+
+// TestAnswerProfileUpdateValidation covers the guards on the update path.
+func TestAnswerProfileUpdateValidation(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+
+	if err := s.UpdateAnswerProfile(ctx, &AnswerProfile{}); err == nil {
+		t.Fatal("UpdateAnswerProfile() should reject an empty id")
+	}
+	if err := s.UpdateAnswerProfile(ctx, &AnswerProfile{ID: "missing"}); err == nil {
+		t.Fatal("UpdateAnswerProfile() should reject an unknown id")
+	}
+	if err := s.DeleteAnswerProfile(ctx, "missing"); err == nil {
+		t.Fatal("DeleteAnswerProfile() should reject an unknown id")
+	}
+	if _, err := s.GetAnswerProfile(ctx, "missing"); err == nil {
+		t.Fatal("GetAnswerProfile() should reject an unknown id")
+	}
+}

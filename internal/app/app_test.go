@@ -673,3 +673,24 @@ func TestNoBootstrapWithoutCredentials(t *testing.T) {
 		t.Fatalf("users = %d, want 0", len(users))
 	}
 }
+
+// TestNewSecretReadFailures covers the token-file read errors: a missing
+// bearer-token file must abort startup instead of running unauthenticated.
+func TestNewSecretReadFailures(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Metrics.RemoteWrite.BearerTokenFile = filepath.Join(t.TempDir(), "missing-token")
+
+	if _, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+	); err == nil {
+		t.Fatal("New() should fail when the remote-write token file is missing")
+	}
+
+	cfg = testConfig(t)
+	cfg.Metrics.Query.BearerTokenFile = filepath.Join(t.TempDir(), "missing-query-token")
+	if _, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+	); err == nil {
+		t.Fatal("New() should fail when the query token file is missing")
+	}
+}

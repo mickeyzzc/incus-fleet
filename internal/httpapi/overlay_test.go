@@ -3,10 +3,16 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/mickeyzzc/incus-fleet/internal/config"
+	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
+	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/overlay"
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
 )
@@ -227,5 +233,47 @@ func TestOverlayHandlerErrorBranches(t *testing.T) {
 				t.Fatalf("status = %d, want %d body = %s", rec.Code, tc.want, rec.Body.String())
 			}
 		})
+	}
+}
+
+// TestSessionUnauthorizedWithoutContext covers the branch where the session
+// handler runs without an auth context (e.g. a misconfigured route wrapper).
+func TestSessionUnauthorizedWithoutContext(t *testing.T) {
+	api := &API{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil)
+	rec := httptest.NewRecorder()
+
+	api.session(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+// TestLinkInventoryLookupPropagatesNodeErrors covers the failure path of the
+// resolver handed to enrichNetworks: an unconfigured node access must surface
+// so the caller degrades to keeping NICs visible.
+func TestLinkInventoryLookupPropagatesNodeErrors(t *testing.T) {
+	api := &API{
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		nodenet: nodeaccess.New(nil, nodenet.NewService(nil), config.NodeAccess{}),
+	}
+	lookup := api.linkInventoryLookup(context.Background(), "c1")
+	if _, err := lookup("missing-member"); err == nil {
+		t.Fatal("expected an error for an unknown member")
+	}
+}
+
+// TestListSessionsWithoutContext covers the guard on the sessions handler when
+// it runs without an auth context.
+func TestListSessionsWithoutContext(t *testing.T) {
+	api := &API{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/sessions", nil)
+	rec := httptest.NewRecorder()
+
+	api.listSessions(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }

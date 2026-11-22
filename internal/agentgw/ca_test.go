@@ -1,7 +1,9 @@
 package agentgw
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
@@ -148,5 +150,38 @@ func TestLoadCAMissingKey(t *testing.T) {
 	}
 	if _, err := LoadCA(certPath, filepath.Join(dir, "missing.key")); err == nil {
 		t.Fatal("LoadCA(missing key) expected error")
+	}
+}
+
+// TestCAHelpers covers the small generators used while issuing certificates.
+func TestCAHelpers(t *testing.T) {
+	token, err := randomToken(16)
+	if err != nil {
+		t.Fatalf("randomToken() error = %v", err)
+	}
+	if len(token) == 0 {
+		t.Fatal("randomToken() returned an empty token")
+	}
+
+	serial, err := randomSerial()
+	if err != nil {
+		t.Fatalf("randomSerial() error = %v", err)
+	}
+	if serial.Sign() <= 0 {
+		t.Fatalf("randomSerial() = %v, want positive", serial)
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if der := mustMarshalKey(key); len(der) == 0 {
+		t.Fatal("mustMarshalKey() returned no bytes")
+	}
+
+	// poolFor must accept the certificate it is given.
+	cert := &x509.Certificate{Raw: []byte("x")}
+	if pool := poolFor(cert); pool == nil {
+		t.Fatal("poolFor() returned nil")
 	}
 }

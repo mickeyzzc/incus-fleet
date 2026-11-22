@@ -677,3 +677,42 @@ func TestDeleteAdminWithAnotherAdminPresent(t *testing.T) {
 		t.Fatalf("delete non-last admin = %d body = %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestDeleteUserBranches covers the not-found path and the
+// last-administrator guard, which protects against locking everyone out.
+func TestDeleteUserBranches(t *testing.T) {
+	f := userFixture(t)
+	admin := loginAs(t, f, "admin1", auth.RoleAdmin, "correct-horse-9")
+
+	if rec := f.request(t, http.MethodDelete, "/api/v1/users/missing", nil, admin, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("delete missing status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	// admin1 is the only enabled administrator, so deleting it conflicts.
+	rec := f.request(t, http.MethodGet, "/api/v1/users", nil, admin, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list users status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var users struct {
+		Users []struct {
+			ID   string `json:"id"`
+			Role string `json:"role"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &users); err != nil {
+		t.Fatalf("decode users: %v", err)
+	}
+	var adminID string
+	for _, u := range users.Users {
+		if u.Role == string(auth.RoleAdmin) {
+			adminID = u.ID
+		}
+	}
+	if adminID == "" {
+		t.Fatal("no administrator in fixture")
+	}
+	rec = f.request(t, http.MethodDelete, "/api/v1/users/"+adminID, nil, admin, "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("delete last admin status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}

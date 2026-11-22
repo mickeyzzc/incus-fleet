@@ -284,7 +284,7 @@ func TestAttachDetachDevice(t *testing.T) {
 	}
 }
 
-func TestAttachDeviceValidation(t *testing.T) {
+func TestAttachDeviceValidationExtra(t *testing.T) {
 	srv := &incusfake.Server{
 		Instance:     manageInstance("web"),
 		NetworkNames: []string{"incusbr0"},
@@ -769,5 +769,85 @@ func TestAttachNICUnmanagedParent(t *testing.T) {
 	}
 	if _, has := nic["network"]; has {
 		t.Fatalf("unmanaged parent must not use the network key: %#v", nic)
+	}
+}
+
+// TestSnapshotAndVolumeValidation covers the guard clauses on snapshot and
+// volume operations: each rejects empty names before touching a cluster.
+func TestSnapshotAndVolumeValidation(t *testing.T) {
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": {}})
+	ctx := context.Background()
+
+	if err := svc.CreateSnapshot(ctx, "c1", "vm1", SnapshotRequest{Name: ""}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("CreateSnapshot empty name = %v", err)
+	}
+	if err := svc.RestoreSnapshot(ctx, "c1", "vm1", ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("RestoreSnapshot empty name = %v", err)
+	}
+	if err := svc.DeleteSnapshot(ctx, "c1", "vm1", ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("DeleteSnapshot empty name = %v", err)
+	}
+	if err := svc.DeleteVolume("c1", "default", ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("DeleteVolume empty name = %v", err)
+	}
+	if err := svc.CreateVolume("c1", "default", VolumeRequest{Name: ""}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("CreateVolume empty name = %v", err)
+	}
+	// DetachDevice resolves the instance first, so an unknown instance is a
+	// not-found rather than a validation error.
+	if _, err := svc.DetachDevice(ctx, "c1", "vm1", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DetachDevice unknown instance = %v", err)
+	}
+	if _, err := svc.UpdateDevice(ctx, "c1", "vm1", "", DeviceRequest{}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("UpdateDevice empty device = %v", err)
+	}
+	if err := svc.DeleteSnapshot(ctx, "zz", "vm1", "snap0"); err == nil {
+		t.Fatal("DeleteSnapshot unknown cluster should fail")
+	}
+	// Read paths against an unknown cluster surface the lookup error.
+	if _, err := svc.ListSnapshots("zz", "vm1"); err == nil {
+		t.Fatal("ListSnapshots unknown cluster should fail")
+	}
+	if _, err := svc.Volumes("zz", "default"); err == nil {
+		t.Fatal("Volumes unknown cluster should fail")
+	}
+	if err := svc.CreateSnapshot(ctx, "zz", "vm1", SnapshotRequest{Name: "s0"}); err == nil {
+		t.Fatal("CreateSnapshot unknown cluster should fail")
+	}
+	if err := svc.RestoreSnapshot(ctx, "zz", "vm1", "s0"); err == nil {
+		t.Fatal("RestoreSnapshot unknown cluster should fail")
+	}
+}
+
+// TestAttachDeviceValidation covers the device-name guard and unknown-instance
+// handling on attach.
+func TestAttachDeviceValidation(t *testing.T) {
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": {}})
+	ctx := context.Background()
+
+	if _, err := svc.AttachDevice(ctx, "c1", "vm1", DeviceRequest{Name: "bad name!"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("AttachDevice(invalid name) = %v", err)
+	}
+	if _, err := svc.AttachDevice(ctx, "c1", "vm1", DeviceRequest{Name: "data"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("AttachDevice(unknown instance) = %v", err)
+	}
+	if _, err := svc.AttachDevice(ctx, "zz", "vm1", DeviceRequest{Name: "data"}); err == nil {
+		t.Fatal("AttachDevice(unknown cluster) should fail")
+	}
+}
+
+// TestUpdateDeviceGuards covers the invalid-name and unknown-instance paths.
+func TestUpdateDeviceGuards(t *testing.T) {
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": {}})
+	ctx := context.Background()
+
+	if _, err := svc.UpdateDevice(ctx, "c1", "vm1", "bad name!", DeviceRequest{}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("UpdateDevice(invalid name) = %v", err)
+	}
+	if _, err := svc.UpdateDevice(ctx, "c1", "vm1", "eth0", DeviceRequest{}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateDevice(unknown instance) = %v", err)
+	}
+	if _, err := svc.UpdateDevice(ctx, "zz", "vm1", "eth0", DeviceRequest{}); err == nil {
+		t.Fatal("UpdateDevice(unknown cluster) should fail")
 	}
 }
