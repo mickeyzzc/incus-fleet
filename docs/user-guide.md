@@ -279,6 +279,8 @@ The cluster network table shows a **Members** column with the same information; 
 NICs are hidden from the parent candidates because a macvlan over a bond slave cannot come
 up.
 
+![Cluster network table with the Members column](images-en/networks-members.png)
+
 The instance address depends on the selected network:
 
 - **Managed bridge** (for example `incusbr0`): the instance joins the Incus internal NAT

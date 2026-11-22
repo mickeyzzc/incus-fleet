@@ -240,6 +240,8 @@ Arch Linux ISO)上传后会出现在共享资产库中:
 其后是**按节点分组的物理网卡**。集群网络表同样提供"所属节点"列;bond 成员网卡不会出现在
 父接口候选里(macvlan 桥不到 bond slave 上)。
 
+![集群网络表的所属节点列](../images/networks-members.png)
+
 实例的网络地址取决于所选网络:
 
 - **托管网桥**(如 `incusbr0`):实例接入 Incus 内部 NAT 网段(如 `10.x.x.x`),
