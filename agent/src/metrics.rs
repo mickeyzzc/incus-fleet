@@ -177,19 +177,13 @@ impl Collector {
         for fs in &filesystems {
             series.push(gauge(
                 "fleet_host_fs_bytes",
-                labels(&[
-                    ("mountpoint", &fs.mountpoint),
-                    ("state", "total"),
-                ]),
+                labels(&[("mountpoint", &fs.mountpoint), ("state", "total")]),
                 now,
                 fs.total_bytes as f64,
             ));
             series.push(gauge(
                 "fleet_host_fs_bytes",
-                labels(&[
-                    ("mountpoint", &fs.mountpoint),
-                    ("state", "available"),
-                ]),
+                labels(&[("mountpoint", &fs.mountpoint), ("state", "available")]),
                 now,
                 fs.available_bytes as f64,
             ));
@@ -356,7 +350,9 @@ fn collect_per_core(
     let mut next = Vec::with_capacity(cores.len());
     for (index, (cpu_id, idle, total)) in cores.iter().enumerate() {
         let usage = match prev.as_ref().and_then(|p| p.get(index)) {
-            Some((prev_idle, prev_total)) if *prev_total > 0 && *total > *prev_total && idle >= prev_idle => {
+            Some((prev_idle, prev_total))
+                if *prev_total > 0 && *total > *prev_total && idle >= prev_idle =>
+            {
                 let total_delta = (*total - *prev_total) as f64;
                 let idle_delta = (*idle - *prev_idle) as f64;
                 ((total_delta - idle_delta) / total_delta).clamp(0.0, 1.0)
@@ -401,11 +397,7 @@ fn read_cpu_per_core() -> Option<Vec<(String, u64, u64)>> {
         let total: u64 = values.iter().sum();
         out.push((index, idle, total));
     }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 /// One mounted filesystem's capacity readings.
@@ -434,7 +426,8 @@ fn read_filesystems() -> Vec<Filesystem> {
     let mut out = Vec::new();
     for line in content.lines() {
         let mut parts = line.split_whitespace();
-        let (Some(device), Some(mountpoint), Some(fstype)) = (parts.next(), parts.next(), parts.next())
+        let (Some(device), Some(mountpoint), Some(fstype)) =
+            (parts.next(), parts.next(), parts.next())
         else {
             continue;
         };
@@ -652,14 +645,20 @@ mod tests {
         let mut collector = Collector::new().with_node_compat(false);
         let batch = collector.collect("agent-1");
         assert!(
-            batch.series.iter().all(|item| !item.name.starts_with("node_")),
+            batch
+                .series
+                .iter()
+                .all(|item| !item.name.starts_with("node_")),
             "node_* series emitted with compatibility off"
         );
 
         let mut collector = Collector::new().with_node_compat(true);
         let batch = collector.collect("agent-1");
         assert!(
-            batch.series.iter().any(|item| item.name.starts_with("node_")),
+            batch
+                .series
+                .iter()
+                .any(|item| item.name.starts_with("node_")),
             "node_* series missing with compatibility on"
         );
     }

@@ -303,7 +303,11 @@ mod tests {
                 available_bytes: 500,
             }],
             disks: vec![("sda".to_string(), 12, 34)],
-            procs: ProcCounts { running: Some(2), blocked: Some(1), forks_total: Some(99) },
+            procs: ProcCounts {
+                running: Some(2),
+                blocked: Some(1),
+                forks_total: Some(99),
+            },
             tcp_established: Some(7),
         };
 
