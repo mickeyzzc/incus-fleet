@@ -140,6 +140,15 @@ async function pollFrame(session: number): Promise<void> {
     return
   }
 
+  if (!running.value) {
+    // A stopped guest cannot serve frames: skip the screenshot fetch
+    // entirely, re-check the power state, and slow-poll until a start is
+    // noticed (#13 F9).
+    void instances.fetchDetail(props.cluster, props.instance).catch(() => {})
+    schedulePoll(session, STOPPED_POLL_INTERVAL_MS)
+    return
+  }
+
   pollBusy = true
   try {
     const blob = await api.desktopScreenshot(props.cluster, props.instance)
@@ -154,21 +163,12 @@ async function pollFrame(session: number): Promise<void> {
       // A stopped guest cannot serve frames; the offline notice explains the
       // situation, so the raw host error would only add noise.
       status.value = running.value ? errorMessage(err) : ''
+      // A failed frame may mean the guest stopped; refresh the power state
+      // so the next poll takes the idle branch instead of hammering on.
+      void instances.fetchDetail(props.cluster, props.instance).catch(() => {})
     }
   } finally {
     pollBusy = false
-  }
-
-  if (session !== generation) {
-    return
-  }
-
-  if (!running.value) {
-    // Skip the screenshot fetch entirely and re-check the power state, so a
-    // start from the toolbar (or elsewhere) is noticed without error spam.
-    void instances.fetchDetail(props.cluster, props.instance).catch(() => {})
-    schedulePoll(session, STOPPED_POLL_INTERVAL_MS)
-    return
   }
 
   schedulePoll(session, POLL_INTERVAL_MS)

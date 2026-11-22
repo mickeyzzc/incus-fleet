@@ -328,6 +328,7 @@ export default {
     detailTitle: '迁移详情',
     task: '任务',
     progress: '进度',
+    noProgress: '暂无进度信息。',
     select: '请选择一条迁移记录',
   },
   login: {
