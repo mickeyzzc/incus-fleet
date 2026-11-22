@@ -55,10 +55,6 @@ func TestCreate(t *testing.T) {
 			{Name: "incusbr0", Type: "bridge", Managed: true},
 			{Name: "incusbr1", Type: "bridge", Managed: true},
 		},
-		Networks: []api.Network{
-			{Name: "incusbr0", Type: "bridge", Managed: true},
-			{Name: "incusbr1", Type: "bridge", Managed: true},
-		},
 	}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
 
