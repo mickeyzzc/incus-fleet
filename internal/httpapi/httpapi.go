@@ -280,6 +280,8 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("GET /api/v1/migrations", a.requireAuth(http.HandlerFunc(a.listMigrations)))
 	mux.Handle("POST /api/v1/migrations", a.requireWriter(http.HandlerFunc(a.submitMigration)))
 	mux.Handle("GET /api/v1/migrations/{id}", a.requireAuth(http.HandlerFunc(a.getMigration)))
+	mux.Handle("POST /api/v1/migrations/{id}/cancel", a.requireWriter(http.HandlerFunc(a.cancelMigration)))
+	mux.Handle("POST /api/v1/migrations/{id}/retry", a.requireWriter(http.HandlerFunc(a.retryMigration)))
 
 	mux.Handle("/", a.staticHandler())
 

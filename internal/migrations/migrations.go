@@ -37,6 +37,7 @@ const (
 	StatusVerifying    = "verifying"
 	StatusDone         = "done"
 	StatusFailed       = "failed"
+	StatusCanceled     = "canceled"
 )
 
 // Modes supported by the service.
@@ -103,9 +104,10 @@ type Service struct {
 	// optional so tests and single-cluster setups can run without it.
 	network *NetworkFixer
 
-	mu     sync.Mutex
-	active map[string]struct{}
-	wg     sync.WaitGroup
+	mu      sync.Mutex
+	active  map[string]struct{}
+	cancels map[string]context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 // New creates a migration service.
@@ -120,6 +122,7 @@ func New(manager *clusters.Manager, st store.Store, logger *slog.Logger, opts ..
 		logger:     logger,
 		runTimeout: 6 * time.Hour,
 		active:     make(map[string]struct{}),
+		cancels:    make(map[string]context.CancelFunc),
 	}
 
 	for _, opt := range opts {
@@ -150,6 +153,65 @@ func (s *Service) List(ctx context.Context, limit int) ([]*store.Migration, erro
 // Wait blocks until all running migrations finish.
 func (s *Service) Wait() {
 	s.wg.Wait()
+}
+
+// Cancel aborts a pending or in-flight migration. Only migrations running on
+// this fleet instance can be canceled; in an HA deployment a migration owned
+// by another instance reports a conflict. The interrupted move restores the
+// source instance when the copy had not completed.
+func (s *Service) Cancel(ctx context.Context, id string) (*store.Migration, error) {
+	migration, err := s.store.GetMigration(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	switch migration.Status {
+	case StatusDone, StatusFailed, StatusCanceled:
+		return nil, fmt.Errorf("%w: migration %s is already %s", ErrConflict, id, migration.Status)
+	}
+
+	s.mu.Lock()
+	cancel, running := s.cancels[id]
+	s.mu.Unlock()
+	if !running {
+		return nil, fmt.Errorf("%w: migration %s is not running on this fleet instance", ErrConflict, id)
+	}
+
+	cancel()
+
+	// The terminal status is written by the interrupted execute path; return
+	// the row as it stands now so the caller can keep polling.
+	return s.store.GetMigration(ctx, id)
+}
+
+// Retry resubmits a terminal migration with the same parameters. Snapshots
+// are not carried over: the original include_snapshots choice is not
+// persisted, so a retry transfers the instance itself.
+func (s *Service) Retry(ctx context.Context, id string) (*store.Migration, error) {
+	migration, err := s.store.GetMigration(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	switch migration.Status {
+	case StatusDone, StatusFailed, StatusCanceled:
+	default:
+		return nil, fmt.Errorf("%w: migration %s is still %s", ErrConflict, id, migration.Status)
+	}
+
+	return s.Submit(ctx, Request{
+		SourceCluster: migration.SourceCluster,
+		TargetCluster: migration.TargetCluster,
+		Instance:      migration.Instance,
+		Mode:          migration.Mode,
+		Live:          migration.Live,
+	})
 }
 
 // Submit validates a migration, persists it, and starts it asynchronously.
@@ -312,7 +374,15 @@ func (s *Service) prepare(_ context.Context, req Request) (*plan, error) {
 
 func (s *Service) execute(p *plan) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.runTimeout)
-	defer cancel()
+	s.mu.Lock()
+	s.cancels[p.migration.ID] = cancel
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.cancels, p.migration.ID)
+		s.mu.Unlock()
+		cancel()
+	}()
 
 	req := p.request
 	migration := p.migration
@@ -334,18 +404,27 @@ func (s *Service) execute(p *plan) {
 	move := req.Mode == ModeMove
 
 	restartSource := func(stage string) {
+		restartCtx, restartCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer restartCancel()
 		if !stoppedSource {
 			return
 		}
 		if move && copyComplete {
 			return
 		}
-		if err := ensureRunning(ctx, sourceClient, req.Instance); err != nil {
+		if err := ensureRunning(restartCtx, sourceClient, req.Instance); err != nil {
 			s.logger.Error("failed to restart source instance", "migration", migration.ID, "instance", req.Instance, "stage", stage, "error", err)
 		}
 	}
 
 	fail := func(stage string, err error) {
+		if errors.Is(err, context.Canceled) {
+			// Operator cancellation: the run context is already dead, so the
+			// terminal status and the source restore need fresh contexts.
+			s.setStatus(context.Background(), migration.ID, StatusCanceled, stage, "canceled by operator")
+			restartSource(stage)
+			return
+		}
 		s.markFailed(ctx, migration.ID, stage, err)
 		restartSource(stage)
 	}

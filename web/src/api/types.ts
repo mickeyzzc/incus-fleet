@@ -13,6 +13,7 @@ export type MigrationStatus =
   | 'verifying'
   | 'done'
   | 'failed'
+  | 'canceled'
 
 export interface ClusterMember {
   name: string

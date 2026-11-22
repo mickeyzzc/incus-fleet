@@ -99,10 +99,11 @@ rather than being duplicated per cluster:
 - **Tasks / audit**: one durable task queue and audit stream, filterable by
   cluster/node/user.
 
-## 3. Bug-fix and hardening backlog (from the 2026-11-20 audit)
+## 3. Bug-fix and hardening backlog (from the 2026-11-20 audit) — **DELIVERED**
 
-All findings below were verified against source. They are tracked publicly
-without internal details.
+All findings below were verified against source and shipped across the 2026-11-22
+releases. The interaction polish items that remained after the main batches are
+listed at the end of this section.
 
 ### High priority
 
@@ -130,7 +131,7 @@ without internal details.
   deletion; surface asset delete failures; catch polling rejections; preserve
   batch selection across polls; refresh fleet status automatically.
 
-### Medium priority
+### Medium priority — delivered 2026-11-22
 
 - Bound rqlite connection pool and discovery chatter.
 - Move remote-write fsync off the agent read loop; report dropped telemetry.
@@ -148,7 +149,18 @@ without internal details.
   responsive tables, relative timestamps, pagination edge cases, global error
   handling, terminal reconnect, loading/empty states.
 
-## 4. Rust agent: host monitoring, node-exporter compatibility, eBPF — **PARTIALLY DELIVERED**
+  Delivered on 2026-11-22: polling in-flight guards and failure backoff,
+  background-tab polling pause, global error/rejection handlers, migration
+  cancel and retry with confirmations, move-mode final confirmation, i18n key
+  parity, pagination boundary clamping, terminal reconnect button, image and
+  ISO pagination.
+
+  Still open as polish: sitewide form-validation rules, abandon-unsaved-changes
+  guards on dialogs, accessibility labels, responsive table layouts, relative
+  timestamps with copyable long IDs, and loading/empty states for the remaining
+  views.
+
+## 4. Rust agent: host monitoring, node-exporter compatibility, eBPF — **DELIVERED (eBPF expansion deferred)**
 
 Shipped: the agent is deployed on both clusters and the telemetry path works end
 to end. `GET /api/v1/agents` reports both members online, and the center accepts a
@@ -166,6 +178,17 @@ Delivered:
 - Telemetry ingestion through the existing WebSocket path, with the center's name
   allowlist extended to accept `node_`.
 
+Shipped 2026-11-22:
+
+- Per-core CPU series (`node_cpu_seconds_total{cpu="N",mode="idle"}` and the
+  native per-core ratio), filesystem capacity via statvfs over the real mount
+  table, disk IOPS from /proc/diskstats, established TCP connections, and
+  process counts (running/blocked/forks).
+- The `INCUS_FLEET_AGENT_NODE_COMPAT` switch disables the `node_*` namespace for
+  deployments that only want `fleet_*`.
+- The center caps agent-supplied label keys at 16 per series to bound
+cardinality.
+
 Still open:
 
 The agent already collects a basic `fleet_*` metric set (CPU ratio, memory,
@@ -175,24 +198,22 @@ falls back to procfs/cgroup, plus a token-protected `/metrics` endpoint.
 
 Planned work:
 
-- **Per-CPU and filesystem series**: the compatibility view currently reports a
-  single aggregated CPU and no filesystem counters.
-- **Compatibility flag**: the `node_*` view is always on; add a switch to disable it.
-- **Metrics completeness**: per-CPU, filesystem/ MountPoint usage, disk IOPS/
-  latency, TCP connection states, process counts, entropy, time sync — the
-  standard node-exporter baseline.
-- **Remote ingest**: the fleet center already accepts `TelemetryBatch` over the
-  agent WebSocket; keep that path and add configurable remote-write to
-  Prometheus/VictoriaMetrics. Ensure series validation and label sanitization
-  remain consistent for both naming schemes.
 - **eBPF expansion**: keep the existing probes; add TCP connect latency/error
   and DNS latency tracing where kernel support allows, with a documented
   capability probe and graceful procfs fallback. Ship an optional prebuilt
-  eBPF object; never require it for basic operation.
-- **Security**: mTLS identity already in place; keep scrape token protection;
-  add allow-listing of scraped label cardinality.
-- **UI**: surface host metrics in the node-scope view (section 2) with
-  drill-down and PromQL-backed historical charts.
+  eBPF object; never require it for basic operation. This is the one piece of
+  the original plan left open — it needs kernel-capable test hosts to verify
+  the probes, so it is deferred rather than half-shipped.
+- **Metrics completeness tail**: entropy and time-sync series remain.
+
+Delivered earlier:
+
+- **Remote ingest**: remote-write to Prometheus/VictoriaMetrics with a bounded
+  spool, the PromQL query proxy, and HTTP service discovery.
+- **UI**: host metrics on the node page, switchable between the center ring
+  buffer and the remote query proxy.
+- **Security**: mTLS identity, scrape token protection, and the label
+  cardinality cap.
 
 Compatibility target: Prometheus node-exporter metric names and label
 conventions, verified against a standard node-exporter instance in CI where

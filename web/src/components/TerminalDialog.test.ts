@@ -285,6 +285,37 @@ describe('TerminalDialog', () => {
 
     expect(socket.readyState).toBe(3)
   })
+
+  // After a clean disconnect a reconnect button appears; clicking it opens a
+  // fresh socket instead of forcing the operator to close and reopen the
+  // whole dialog.
+  it('offers reconnect after a disconnect and opens a new socket', async () => {
+    const wrapper = mountDialog()
+    await settle()
+
+    expect(MockWebSocket.instances.length).toBe(1)
+    const first = MockWebSocket.instances[0]
+    if (!first) {
+      throw new Error('console socket missing')
+    }
+
+    const reconnect = wrapper.findAll('button').find((item) => item.text().includes('Reconnect'))
+    if (!reconnect) {
+      throw new Error('reconnect button missing')
+    }
+
+    first.onclose?.({ code: 1000, reason: '' })
+    await settle()
+
+    await reconnect.trigger('click')
+    await settle()
+
+    const second = MockWebSocket.instances[1]
+    if (!second) {
+      throw new Error('reconnected socket missing')
+    }
+    expect(second.url).toContain('/console')
+  })
 })
 
 describe('TerminalDialog default session', () => {

@@ -156,6 +156,8 @@ vi.mock('@/api', async (importOriginal) => {
       listMigrations: vi.fn(),
       getMigration: vi.fn(),
       submitMigration: vi.fn(),
+      cancelMigration: vi.fn(),
+      retryMigration: vi.fn(),
       nodeSnapshot: vi.fn(),
       nodeTasks: vi.fn(),
       nodeTask: vi.fn(),

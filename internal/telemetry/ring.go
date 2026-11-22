@@ -254,11 +254,21 @@ func seriesKey(name string, labels map[string]string) string {
 	return b.String()
 }
 
+// maxSeriesLabels bounds how many agent-supplied label keys one series may
+// carry. Each distinct label value multiplies the series count in the ring and
+// in downstream Prometheus, so an agent must not inflate cardinality with
+// unbounded key sets. Center-owned labels (cluster/member/agent_id) are added
+// afterwards and are not counted against the limit.
+const maxSeriesLabels = 16
+
 func sanitizeLabels(labels map[string]string) map[string]string {
 	out := make(map[string]string, len(labels)+3)
 	for key, value := range labels {
 		if len(key) == 0 || len(key) > 64 || len(value) > 256 {
 			continue
+		}
+		if len(out) >= maxSeriesLabels {
+			break
 		}
 		out[key] = value
 	}
