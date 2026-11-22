@@ -169,7 +169,9 @@ describe('AssetsView fleet-wide images and ISOs', () => {
     cached: false,
     created_at: '2026-11-16T00:00:00Z',
   }
-  const isoFixture = { name: 'debian.iso', pool: 'default', size: '1000', cluster: 'c1' }
+  const isoFixture = { name: 'debian.iso', pool: 'default', size: '3771187200', cluster: 'c1' }
+  const smallIsoFixture = { name: 'tiny.iso', pool: 'default', size: '63963136', cluster: 'c2' }
+  const brokenIsoFixture = { name: 'broken.iso', pool: 'default', size: '', cluster: 'c2' }
 
   beforeEach(() => {
     vi.mocked(api.listClusters).mockResolvedValue([
@@ -177,7 +179,7 @@ describe('AssetsView fleet-wide images and ISOs', () => {
       { name: 'c2', display_name: 'C2', online: true },
     ] as never)
     vi.mocked(api.listAllImages).mockResolvedValue([imageFixture])
-    vi.mocked(api.listAllISOs).mockResolvedValue([isoFixture])
+    vi.mocked(api.listAllISOs).mockResolvedValue([isoFixture, smallIsoFixture, brokenIsoFixture])
     vi.mocked(api.copyImage).mockResolvedValue(undefined)
     vi.mocked(api.deleteISO).mockResolvedValue(undefined)
     vi.mocked(api.importISOWithProgress).mockResolvedValue({ name: 'debian.iso', pool: 'default' })
@@ -190,6 +192,20 @@ describe('AssetsView fleet-wide images and ISOs', () => {
     expect(wrapper.text()).toContain('debian/13')
     expect(wrapper.text()).toContain('fp-123456789…')
     expect(wrapper.text()).toContain('debian.iso')
+  })
+
+  it('formats ISO sizes as human-readable byte counts', async () => {
+    const wrapper = await mountView()
+
+    // Raw volume-config byte strings render as formatted sizes, not raw
+    // numbers (#13 F4).
+    expect(wrapper.text()).toContain('3.5 GiB')
+    expect(wrapper.text()).toContain('61.0 MiB')
+    expect(wrapper.text()).not.toContain('3771187200')
+
+    // A missing or unparseable size falls back to the unknown placeholder.
+    const unknownRow = wrapper.findAll('.el-table__row').find((row) => row.text().includes('broken.iso'))
+    expect(unknownRow?.text()).toContain('Unknown')
   })
 
   it('copies an image to a target cluster through the distribute dialog', async () => {
@@ -230,8 +246,8 @@ describe('AssetsView fleet-wide images and ISOs', () => {
   it('deletes an ISO after confirmation', async () => {
     const wrapper = await mountView()
 
-    const deleteButtons = wrapper.findAll('button').filter((b) => b.text() === 'Delete')
-    await deleteButtons.at(-1)!.trigger('click')
+    const isoRow = wrapper.findAll('.el-table__row').find((row) => row.text().includes('debian.iso'))
+    await isoRow?.findAll('button').find((b) => b.text() === 'Delete')!.trigger('click')
     await flushPromises()
 
     expect(api.deleteISO).toHaveBeenCalledWith('c1', 'default', 'debian.iso')

@@ -201,6 +201,39 @@ describe('RemoteDesktopDialog', () => {
     expect(api.instanceAction).toHaveBeenCalledWith('c1', 'vm-01', { action: 'start', force: false })
   })
 
+  it('pauses screenshot polling while the guest is stopped', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(
+      instanceDetail({ name: 'vm-01', type: 'virtual-machine', status: 'Stopped' }),
+    )
+    mountDialog(true)
+    await flushPromises()
+
+    // No frames are requested for a stopped guest — the server error spam was
+    // the bug (#13 F9). The power state is re-checked on the slow loop.
+    await vi.advanceTimersByTimeAsync(12000)
+    await flushPromises()
+
+    expect(api.desktopScreenshot).not.toHaveBeenCalled()
+    expect(vi.mocked(api.getInstance).mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('resumes screenshot polling once the guest starts again', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(
+      instanceDetail({ name: 'vm-01', type: 'virtual-machine', status: 'Stopped' }),
+    )
+    mountDialog(true)
+    await flushPromises()
+    expect(api.desktopScreenshot).not.toHaveBeenCalled()
+
+    vi.mocked(api.getInstance).mockResolvedValue(
+      instanceDetail({ name: 'vm-01', type: 'virtual-machine', status: 'Running' }),
+    )
+    await vi.advanceTimersByTimeAsync(10500)
+    await flushPromises()
+
+    expect(api.desktopScreenshot).toHaveBeenCalled()
+  })
+
   it('stops polling when closed', async () => {
     const wrapper = mountDialog(true)
     await flushPromises()

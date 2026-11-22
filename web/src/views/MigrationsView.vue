@@ -76,6 +76,24 @@ function statusLabel(status: string): string {
   return te(key) ? t(key) : status
 }
 
+// Backend stage markers that merely duplicate the status column; the
+// localized status label is the user-facing text for them. Every other
+// progress value ("copying disks", Incus operation percentages, ...) is real
+// stage information and renders as-is.
+const progressMarkers: Record<string, string> = {
+  complete: 'migrationStatus.done',
+}
+
+/** Renders the Progress column value, replacing raw terminal markers. */
+function progressLabel(progress: string, status: string): string {
+  const marker = progressMarkers[progress]
+  if (marker) {
+    return t(marker)
+  }
+
+  return progress || statusLabel(status)
+}
+
 /** Renders an instance type enum value in the active language. */
 function instanceTypeLabel(type: string): string {
   return t(type === 'virtual-machine' ? 'common.virtualMachine' : 'common.container')
@@ -196,7 +214,7 @@ function modeLabel(mode: string): string {
                   :show-text="false"
                   :stroke-width="6"
                 />
-                <small>{{ row.progress || statusLabel(row.status) }}</small>
+                <small>{{ progressLabel(row.progress, row.status) }}</small>
               </div>
             </template>
           </el-table-column>
@@ -267,7 +285,7 @@ function modeLabel(mode: string): string {
             :indeterminate="true"
             :show-text="false"
           />
-          <p>{{ selected.progress || t('migrations.noProgress') }}</p>
+          <p>{{ selected.progress ? progressLabel(selected.progress, selected.status) : t('migrations.noProgress') }}</p>
         </div>
 
         <el-alert

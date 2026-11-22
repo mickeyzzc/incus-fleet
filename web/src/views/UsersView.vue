@@ -238,7 +238,7 @@ async function remove(user: User): Promise<void> {
       <template #footer>
         <el-button @click="dialogOpen = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="saving" @click="submit">
-          {{ t('common.save') }}
+          {{ editing ? t('common.save') : t('common.create') }}
         </el-button>
       </template>
     </el-dialog>

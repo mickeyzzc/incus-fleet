@@ -122,7 +122,10 @@ function request(): DeviceRequest {
     if (form.pool.trim()) payload.pool = form.pool.trim()
     if (form.source.trim()) payload.source = form.source.trim()
     if (form.path.trim()) payload.path = form.path.trim()
-    if (form.size.trim()) payload.size = form.size.trim()
+    // A size quota only applies to freshly created disks; sending one for an
+    // existing volume fails with "Only root or tmpfs disks can have a size
+    // quota".
+    if (form.size.trim() && !form.source.trim()) payload.size = form.size.trim()
   } else if (form.type === 'proxy') {
     if (form.listen.trim()) payload.listen = form.listen.trim()
     if (form.connect.trim()) payload.connect = form.connect.trim()
@@ -188,7 +191,7 @@ function editRequest(): DeviceRequest {
   if (editForm.pool.trim()) payload.pool = editForm.pool.trim()
   if (editForm.source.trim()) payload.source = editForm.source.trim()
   if (editForm.path.trim()) payload.path = editForm.path.trim()
-  if (editForm.size.trim()) payload.size = editForm.size.trim()
+  if (editForm.size.trim() && !editForm.source.trim()) payload.size = editForm.size.trim()
   if (device.type === 'proxy') {
     payload.type = 'proxy'
     if (editForm.listen.trim()) payload.listen = editForm.listen.trim()
@@ -313,7 +316,12 @@ async function detach(name: string): Promise<void> {
             <el-input v-model="form.path" />
           </el-form-item>
           <el-form-item :label="t('devices.size')">
-            <el-input v-model="form.size" :placeholder="t('form.rootDiskPlaceholder')" />
+            <el-input
+              v-model="form.size"
+              :placeholder="t('form.rootDiskPlaceholder')"
+              :disabled="!!form.source.trim()"
+            />
+            <p class="field-hint">{{ t('devices.sizeHint') }}</p>
           </el-form-item>
         </template>
 
@@ -405,7 +413,11 @@ async function detach(name: string): Promise<void> {
             <el-input v-model="editForm.path" />
           </el-form-item>
           <el-form-item :label="t('devices.size')">
-            <el-input v-model="editForm.size" :placeholder="t('form.rootDiskPlaceholder')" />
+            <el-input
+              v-model="editForm.size"
+              :placeholder="t('form.rootDiskPlaceholder')"
+              :disabled="!!editForm.source.trim()"
+            />
             <p class="field-hint">{{ t('devices.sizeHint') }}</p>
           </el-form-item>
         </template>

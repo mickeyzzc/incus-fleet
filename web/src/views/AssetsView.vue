@@ -329,6 +329,16 @@ function formattedSpeed(): string {
 
   return `${formatBytes(task.speed)}/s`
 }
+
+/** ISO sizes arrive as raw byte strings from the volume config. */
+function sizeLabel(size: string): string {
+  const parsed = Number(size)
+  if (size && Number.isFinite(parsed) && parsed > 0) {
+    return formatBytes(parsed)
+  }
+
+  return t('common.unknown')
+}
 </script>
 
 <template>
@@ -515,7 +525,7 @@ function formattedSpeed(): string {
           <el-table-column prop="pool" :label="t('cluster.storagePools')" width="130" />
           <el-table-column :label="t('common.size')" width="110">
             <template #default="{ row }">
-              {{ row.size || t('common.unknown') }}
+              {{ sizeLabel(row.size) }}
             </template>
           </el-table-column>
           <el-table-column :label="t('common.actions')" width="100" fixed="right">

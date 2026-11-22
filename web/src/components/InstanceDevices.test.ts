@@ -45,7 +45,7 @@ describe('InstanceDevices', () => {
     expect(text).toContain('network=incusbr0')
   })
 
-  it('attaches a disk device', async () => {
+  it('attaches a disk device backed by an existing volume without a size', async () => {
     const wrapper = mountPanel()
 
     await wrapper.findAll('button').find((b) => b.text().includes('Attach device'))?.trigger('click')
@@ -56,22 +56,61 @@ describe('InstanceDevices', () => {
     await inputs[0]?.setValue('data')
     await inputs[1]?.setValue('assets-vol')
     await inputs[2]?.setValue('/data')
-    await inputs[3]?.setValue('5GiB')
     dialog.findComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', 'default')
 
     await dialog.findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 
+    // An existing volume cannot take a size quota; the request omits it (#13 F8).
     expect(api.attachDevice).toHaveBeenCalledWith('c1', 'web', {
       name: 'data',
       type: 'disk',
       pool: 'default',
       source: 'assets-vol',
       path: '/data',
-      size: '5GiB',
     })
     expect(ElMessage.success).toHaveBeenCalledWith('Device data attached.')
     expect(wrapper.emitted('changed')).toHaveLength(1)
+  })
+
+  it('disables the size field while a source volume is set', async () => {
+    const wrapper = mountPanel()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('Attach device'))?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent({ name: 'ElDialog' })
+    const inputs = dialog.findAll('input[type="text"]')
+    expect(inputs[3]?.attributes('disabled')).toBeUndefined()
+
+    await inputs[1]?.setValue('assets-vol')
+    expect(inputs[3]?.attributes('disabled')).toBeDefined()
+
+    await inputs[1]?.setValue('')
+    expect(inputs[3]?.attributes('disabled')).toBeUndefined()
+  })
+
+  it('attaches a fresh disk with a size quota', async () => {
+    const wrapper = mountPanel()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('Attach device'))?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent({ name: 'ElDialog' })
+    const inputs = dialog.findAll('input[type="text"]')
+    await inputs[0]?.setValue('scratch')
+    await inputs[2]?.setValue('/scratch')
+    await inputs[3]?.setValue('10GiB')
+
+    await dialog.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.attachDevice).toHaveBeenCalledWith('c1', 'web', {
+      name: 'scratch',
+      type: 'disk',
+      path: '/scratch',
+      size: '10GiB',
+    })
   })
 
   it('attaches a NIC device through the nic branch', async () => {
@@ -296,19 +335,48 @@ describe('InstanceDevices', () => {
     const inputs = dialog!.findAll('input[type="text"]')
     await inputs[0]?.setValue('installer-v2')
     await inputs[1]?.setValue('/mnt/iso')
-    await inputs[2]?.setValue('2GiB')
 
     await dialog!.findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 
     // boot.priority is not part of the form; the backend merge keeps it.
+    // The size field is disabled for a source-backed volume and the request
+    // omits the quota (#13 F8).
     expect(api.updateDevice).toHaveBeenCalledWith('c1', 'web', 'iso0', {
       name: 'iso0',
       type: 'disk',
       pool: 'default',
       source: 'installer-v2',
       path: '/mnt/iso',
-      size: '2GiB',
+    })
+  })
+
+  it('edits a root disk size while no source is set', async () => {
+    const wrapper = mountPanel({
+      devices: {
+        root: { type: 'disk', pool: 'default', path: '/', size: '20GiB' },
+      },
+    })
+    await flushPromises()
+
+    const row = wrapper.findAll('.el-table__row').find((item) => item.text().includes('root'))
+    await row?.findAll('button').find((b) => b.text().includes('Edit'))?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findAllComponents({ name: 'ElDialog' })[1]
+    const sizeInput = dialog!.findAll('input[type="text"]')[2]
+    expect(sizeInput?.attributes('disabled')).toBeUndefined()
+    await sizeInput?.setValue('40GiB')
+
+    await dialog!.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.updateDevice).toHaveBeenCalledWith('c1', 'web', 'root', {
+      name: 'root',
+      type: 'disk',
+      pool: 'default',
+      path: '/',
+      size: '40GiB',
     })
   })
 

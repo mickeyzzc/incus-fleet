@@ -12,6 +12,9 @@ import { errorMessage } from '@/utils/errors'
 // second, so this keeps interactive latency acceptable without flooding the
 // host with SSH sessions.
 const POLL_INTERVAL_MS = 800
+// While the guest is stopped no frame can be served; poll slowly and only to
+// notice a power-on instead of hammering the screenshot endpoint.
+const STOPPED_POLL_INTERVAL_MS = 5000
 // Drag-motion throttle: one absolute move per tick while a button is held.
 const MOVE_THROTTLE_MS = 150
 // Keys that only modify other keys; sending them alone is wasted round trips.
@@ -154,6 +157,18 @@ async function pollFrame(session: number): Promise<void> {
     }
   } finally {
     pollBusy = false
+  }
+
+  if (session !== generation) {
+    return
+  }
+
+  if (!running.value) {
+    // Skip the screenshot fetch entirely and re-check the power state, so a
+    // start from the toolbar (or elsewhere) is noticed without error spam.
+    void instances.fetchDetail(props.cluster, props.instance).catch(() => {})
+    schedulePoll(session, STOPPED_POLL_INTERVAL_MS)
+    return
   }
 
   schedulePoll(session, POLL_INTERVAL_MS)

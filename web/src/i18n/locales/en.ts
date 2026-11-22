@@ -331,7 +331,6 @@ export default {
     detailTitle: 'Migration detail',
     task: 'Task',
     progress: 'Progress',
-    noProgress: 'No progress details reported.',
     select: 'Select a migration',
   },
   login: {
