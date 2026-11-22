@@ -63,4 +63,21 @@ describe('answer profiles store', () => {
     await store.fetch()
     expect(store.error).toContain('boom')
   })
+
+  it('surfaces create/update/delete errors', async () => {
+    const store = useAnswerProfilesStore()
+    const payload = { name: 'lab', profile: 'nocloud' as const, is_default: false }
+    vi.mocked(api.createAnswerProfile).mockRejectedValue(new Error('create failed'))
+    await expect(store.create(payload)).rejects.toThrow('create failed')
+    expect(store.error).toContain('create failed')
+
+    vi.mocked(api.updateAnswerProfile).mockRejectedValue(new Error('update failed'))
+    await expect(store.update('ap1', payload)).rejects.toThrow('update failed')
+    expect(store.error).toContain('update failed')
+
+    vi.mocked(api.deleteAnswerProfile).mockRejectedValue(new Error('delete failed'))
+    await expect(store.remove('ap1')).rejects.toThrow('delete failed')
+    expect(store.error).toContain('delete failed')
+    expect(store.saving).toBe(false)
+  })
 })

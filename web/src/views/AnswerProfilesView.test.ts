@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import ElementPlus, { ElMessageBox } from 'element-plus'
+import ElementPlus, { ElMessage, ElMessageBox } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
@@ -70,5 +70,62 @@ describe('AnswerProfilesView', () => {
     await delButton!.trigger('click')
     await flushPromises()
     expect(api.deleteAnswerProfile).toHaveBeenCalledWith('ap1')
+  })
+
+  it('edits an existing profile via the update path', async () => {
+    const wrapper = await mountView()
+    const editButton = wrapper.findAll('button').find((b) => b.text().includes('Edit'))
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+    await flushPromises()
+    const dialog = wrapper.find('.el-dialog')
+    expect(dialog.exists()).toBe(true)
+    const save = dialog.findAll('button').find((b) => b.text().includes('Save'))
+    await save!.trigger('click')
+    await flushPromises()
+    expect(api.updateAnswerProfile).toHaveBeenCalledWith('ap1', expect.any(Object))
+  })
+
+  it('rejects an empty name before calling the API', async () => {
+    const wrapper = await mountView()
+    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add profile'))
+    await addButton!.trigger('click')
+    await flushPromises()
+    const dialog = wrapper.find('.el-dialog')
+    const save = dialog.findAll('button').find((b) => b.text().includes('Save'))
+    await save!.trigger('click')
+    await flushPromises()
+    expect(api.createAnswerProfile).not.toHaveBeenCalled()
+    expect(ElMessage.error).toHaveBeenCalled()
+  })
+
+  it('cancels deletion without calling the API', async () => {
+    vi.mocked(ElMessageBox.confirm).mockRejectedValue(new Error('cancel'))
+    const wrapper = await mountView()
+    const delButton = wrapper.findAll('button').find((b) => b.text().includes('Delete'))
+    await delButton!.trigger('click')
+    await flushPromises()
+    expect(api.deleteAnswerProfile).not.toHaveBeenCalled()
+  })
+
+  it('reports save and delete failures', async () => {
+    vi.mocked(api.createAnswerProfile).mockRejectedValue(new Error('boom'))
+    vi.mocked(api.deleteAnswerProfile).mockRejectedValue(new Error('boom'))
+    const wrapper = await mountView()
+    // failed create
+    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add profile'))
+    await addButton!.trigger('click')
+    await flushPromises()
+    const dialog = wrapper.find('.el-dialog')
+    await dialog.find('input').setValue('x')
+    const save = dialog.findAll('button').find((b) => b.text().includes('Save'))
+    await save!.trigger('click')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalled()
+    // failed delete
+    const delButton = wrapper.findAll('button').find((b) => b.text().includes('Delete'))
+    await delButton!.trigger('click')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalled()
   })
 })
