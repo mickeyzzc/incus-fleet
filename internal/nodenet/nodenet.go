@@ -217,11 +217,12 @@ type CommandRunner interface {
 	Run(ctx context.Context, command string) (string, error)
 }
 
-// BondSlaves maps bonding member interfaces to their master, read from the
-// member's link table (`ip -j link show`). The instance forms use this to
-// keep bond slaves out of the macvlan parent candidates: a macvlan over a
-// slave cannot come up while the bond owns it.
-func BondSlaves(ctx context.Context, run CommandRunner) (map[string]string, error) {
+// LinkMasters maps every interface on the host to its bonding master
+// ("" when the interface is not a bond member), read from the link table
+// (`ip -j link show`). Callers use it both to keep bond slaves out of the
+// macvlan parent candidates and to attribute unlocated NICs to the member
+// that owns them.
+func LinkMasters(ctx context.Context, run CommandRunner) (map[string]string, error) {
 	out, err := run.Run(ctx, "ip -j link show")
 	if err != nil {
 		return nil, fmt.Errorf("%w: ip link show: %v", ErrUnavailable, err)
@@ -235,10 +236,30 @@ func BondSlaves(ctx context.Context, run CommandRunner) (map[string]string, erro
 		return nil, fmt.Errorf("%w: parse ip link output: %v", ErrUnavailable, err)
 	}
 
-	slaves := make(map[string]string)
+	masters := make(map[string]string)
 	for _, link := range links {
-		if link.Master != "" && link.Ifname != "" {
-			slaves[link.Ifname] = link.Master
+		if link.Ifname != "" {
+			masters[link.Ifname] = link.Master
+		}
+	}
+
+	return masters, nil
+}
+
+// BondSlaves maps bonding member interfaces to their master, read from the
+// member's link table. The instance forms use this to keep bond slaves out
+// of the macvlan parent candidates: a macvlan over a slave cannot come up
+// while the bond owns it.
+func BondSlaves(ctx context.Context, run CommandRunner) (map[string]string, error) {
+	masters, err := LinkMasters(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+
+	slaves := make(map[string]string)
+	for ifname, master := range masters {
+		if master != "" {
+			slaves[ifname] = master
 		}
 	}
 
