@@ -399,6 +399,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		CertIssuer:     agentGW,
 		Telemetry:      telemetryStore,
 		MetricsQuery:   queryProxy,
+		RateLimit:      true,
 		MetricsSD: httpapi.MetricsSDConfig{
 			Enabled: cfg.Metrics.HTTPSD.Enabled, Token: cfg.Metrics.HTTPSD.Token,
 			PublicURL: cfg.Metrics.HTTPSD.PublicURL, Mode: cfg.Metrics.HTTPSD.Mode,

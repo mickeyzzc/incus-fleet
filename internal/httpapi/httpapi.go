@@ -62,6 +62,8 @@ type Deps struct {
 	// DesktopRunner overrides the host-command backend of the graphical
 	// console. Production leaves it nil, which uses the nodeaccess SSH path.
 	DesktopRunner DesktopRunnerFunc
+	// RateLimit enables per-client throttling on authentication endpoints.
+	RateLimit bool
 }
 
 // DesktopRunnerFunc resolves the host-command runner for one guest's console.
@@ -94,6 +96,7 @@ type API struct {
 	static         fs.FS
 	taskWorker     bool
 	desktopRun     DesktopRunnerFunc
+	rateLimit      bool
 }
 
 // New builds the HTTP handler.
@@ -127,6 +130,7 @@ func New(deps Deps) *API {
 		version:        deps.Version,
 		taskWorker:     deps.TaskWorker,
 		desktopRun:     deps.DesktopRunner,
+		rateLimit:      deps.RateLimit,
 	}
 
 	if deps.StaticFS != nil {
@@ -165,6 +169,7 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /api/v1/users", a.requireAuth(http.HandlerFunc(a.createUser)))
 	mux.Handle("PATCH /api/v1/users/{id}", a.requireAdmin(http.HandlerFunc(a.updateUser)))
 	mux.Handle("DELETE /api/v1/users/{id}", a.requireAdmin(http.HandlerFunc(a.deleteUser)))
+	mux.Handle("POST /api/v1/users/{id}/sessions/revoke", a.requireAdmin(http.HandlerFunc(a.revokeUserSessions)))
 	mux.Handle("GET /api/v1/auth/session", a.requireAuth(http.HandlerFunc(a.session)))
 	mux.Handle("GET /api/v1/clusters", a.requireAuth(http.HandlerFunc(a.listClusters)))
 	mux.Handle("GET /api/v1/clusters/{cluster}", a.requireAuth(http.HandlerFunc(a.getCluster)))

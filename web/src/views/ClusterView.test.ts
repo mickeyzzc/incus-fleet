@@ -203,7 +203,7 @@ describe('ClusterView', () => {
     expect(wrapper.text()).toContain('Storage pools')
     expect(wrapper.text()).toContain('default')
     expect(wrapper.text()).toContain('/srv/incus')
-    expect(wrapper.text()).toContain('Networks')
+    expect(wrapper.text()).toContain('Managed networks')
     expect(wrapper.text()).toContain('incusbr0')
     expect(wrapper.text()).toContain('10.0.0.1/24')
   })
@@ -353,18 +353,18 @@ describe('ClusterView', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('Storage pool default deleted.')
   })
 
-  it('edits managed networks and skips unmanaged ones', async () => {
+  it('edits managed networks and never lists node-local NICs', async () => {
     const { wrapper } = await mountCluster()
 
     const rows = wrapper.findAll('.el-table__row').filter((row) => row.text().includes('incusbr0') || row.text().includes('lo'))
     const managedRow = rows.find((row) => row.text().includes('incusbr0'))
-    const unmanagedRow = rows.find((row) => row.text().includes('lo'))
 
     await managedRow?.findAll('button').find((b) => b.text().includes('Edit'))?.trigger('click')
     await flushPromises()
 
     expect(wrapper.findComponent(NetworkDialog).props('network')).toMatchObject({ name: 'incusbr0' })
-    expect(unmanagedRow?.findAll('button').some((b) => b.text().includes('Delete'))).toBe(false)
+    // The unmanaged physical NIC from the fixture must not render at cluster scope.
+    expect(rows.some((row) => row.text().includes('lo'))).toBe(false)
 
     await managedRow?.findAll('button').find((b) => b.text().includes('Delete'))?.trigger('click')
     await flushPromises()

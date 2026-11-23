@@ -7,6 +7,7 @@ import { api, type UnattendedAnswerPreview, type UnattendedProfile, type Unatten
 import { useInstancesStore } from '@/stores/instances'
 import { useAnswerProfilesStore } from '@/stores/answerProfiles'
 import { errorMessage } from '@/utils/errors'
+import { parseSize } from '@/utils/size'
 
 const props = defineProps<{
   modelValue: boolean
@@ -192,9 +193,15 @@ async function loadPreview(): Promise<void> {
   }
 }
 
+const rootDiskSize = computed(() => parseSize(form.rootDisk))
+
 async function submit(): Promise<void> {
   if (!form.name.trim()) {
     ElMessage.error(t('iso.nameRequired'))
+    return
+  }
+  if (form.rootDisk.trim() && !rootDiskSize.value.valid) {
+    ElMessage.error(t('validation.sizeFormat'))
     return
   }
 
@@ -211,7 +218,7 @@ async function submit(): Promise<void> {
         {
           ...buildUnattendedRequest(form.name.trim()),
           network: form.network || undefined,
-          root_disk: form.rootDisk.trim() || undefined,
+          root_disk: rootDiskSize.value.value || undefined,
         },
       )
       ElMessage.success(t('iso.unattendedLaunched', { name: launch?.name ?? form.name.trim() }))
@@ -228,7 +235,7 @@ async function submit(): Promise<void> {
     await instances.launchFromISO(props.cluster, props.isoPool, props.isoName, {
       name: form.name.trim(),
       network: form.network || undefined,
-      root_disk: form.rootDisk.trim() || undefined,
+      root_disk: rootDiskSize.value.value || undefined,
     })
     ElMessage.success(t('iso.launched', { name: form.name.trim() }))
     emit('launched', form.name.trim())
@@ -267,6 +274,10 @@ async function submit(): Promise<void> {
 
       <el-form-item :label="t('form.rootDisk')">
         <el-input v-model="form.rootDisk" placeholder="20GiB" />
+        <p class="field-hint">{{ t('validation.diskHint') }}</p>
+        <p v-if="form.rootDisk.trim() && !rootDiskSize.valid" class="field-error">
+          {{ t('validation.sizeFormat') }}
+        </p>
       </el-form-item>
 
       <el-form-item>

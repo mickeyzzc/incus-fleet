@@ -1,17 +1,44 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
+import AnswerProfilesView from '@/views/AnswerProfilesView.vue'
 import type { ClusterImage, ClusterSummary, ISOSummary, Keystone, StoredScript } from '@/api/types'
 import { api } from '@/api'
 import { useAssetsStore } from '@/stores/assets'
+import { useUploadsStore } from '@/stores/uploads'
 import { errorMessage } from '@/utils/errors'
 import { formatBytes } from '@/utils/format'
 
 const assets = useAssetsStore()
+const uploads = useUploadsStore()
+const { task: uploadTask, minimized: uploadMinimized, percent: uploadPercent, etaSeconds: uploadEtaSeconds } = storeToRefs(uploads)
 const { t } = useI18n()
+
+const TAB_NAMES = ['images', 'isos', 'keys', 'scripts', 'answers'] as const
+type TabName = (typeof TAB_NAMES)[number]
+
+function tabFromQuery(): TabName {
+  const requested = new URLSearchParams(window.location.search).get('tab')
+  return requested !== null && (TAB_NAMES as readonly string[]).includes(requested)
+    ? (requested as TabName)
+    : 'images'
+}
+
+const activeTab = ref<TabName>(tabFromQuery())
+
+watch(activeTab, (tab) => {
+  const url = new URL(window.location.href)
+  if (tab === 'images') {
+    url.searchParams.delete('tab')
+  } else {
+    url.searchParams.set('tab', tab)
+  }
+  window.history.replaceState(null, '', url.toString())
+})
 
 const keyDialogOpen = ref(false)
 const keyEditing = ref<Keystone | null>(null)
@@ -27,6 +54,9 @@ const saving = computed(() => assets.saving)
 const clusterList = ref<ClusterSummary[]>([])
 const imagesLoading = ref(false)
 const isosLoading = ref(false)
+const imagesError = ref('')
+const isosError = ref('')
+const clustersError = ref('')
 const imageRows = ref<ClusterImage[]>([])
 
 const isoRows = ref<ISOSummary[]>([])
@@ -65,40 +95,10 @@ watch(
 const copyDialogOpen = ref(false)
 const copySource = ref<ClusterImage | null>(null)
 const copyTarget = ref('')
+const copyBusy = ref(false)
 
 const uploadDialogOpen = ref(false)
 const uploadForm = reactive({ cluster: '', pool: 'default' })
-
-interface UploadTask {
-  name: string
-  cluster: string
-  loaded: number
-  total: number
-  speed: number
-}
-
-const uploadTask = ref<UploadTask | null>(null)
-const uploadMinimized = ref(false)
-
-const uploadPercent = computed(() => {
-  const task = uploadTask.value
-  if (!task || task.total <= 0) {
-    return 0
-  }
-
-  return Math.min(100, Math.round((task.loaded / task.total) * 100))
-})
-
-const uploadEtaSeconds = computed(() => {
-  const task = uploadTask.value
-  if (!task || task.speed <= 0) {
-    return null
-  }
-
-  return Math.max(0, Math.ceil((task.total - task.loaded) / task.speed))
-})
-
-let lastSample: { loaded: number; at: number } | null = null
 
 onMounted(() => {
   void assets.fetchKeys(true)
@@ -111,17 +111,23 @@ onMounted(() => {
 async function fetchClusters(): Promise<void> {
   try {
     clusterList.value = (await api.listClusters()) ?? []
-  } catch {
-    // The page still works without the cluster picker.
+    clustersError.value = ''
+  } catch (err) {
+    clustersError.value = errorMessage(err)
   }
 }
 
 async function fetchImages(): Promise<void> {
   imagesLoading.value = true
   try {
-    imageRows.value = (await api.listAllImages()) ?? []
-  } catch {
+    const result = await api.listAllImagesWithErrors()
+    imageRows.value = result.items ?? []
+    imagesError.value = result.failedClusters.length
+      ? t('assets.partialFailure', { clusters: result.failedClusters.join(', ') })
+      : ''
+  } catch (err) {
     imageRows.value = []
+    imagesError.value = errorMessage(err)
   } finally {
     imagesLoading.value = false
   }
@@ -130,9 +136,14 @@ async function fetchImages(): Promise<void> {
 async function fetchISOs(): Promise<void> {
   isosLoading.value = true
   try {
-    isoRows.value = (await api.listAllISOs()) ?? []
-  } catch {
+    const result = await api.listAllISOsWithErrors()
+    isoRows.value = result.items ?? []
+    isosError.value = result.failedClusters.length
+      ? t('assets.partialFailure', { clusters: result.failedClusters.join(', ') })
+      : ''
+  } catch (err) {
     isoRows.value = []
+    isosError.value = errorMessage(err)
   } finally {
     isosLoading.value = false
   }
@@ -147,6 +158,11 @@ function openKeyDialog(key: Keystone | null): void {
 }
 
 async function submitKey(): Promise<void> {
+  if (!keyForm.name.trim() || !keyForm.public_key.trim()) {
+    ElMessage.error(t('assets.fieldsRequired'))
+    return
+  }
+
   try {
     const payload = { name: keyForm.name.trim(), public_key: keyForm.public_key.trim(), comment: keyForm.comment.trim() }
     if (keyEditing.value) {
@@ -190,6 +206,11 @@ function openScriptDialog(script: StoredScript | null): void {
 }
 
 async function submitScript(): Promise<void> {
+  if (!scriptForm.name.trim() || !scriptForm.body.trim()) {
+    ElMessage.error(t('assets.fieldsRequired'))
+    return
+  }
+
   try {
     const payload = {
       name: scriptForm.name.trim(),
@@ -252,6 +273,7 @@ async function submitCopy(): Promise<void> {
     return
   }
 
+  copyBusy.value = true
   try {
     await api.copyImage(source.cluster, source.fingerprint, {
       target_cluster: copyTarget.value,
@@ -261,6 +283,8 @@ async function submitCopy(): Promise<void> {
     copyDialogOpen.value = false
   } catch (err) {
     ElMessage.error(t('assets.imageCopyFailed', { error: errorMessage(err) }))
+  } finally {
+    copyBusy.value = false
   }
 }
 
@@ -276,7 +300,7 @@ function confirmDeleteImage(image: ClusterImage): void {
         ElMessage.success(t('assets.imageDeleted'))
         await fetchImages()
       } catch (err) {
-        ElMessage.error(t('assets.imageCopyFailed', { error: errorMessage(err) }))
+        ElMessage.error(t('assets.imageDeleteFailed', { error: errorMessage(err) }))
       }
     })
     .catch(() => {})
@@ -308,57 +332,31 @@ function openUploadDialog(): void {
 
 async function submitUpload(file: File): Promise<void> {
   uploadDialogOpen.value = false
-  uploadMinimized.value = false
-  lastSample = { loaded: 0, at: performance.now() }
-  uploadTask.value = {
-    name: file.name,
-    cluster: uploadForm.cluster,
-    loaded: 0,
-    total: file.size,
-    speed: 0,
-  }
-
-  try {
-    await api.importISOWithProgress(
-      uploadForm.cluster,
-      { file, pool: uploadForm.pool.trim() || undefined },
-      (loaded, total) => {
-        const task = uploadTask.value
-        if (!task) {
-          return
-        }
-
-        const now = performance.now()
-        if (lastSample) {
-          const seconds = (now - lastSample.at) / 1000
-          if (seconds >= 0.25 && loaded > lastSample.loaded) {
-            task.speed = (loaded - lastSample.loaded) / seconds
-            lastSample = { loaded, at: now }
-          }
-        }
-        task.loaded = loaded
-        task.total = total
-      },
-    )
-
-    ElNotification.success({
-      title: t('assets.uploadComplete'),
-      message: `${file.name} → ${uploadForm.cluster}`,
-      position: 'bottom-right',
-      duration: 6000,
-    })
-    await fetchISOs()
-  } catch (err) {
+  const cluster = uploadForm.cluster
+  const done = await uploads.startISO(cluster, uploadForm.pool, file)
+  if (!done) {
+    const task = uploadTask.value
     ElNotification.error({
-      title: t('assets.uploadFailed', { error: errorMessage(err) }),
+      title: t('assets.uploadFailed', { error: task?.error ?? '' }),
       message: file.name,
       position: 'bottom-right',
       duration: 0,
     })
-  } finally {
-    uploadTask.value = null
-    uploadMinimized.value = false
+    return
   }
+
+  ElNotification.success({
+    title: t('assets.uploadComplete'),
+    message: `${file.name} → ${cluster}`,
+    position: 'bottom-right',
+    duration: 6000,
+  })
+  await fetchISOs()
+}
+
+function cancelUpload(): void {
+  uploads.cancel()
+  ElMessage.info(t('assets.uploadCanceled'))
 }
 
 function onUploadFile(event: Event): void {
@@ -392,220 +390,256 @@ function sizeLabel(size: string): string {
 
 <template>
   <div class="page">
-    <div class="page-header">
-      <div>
-        <h2>{{ t('assets.title') }}</h2>
-        <p class="subtitle">{{ t('assets.hint') }}</p>
-      </div>
-    </div>
+    <el-alert
+      v-if="clustersError"
+      class="fleet-alert"
+      type="warning"
+      :closable="false"
+      show-icon
+      aria-live="polite"
+      :title="t('assets.loadFailed', { error: clustersError })"
+    />
+    <el-tabs v-model="activeTab" class="asset-tabs">
+      <el-tab-pane :label="t('assets.tabImages')" name="images">
+      <section class="panel">
+        <div class="panel-body">
+          <div class="section-heading page-header">
+            <div>
+              <h3 class="section-title">{{ t('assets.imagesTitle') }}</h3>
+              <p class="subtitle">{{ t('assets.imagesHint') }}</p>
+            </div>
+            <div class="page-actions">
+              <el-button :icon="Refresh" :loading="imagesLoading" @click="fetchImages">
+                {{ t('common.refresh') }}
+              </el-button>
+            </div>
+          </div>
 
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('assets.keysTitle') }}</h3>
-            <p class="subtitle">{{ t('assets.keysHint') }}</p>
-          </div>
-          <div class="page-actions">
-            <el-button :icon="Plus" type="primary" @click="openKeyDialog(null)">
-              {{ t('assets.addKey') }}
-            </el-button>
-          </div>
+          <el-alert
+            v-if="imagesError"
+            class="fleet-alert"
+            type="error"
+            :closable="false"
+            show-icon
+            aria-live="polite"
+            :title="t('assets.loadFailed', { error: imagesError })"
+          />
+
+          <el-table v-loading="imagesLoading" :data="pagedImageRows" size="small" stripe>
+            <el-table-column :label="t('common.cluster')" width="110">
+              <template #default="{ row }">
+                <el-tag size="small" effect="plain">{{ row.cluster }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('form.image')" min-width="160">
+              <template #default="{ row }">
+                <strong>{{ row.alias || row.os || t('common.none') }}</strong>
+                <span v-if="row.release" class="mini-label">{{ row.release }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('images.fingerprint')" min-width="130">
+              <template #default="{ row }">
+                <span class="mono">{{ shortFingerprint(row.fingerprint) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.size')" width="100">
+              <template #default="{ row }">
+                {{ formatBytes(row.size) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('images.cached')" width="90">
+              <template #default="{ row }">
+                <el-tag v-if="row.cached" size="small" type="info" effect="light">
+                  {{ t('images.cached') }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="160" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openCopyDialog(row)">
+                  {{ t('images.distribute') }}
+                </el-button>
+                <el-button link type="danger" @click="confirmDeleteImage(row)">
+                  {{ t('common.delete') }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty :description="t('images.empty')" />
+            </template>
+          </el-table>
+          <el-pagination
+            v-model:current-page="imagePage"
+            v-model:page-size="imagePageSize"
+            class="table-pagination"
+            layout="total, sizes, prev, pager, next"
+            :total="imageRows.length"
+            :page-sizes="[10, 20, 50]"
+          />
         </div>
+      </section>
+      </el-tab-pane>
 
-        <el-table v-loading="assets.keysLoading" :data="assets.keyCache" size="small" stripe>
-          <el-table-column :label="t('assets.keyName')" min-width="160">
-            <template #default="{ row }">
-              <strong>{{ row.name }}</strong>
-              <span v-if="row.comment" class="mini-label">{{ row.comment }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="Public key" min-width="280">
-            <template #default="{ row }">
-              <span class="mono key-text">{{ row.public_key }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="150">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openKeyDialog(row)">
-                {{ t('common.edit') }}
+      <el-tab-pane :label="t('assets.tabISOs')" name="isos">
+      <section class="panel">
+        <div class="panel-body">
+          <div class="section-heading page-header">
+            <div>
+              <h3 class="section-title">{{ t('assets.isosTitle') }}</h3>
+              <p class="subtitle">{{ t('assets.isosHint') }}</p>
+            </div>
+            <div class="page-actions">
+              <el-button :icon="Plus" type="primary" @click="openUploadDialog">
+                {{ t('assets.addISO') }}
               </el-button>
-              <el-button link type="danger" @click="confirmDeleteKey(row)">
-                {{ t('common.delete') }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('assets.keysEmpty')" />
-          </template>
-        </el-table>
-      </div>
-    </section>
+            </div>
+          </div>
 
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('assets.scriptsTitle') }}</h3>
-            <p class="subtitle">{{ t('assets.scriptsHint') }}</p>
-          </div>
-          <div class="page-actions">
-            <el-button :icon="Plus" type="primary" @click="openScriptDialog(null)">
-              {{ t('assets.addScript') }}
-            </el-button>
-          </div>
+          <el-alert
+            v-if="isosError"
+            class="fleet-alert"
+            type="error"
+            :closable="false"
+            show-icon
+            aria-live="polite"
+            :title="t('assets.loadFailed', { error: isosError })"
+          />
+
+          <el-table v-loading="isosLoading" :data="pagedIsoRows" size="small" stripe>
+            <el-table-column :label="t('common.cluster')" width="110">
+              <template #default="{ row }">
+                <el-tag size="small" effect="plain">{{ row.cluster }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('iso.name')" min-width="180">
+              <template #default="{ row }">
+                <strong>{{ row.name }}</strong>
+                <span v-if="row.description" class="mini-label">{{ row.description }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="pool" :label="t('cluster.storagePools')" width="130" />
+            <el-table-column :label="t('common.size')" width="110">
+              <template #default="{ row }">
+                {{ sizeLabel(row.size) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="100" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="danger" @click="confirmDeleteISO(row)">
+                  {{ t('common.delete') }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty :description="t('iso.empty')" />
+            </template>
+          </el-table>
+          <el-pagination
+            v-model:current-page="isoPage"
+            v-model:page-size="isoPageSize"
+            class="table-pagination"
+            layout="total, sizes, prev, pager, next"
+            :total="isoRows.length"
+            :page-sizes="[10, 20, 50]"
+          />
         </div>
+      </section>
+      </el-tab-pane>
 
-        <el-table v-loading="assets.scriptsLoading" :data="assets.scriptCache" size="small" stripe>
-          <el-table-column :label="t('assets.scriptName')" min-width="180">
-            <template #default="{ row }">
-              <strong>{{ row.name }}</strong>
-              <span v-if="row.description" class="mini-label">{{ row.description }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('assets.scriptBody')" min-width="280">
-            <template #default="{ row }">
-              <span class="mono key-text">{{ row.body.split('\n')[0] }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="150">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openScriptDialog(row)">
-                {{ t('common.edit') }}
+      <el-tab-pane :label="t('assets.tabKeys')" name="keys">
+      <section class="panel">
+        <div class="panel-body">
+          <div class="section-heading page-header">
+            <div>
+              <h3 class="section-title">{{ t('assets.keysTitle') }}</h3>
+              <p class="subtitle">{{ t('assets.keysHint') }}</p>
+            </div>
+            <div class="page-actions">
+              <el-button :icon="Plus" type="primary" @click="openKeyDialog(null)">
+                {{ t('assets.addKey') }}
               </el-button>
-              <el-button link type="danger" @click="confirmDeleteScript(row)">
-                {{ t('common.delete') }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('assets.scriptsEmpty')" />
-          </template>
-        </el-table>
-      </div>
-    </section>
+            </div>
+          </div>
 
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('assets.imagesTitle') }}</h3>
-            <p class="subtitle">{{ t('assets.imagesHint') }}</p>
-          </div>
-          <div class="page-actions">
-            <el-button :icon="Refresh" :loading="imagesLoading" @click="fetchImages">
-              {{ t('common.refresh') }}
-            </el-button>
-          </div>
+          <el-table v-loading="assets.keysLoading" :data="assets.keyCache" size="small" stripe>
+            <el-table-column :label="t('assets.keyName')" min-width="160">
+              <template #default="{ row }">
+                <strong>{{ row.name }}</strong>
+                <span v-if="row.comment" class="mini-label">{{ row.comment }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('assets.keyPublic')" min-width="280">
+              <template #default="{ row }">
+                <span class="mono key-text">{{ row.public_key }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="150">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openKeyDialog(row)">
+                  {{ t('common.edit') }}
+                </el-button>
+                <el-button link type="danger" @click="confirmDeleteKey(row)">
+                  {{ t('common.delete') }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty :description="t('assets.keysEmpty')" />
+            </template>
+          </el-table>
         </div>
+      </section>
+      </el-tab-pane>
 
-        <el-table v-loading="imagesLoading" :data="pagedImageRows" size="small" stripe>
-          <el-table-column :label="t('common.cluster')" width="110">
-            <template #default="{ row }">
-              <el-tag size="small" effect="plain">{{ row.cluster }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('form.image')" min-width="160">
-            <template #default="{ row }">
-              <strong>{{ row.alias || row.os || t('common.none') }}</strong>
-              <span v-if="row.release" class="mini-label">{{ row.release }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('images.fingerprint')" min-width="130">
-            <template #default="{ row }">
-              <span class="mono">{{ shortFingerprint(row.fingerprint) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.size')" width="100">
-            <template #default="{ row }">
-              {{ formatBytes(row.size) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('images.cached')" width="90">
-            <template #default="{ row }">
-              <el-tag v-if="row.cached" size="small" type="info" effect="light">
-                {{ t('images.cached') }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="160" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openCopyDialog(row)">
-                {{ t('images.distribute') }}
+      <el-tab-pane :label="t('assets.tabScripts')" name="scripts">
+      <section class="panel">
+        <div class="panel-body">
+          <div class="section-heading page-header">
+            <div>
+              <h3 class="section-title">{{ t('assets.scriptsTitle') }}</h3>
+              <p class="subtitle">{{ t('assets.scriptsHint') }}</p>
+            </div>
+            <div class="page-actions">
+              <el-button :icon="Plus" type="primary" @click="openScriptDialog(null)">
+                {{ t('assets.addScript') }}
               </el-button>
-              <el-button link type="danger" @click="confirmDeleteImage(row)">
-                {{ t('common.delete') }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('images.empty')" />
-          </template>
-        </el-table>
-        <el-pagination
-          v-model:current-page="imagePage"
-          v-model:page-size="imagePageSize"
-          class="table-pagination"
-          layout="total, sizes, prev, pager, next"
-          :total="imageRows.length"
-          :page-sizes="[10, 20, 50]"
-        />
-      </div>
-    </section>
+            </div>
+          </div>
 
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('assets.isosTitle') }}</h3>
-            <p class="subtitle">{{ t('assets.isosHint') }}</p>
-          </div>
-          <div class="page-actions">
-            <el-button :icon="Plus" type="primary" @click="openUploadDialog">
-              {{ t('assets.addISO') }}
-            </el-button>
-          </div>
+          <el-table v-loading="assets.scriptsLoading" :data="assets.scriptCache" size="small" stripe>
+            <el-table-column :label="t('assets.scriptName')" min-width="180">
+              <template #default="{ row }">
+                <strong>{{ row.name }}</strong>
+                <span v-if="row.description" class="mini-label">{{ row.description }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('assets.scriptBody')" min-width="280">
+              <template #default="{ row }">
+                <span class="mono key-text">{{ row.body.split('\n')[0] }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="150">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openScriptDialog(row)">
+                  {{ t('common.edit') }}
+                </el-button>
+                <el-button link type="danger" @click="confirmDeleteScript(row)">
+                  {{ t('common.delete') }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty :description="t('assets.scriptsEmpty')" />
+            </template>
+          </el-table>
         </div>
+      </section>
+      </el-tab-pane>
 
-        <el-table v-loading="isosLoading" :data="pagedIsoRows" size="small" stripe>
-          <el-table-column :label="t('common.cluster')" width="110">
-            <template #default="{ row }">
-              <el-tag size="small" effect="plain">{{ row.cluster }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('iso.name')" min-width="180">
-            <template #default="{ row }">
-              <strong>{{ row.name }}</strong>
-              <span v-if="row.description" class="mini-label">{{ row.description }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="pool" :label="t('cluster.storagePools')" width="130" />
-          <el-table-column :label="t('common.size')" width="110">
-            <template #default="{ row }">
-              {{ sizeLabel(row.size) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="100" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="danger" @click="confirmDeleteISO(row)">
-                {{ t('common.delete') }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('iso.empty')" />
-          </template>
-        </el-table>
-        <el-pagination
-          v-model:current-page="isoPage"
-          v-model:page-size="isoPageSize"
-          class="table-pagination"
-          layout="total, sizes, prev, pager, next"
-          :total="isoRows.length"
-          :page-sizes="[10, 20, 50]"
-        />
-      </div>
-    </section>
+      <el-tab-pane :label="t('assets.tabAnswers')" name="answers">
+        <AnswerProfilesView embedded />
+      </el-tab-pane>
+    </el-tabs>
 
     <el-dialog
       v-model="keyDialogOpen"
@@ -617,7 +651,7 @@ function sizeLabel(size: string): string {
         <el-form-item :label="t('assets.keyName')">
           <el-input v-model="keyForm.name" placeholder="user@example" />
         </el-form-item>
-        <el-form-item label="Public key">
+        <el-form-item :label="t('assets.keyPublic')">
           <el-input
             v-model="keyForm.public_key"
             type="textarea"
@@ -691,7 +725,7 @@ function sizeLabel(size: string): string {
       </el-form>
       <template #footer>
         <el-button @click="copyDialogOpen = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :disabled="!copyTarget" @click="submitCopy">
+        <el-button type="primary" :disabled="!copyTarget" :loading="copyBusy" @click="submitCopy">
           {{ t('images.distribute') }}
         </el-button>
       </template>
@@ -738,6 +772,9 @@ function sizeLabel(size: string): string {
           <span class="mini-label">→ {{ uploadTask.cluster }}</span>
           <el-button link size="small" @click="uploadMinimized = true">
             {{ t('assets.uploadBackground') }}
+          </el-button>
+          <el-button link size="small" type="danger" @click="cancelUpload">
+            {{ t('assets.uploadCancel') }}
           </el-button>
         </div>
         <el-progress

@@ -7,6 +7,7 @@ import { useI18n } from 'vue-i18n'
 import type { StoragePoolResource } from '@/api/types'
 import { useInstancesStore } from '@/stores/instances'
 import { errorMessage } from '@/utils/errors'
+import { parseSize } from '@/utils/size'
 import { formatBytes } from '@/utils/format'
 
 const props = defineProps<{
@@ -33,7 +34,7 @@ const visible = computed({
 const volumes = computed(() => instances.volumes(props.cluster, props.pool?.name ?? ''))
 
 /** Parses an Incus size string into bytes for display; returns 0 when unknown. */
-function parseSize(value: string): number {
+function sizeBytes(value: string): number {
   const units: Record<string, number> = {
     KiB: 1024,
     MiB: 1024 ** 2,
@@ -84,12 +85,16 @@ async function submitCreate(): Promise<void> {
     ElMessage.error(t('admin.validationName'))
     return
   }
+  if (form.size.trim() && !parseSize(form.size).valid) {
+    ElMessage.error(t('validation.sizeFormat'))
+    return
+  }
 
   try {
     await instances.createVolume(props.cluster, props.pool?.name ?? '', {
       name,
       description: form.description.trim(),
-      size: form.size.trim(),
+      size: parseSize(form.size).value,
     })
     ElMessage.success(t('volumes.created', { name }))
     creating.value = false
@@ -143,7 +148,11 @@ async function remove(name: string): Promise<void> {
           <el-input v-model="form.name" />
         </el-form-item>
         <el-form-item :label="t('volumes.size')">
-          <el-input v-model="form.size" :placeholder="t('form.rootDiskPlaceholder')" />
+          <el-input v-model="form.size" :placeholder="t('form.diskSizePlaceholder')" />
+          <p class="field-hint">{{ t('validation.sizeHint') }}</p>
+          <p v-if="form.size.trim() && !parseSize(form.size).valid" class="field-error">
+            {{ t('validation.sizeFormat') }}
+          </p>
         </el-form-item>
         <el-form-item :label="t('admin.description')" class="volume-description">
           <el-input v-model="form.description" />
@@ -163,7 +172,7 @@ async function remove(name: string): Promise<void> {
       </el-table-column>
       <el-table-column :label="t('volumes.size')" width="100">
         <template #default="{ row }">
-          {{ row.config?.size ? formatBytes(parseSize(row.config.size)) : t('common.none') }}
+          {{ row.config?.size ? formatBytes(sizeBytes(row.config.size)) : t('common.none') }}
         </template>
       </el-table-column>
       <el-table-column :label="t('common.node')" width="110">

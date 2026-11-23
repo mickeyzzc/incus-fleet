@@ -57,6 +57,9 @@ watch(
 )
 
 async function submit(): Promise<void> {
+  if (running.value) {
+    return
+  }
   running.value = true
   try {
     if (props.mode === 'keys') {

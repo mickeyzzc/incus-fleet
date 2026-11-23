@@ -34,7 +34,7 @@ function mockFleet() {
     { name: 'c62', display_name: 'c62', endpoint: 'https://a', online: true } as never,
     { name: 'c63', display_name: 'c63', endpoint: 'https://b', online: true } as never,
   ])
-  vi.mocked(api.listAllVolumes).mockResolvedValue([volumeA, volumeB])
+  vi.mocked(api.listAllVolumesWithErrors).mockResolvedValue({ items: [volumeA, volumeB], failedClusters: [] })
 }
 
 async function mountView() {
@@ -52,7 +52,7 @@ describe('FleetVolumesView', () => {
   it('loads volumes across every cluster', async () => {
     const wrapper = await mountView()
 
-    expect(api.listAllVolumes).toHaveBeenCalled()
+    expect(api.listAllVolumesWithErrors).toHaveBeenCalled()
     expect(wrapper.text()).toContain('data-a')
     expect(wrapper.text()).toContain('iso-b')
     // Both clusters appear, which is the point of a fleet-level view.
@@ -90,7 +90,7 @@ describe('FleetVolumesView', () => {
 
   it('reports a load failure', async () => {
     const error = vi.spyOn(ElMessage, 'error').mockImplementation(() => undefined as never)
-    vi.mocked(api.listAllVolumes).mockRejectedValueOnce(new Error('cluster down'))
+    vi.mocked(api.listAllVolumesWithErrors).mockRejectedValueOnce(new Error('cluster down'))
 
     const wrapper = await mountView()
 
@@ -99,7 +99,7 @@ describe('FleetVolumesView', () => {
   })
 
   it('shows an empty state when nothing matches', async () => {
-    vi.mocked(api.listAllVolumes).mockResolvedValueOnce([])
+    vi.mocked(api.listAllVolumesWithErrors).mockResolvedValueOnce({ items: [], failedClusters: [] })
     const wrapper = await mountView()
 
     expect(wrapper.text()).toContain('No volumes found')
@@ -124,7 +124,7 @@ describe('FleetVolumesView filters and fallbacks', () => {
   })
 
   it('renders a dash for a volume without a configured size', async () => {
-    vi.mocked(api.listAllVolumes).mockResolvedValueOnce([volumeB])
+    vi.mocked(api.listAllVolumesWithErrors).mockResolvedValueOnce({ items: [volumeB], failedClusters: [] })
     const wrapper = await mountView()
 
     // The ISO volume has no size in config, so the cell shows an em dash and

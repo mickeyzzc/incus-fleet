@@ -44,10 +44,9 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'titles.instances' },
   },
   {
+    // Migration history is a record of instance operations, not a workspace.
     path: '/migrations',
-    name: 'migrations',
-    component: () => import('@/views/MigrationsView.vue'),
-    meta: { titleKey: 'titles.migrations' },
+    redirect: { path: '/instances', query: { view: 'migrations' } },
   },
   {
     path: '/assets',
@@ -56,10 +55,9 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'titles.assets' },
   },
   {
+    // Answer profiles live with the other reusable automation content.
     path: '/answer-profiles',
-    name: 'answer-profiles',
-    component: () => import('@/views/AnswerProfilesView.vue'),
-    meta: { titleKey: 'titles.answerProfiles' },
+    redirect: { path: '/assets', query: { tab: 'answers' } },
   },
   {
     path: '/volumes',

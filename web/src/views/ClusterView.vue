@@ -46,7 +46,11 @@ const clusters = useClustersStore()
 const instances = useInstancesStore()
 const { t, te } = useI18n()
 
+const activeTab = ref('overview')
 const typeFilter = ref<InstanceType>('any')
+const instanceSearch = ref('')
+const instancePage = ref(1)
+const instancePageSize = ref(20)
 const detailOpen = ref(false)
 const detailName = ref('')
 const migrateOpen = ref(false)
@@ -82,37 +86,47 @@ const profiles = computed(() => instances.profiles(props.cluster))
 const clusterImages = computed(() => instances.images(props.cluster))
 const clusterISOs = computed(() => instances.isoCache[props.cluster] ?? [])
 const poolNames = computed(() => (resources.value?.storage_pools ?? []).map((pool) => pool.name))
-// Networks ordered for readability: managed networks are cluster-wide, then
-// physical NICs grouped by member — a flat mix of every node's NICs read as
-// one confusing list (#13 F6 follow-up).
-const networkRows = computed(() => {
-  const networks = [...(resources.value?.networks ?? [])]
-  networks.sort((a, b) => {
-    if (a.managed !== b.managed) {
-      return a.managed ? -1 : 1
-    }
-    if (!a.managed && !b.managed) {
-      const memberA = a.locations.join(',')
-      const memberB = b.locations.join(',')
-      if (memberA !== memberB) {
-        return memberA.localeCompare(memberB)
-      }
-    }
-
-    return a.name.localeCompare(b.name)
-  })
-
-  return networks
-})
+// Cluster scope only owns managed networks. Physical NICs, addresses, routes
+// and firewall rules are per-node facts and live exclusively on the node page.
+const networkRows = computed(() =>
+  [...(resources.value?.networks ?? [])]
+    .filter((network) => network.managed)
+    .sort((a, b) => a.name.localeCompare(b.name)),
+)
 const isoImportOpen = ref(false)
 const isoLaunchOpen = ref(false)
 const isoTarget = ref({ name: '', pool: '' })
 const cachedImageCount = computed(() => clusterImages.value.filter((image) => image.cached).length)
-const filtered = computed(() =>
-  instances.items.filter(
-    (instance) => typeFilter.value === 'any' || instance.type === typeFilter.value,
-  ),
-)
+const filtered = computed(() => {
+  const query = instanceSearch.value.trim().toLowerCase()
+  return instances.items.filter((instance) => {
+    if (typeFilter.value !== 'any' && instance.type !== typeFilter.value) {
+      return false
+    }
+    if (!query) {
+      return true
+    }
+    return (
+      instance.name.toLowerCase().includes(query) ||
+      instance.location?.toLowerCase().includes(query) === true ||
+      (instance.description ?? '').toLowerCase().includes(query)
+    )
+  })
+})
+
+const pagedInstances = computed(() => {
+  const start = (instancePage.value - 1) * instancePageSize.value
+  return filtered.value.slice(start, start + instancePageSize.value)
+})
+
+watch([typeFilter, instanceSearch], () => {
+  instancePage.value = 1
+})
+watch(filtered, (rows) => {
+  if (instancePage.value > Math.max(1, Math.ceil(rows.length / instancePageSize.value))) {
+    instancePage.value = Math.max(1, Math.ceil(rows.length / instancePageSize.value))
+  }
+})
 const onlineTargets = computed(() =>
   clusters.items.filter((cluster) => cluster.online && cluster.name !== props.cluster),
 )
@@ -508,600 +522,613 @@ function openNodeUpgrade(member: ClusterMember): void {
       :title="instances.error"
     />
 
-    <section v-if="summary" class="panel">
-      <div class="panel-body cluster-detail">
-        <div class="detail-grid">
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.server') }}</div>
-            <div class="value">{{ summary.server_name || t('common.none') }}</div>
-          </div>
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.incusVersion') }}</div>
-            <div class="value">{{ summary.server_version || t('common.none') }}</div>
-          </div>
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.members') }}</div>
-            <div class="value">{{ summary.members.length }}</div>
-          </div>
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.instances') }}</div>
-            <div class="value">
-              {{
-                t('cluster.instancesSummary', {
-                  total: summary.instances.total,
-                  running: summary.instances.running,
-                })
-              }}
+    <el-tabs v-model="activeTab" class="page-tabs">
+      <el-tab-pane :label="t('cluster.tabOverview')" name="overview">
+      <section v-if="summary" class="panel">
+        <div class="panel-body cluster-detail">
+          <div class="detail-grid">
+            <div class="detail-item">
+              <div class="label">{{ t('cluster.server') }}</div>
+              <div class="value">{{ summary.server_name || t('common.none') }}</div>
             </div>
-          </div>
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.containersVms') }}</div>
-            <div class="value">
-              {{ summary.instances.containers }} / {{ summary.instances.virtual_machines }}
+            <div class="detail-item">
+              <div class="label">{{ t('cluster.incusVersion') }}</div>
+              <div class="value">{{ summary.server_version || t('common.none') }}</div>
             </div>
-          </div>
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.architectures') }}</div>
-            <div class="value">{{ summary.architectures?.join(', ') || t('common.none') }}</div>
-          </div>
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.cpuCores') }}</div>
-            <div class="value">
-              {{ summary.cpu?.total ?? '—' }}{{ summary.cpu?.architecture ? ` · ${summary.cpu.architecture}` : '' }}
+            <div class="detail-item">
+              <div class="label">{{ t('cluster.members') }}</div>
+              <div class="value">{{ summary.members.length }}</div>
             </div>
-          </div>
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.memUsage') }}</div>
-            <div class="value">
-              <template v-if="summary.memory">
-                {{ formatBytes(summary.memory.used) }} / {{ formatBytes(summary.memory.total) }}
-              </template>
-              <template v-else>{{ t('common.none') }}</template>
-            </div>
-          </div>
-        </div>
-
-        <StorageBar
-          :used="summary.storage.used"
-          :total="summary.storage.total"
-          :pool="summary.storage.pool"
-        />
-
-        <div v-if="summary.memory && summary.memory.total > 0" class="mem-bar">
-          <el-progress
-            :percentage="Math.min(100, (summary.memory.used / summary.memory.total) * 100)"
-            :stroke-width="10"
-            :format="(p: number) => `${p.toFixed(1)}%`"
-          />
-        </div>
-
-        <div class="cluster-tags">
-          <el-tag v-for="network in summary.networks" :key="network" size="small" effect="plain">
-            {{ network }}
-          </el-tag>
-        </div>
-      </div>
-    </section>
-
-    <section v-if="summary" class="panel">
-      <div class="panel-body">
-        <div class="page-header" style="margin-bottom: 14px">
-          <div>
-            <h3 class="section-title">{{ t('cluster.nodes') }}</h3>
-            <p class="subtitle">{{ t('cluster.nodesHint') }}</p>
-          </div>
-          <div class="page-actions">
-            <el-button :icon="Plus" type="primary" @click="addMemberOpen = true">
-              {{ t('cluster.addNode') }}
-            </el-button>
-          </div>
-        </div>
-
-        <el-table :data="summary.members" size="small" stripe>
-          <el-table-column :label="t('common.name')" min-width="160">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openNodeDetail(row)">
-                {{ row.name }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.status')" width="110">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 'Online' ? 'success' : 'info'" size="small" effect="plain">
-                {{ memberStatusLabel(row.status) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.memberRoles')" min-width="150">
-            <template #default="{ row }">
-              <span class="mono">{{ row.roles?.join(', ') || t('common.none') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.architectures')" width="120">
-            <template #default="{ row }">{{ row.architecture || t('common.none') }}</template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.memberAddress')" min-width="190">
-            <template #default="{ row }">
-              <span class="mono">{{ row.url || summary.endpoint }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="220" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openNodeDetail(row)">
-                {{ t('cluster.manageNode') }}
-              </el-button>
-              <el-button link type="primary" @click="openMemberDialog(row)">
-                {{ t('common.edit') }}
-              </el-button>
-              <el-button
-                v-if="row.status === 'Online'"
-                link
-                type="warning"
-                @click="openNodeUpgrade(row)"
-              >
-                {{ t('node.upgrade') }}
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-body">
-        <div class="page-header" style="margin-bottom: 14px">
-          <div>
-            <h3 class="section-title">{{ t('cluster.instances') }}</h3>
-            <p class="subtitle">
-              {{ t('common.shown', { count: filtered.length }) }} ·
-              {{ t('cluster.migrationTargets', { count: onlineTargets.length }) }}
-            </p>
-          </div>
-          <div class="page-actions">
-            <el-select v-model="typeFilter" style="width: 180px">
-              <el-option :label="t('common.allTypes')" value="any" />
-              <el-option :label="t('common.containers')" value="container" />
-              <el-option :label="t('common.virtualMachines')" value="virtual-machine" />
-            </el-select>
-          </div>
-        </div>
-
-        <el-table v-loading="instances.loading" :data="filtered" stripe>
-          <el-table-column :label="t('common.name')" min-width="170">
-            <template #default="{ row }">
-              <div class="status-cell">
-                <div>
-                  <el-button link type="primary" class="name-link" @click="openDetail(row)">
-                    {{ row.name }}
-                  </el-button>
-                  <span class="mini-label">{{ row.description || t('common.none') }}</span>
-                </div>
+            <div class="detail-item">
+              <div class="label">{{ t('cluster.instances') }}</div>
+              <div class="value">
+                {{
+                  t('cluster.instancesSummary', {
+                    total: summary.instances.total,
+                    running: summary.instances.running,
+                  })
+                }}
               </div>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.type')" width="130">
-            <template #default="{ row }">
-              <el-tag size="small" effect="plain">{{ instanceTypeLabel(row.type) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.status')" width="120">
-            <template #default="{ row }">
-              <StatusTag :status="row.status" :status-code="row.status_code" />
-            </template>
-          </el-table-column>
-          <el-table-column prop="location" :label="t('common.node')" width="140" />
-          <el-table-column :label="t('common.address')" min-width="150">
-            <template #default="{ row }">
-              <span class="mono">{{ primaryAddress(row.ipv4, row.ipv6) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.memory')" width="110">
-            <template #default="{ row }">{{ formatBytes(row.memory) }}</template>
-          </el-table-column>
-          <el-table-column :label="t('common.live')" width="90">
-            <template #default="{ row }">
-              <el-tag v-if="row.live_migratable" size="small" type="success" effect="light">
-                {{ t('common.yes') }}
-              </el-tag>
-              <span v-else class="muted">{{ t('common.none') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="420" fixed="right">
-            <template #default="{ row }">
-              <InstanceActions
-                :instance="row"
-                :busy="isBusy(row)"
-                @action="act(row, $event)"
-                @edit="openEdit(row)"
-                @migrate="openMigrate(row)"
-                @delete="confirmDelete(row)"
-              />
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('cluster.noInstances')" />
-          </template>
-        </el-table>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('cluster.storagePools') }}</h3>
-            <p class="subtitle">{{ t('cluster.storagePoolsHint') }}</p>
+            </div>
+            <div class="detail-item">
+              <div class="label">{{ t('cluster.containersVms') }}</div>
+              <div class="value">
+                {{ summary.instances.containers }} / {{ summary.instances.virtual_machines }}
+              </div>
+            </div>
+            <div class="detail-item">
+              <div class="label">{{ t('cluster.architectures') }}</div>
+              <div class="value">{{ summary.architectures?.join(', ') || t('common.none') }}</div>
+            </div>
+            <div class="detail-item">
+              <div class="label">{{ t('cluster.cpuCores') }}</div>
+              <div class="value">
+                {{ summary.cpu?.total ?? '—' }}{{ summary.cpu?.architecture ? ` · ${summary.cpu.architecture}` : '' }}
+              </div>
+            </div>
+            <div class="detail-item">
+              <div class="label">{{ t('cluster.memUsage') }}</div>
+              <div class="value">
+                <template v-if="summary.memory">
+                  {{ formatBytes(summary.memory.used) }} / {{ formatBytes(summary.memory.total) }}
+                </template>
+                <template v-else>{{ t('common.none') }}</template>
+              </div>
+            </div>
           </div>
-          <div class="page-actions">
-            <el-button :icon="Plus" @click="openPoolDialog()">{{ t('admin.addPool') }}</el-button>
+
+          <StorageBar
+            :used="summary.storage.used"
+            :total="summary.storage.total"
+            :pool="summary.storage.pool"
+          />
+
+          <div v-if="summary.memory && summary.memory.total > 0" class="mem-bar">
+            <el-progress
+              :percentage="Math.min(100, (summary.memory.used / summary.memory.total) * 100)"
+              :stroke-width="10"
+              :format="(p: number) => `${p.toFixed(1)}%`"
+            />
+          </div>
+
+          <div class="cluster-tags">
+            <el-tag v-for="network in summary.networks" :key="network" size="small" effect="plain">
+              {{ network }}
+            </el-tag>
           </div>
         </div>
+      </section>
 
-        <el-table v-loading="instances.resourcesLoading" :data="resources?.storage_pools ?? []" stripe>
-          <el-table-column :label="t('cluster.poolName')" min-width="140">
-            <template #default="{ row }">
-              <strong>{{ row.name }}</strong>
-              <span v-if="row.description" class="mini-label">{{ row.description }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.driver')" width="110" prop="driver" />
-          <el-table-column :label="t('cluster.source')" min-width="150">
-            <template #default="{ row }">
-              <span class="mono">{{ row.source || t('common.none') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.usage')" min-width="220">
-            <template #default="{ row }">
-              <StorageBar v-if="row.total > 0" :used="row.used" :total="row.total" />
-              <span v-else class="muted">{{ formatBytes(row.used) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.usedBy')" width="130">
-            <template #default="{ row }">
-              {{ t('cluster.usedByCount', { count: row.used_by.length }) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="200" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openVolumesDialog(row)">
-                {{ t('volumes.manage') }}
+      <section v-if="summary" class="panel">
+        <div class="panel-body">
+          <div class="page-header" style="margin-bottom: 14px">
+            <div>
+              <h3 class="section-title">{{ t('cluster.nodes') }}</h3>
+              <p class="subtitle">{{ t('cluster.nodesHint') }}</p>
+            </div>
+            <div class="page-actions">
+              <el-button :icon="Plus" type="primary" @click="addMemberOpen = true">
+                {{ t('cluster.addNode') }}
               </el-button>
-              <el-button link type="primary" @click="openPoolDialog(row)">
-                {{ t('common.edit') }}
-              </el-button>
-              <el-button link type="danger" @click="confirmDeletePool(row)">
-                {{ t('common.delete') }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('cluster.noPools')" />
-          </template>
-        </el-table>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('images.title') }}</h3>
-            <p class="subtitle">{{ t('form.imageHint') }}</p>
+            </div>
           </div>
-          <div class="page-actions">
-            <el-button
-              v-if="cachedImageCount > 0"
-              :loading="instances.saving"
-              @click="cleanupCachedImages"
-            >
-              {{ t('images.cleanup') }} ({{ cachedImageCount }})
-            </el-button>
-            <el-button :icon="Plus" type="primary" @click="importDialogOpen = true">
-              {{ t('images.import') }}
-            </el-button>
-          </div>
-        </div>
 
-        <el-table v-loading="instances.imagesLoading" :data="clusterImages" size="small" stripe>
-          <el-table-column :label="t('form.image')" min-width="180">
-            <template #default="{ row }">
-              <strong>{{ row.aliases[0] || row.os || row.fingerprint.slice(0, 12) }}</strong>
-              <span v-if="row.release" class="mini-label">{{ row.release }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('images.fingerprint')" min-width="140">
-            <template #default="{ row }">
-              <span class="mono">{{ row.fingerprint.slice(0, 12) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.type')" width="130">
-            <template #default="{ row }">
-              {{ instanceTypeLabel(row.type || 'container') }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.size')" width="100">
-            <template #default="{ row }">
-              {{ formatBytes(row.size) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('images.cached')" width="90">
-            <template #default="{ row }">
-              <el-tag v-if="row.cached" size="small" type="warning" effect="light">
-                {{ t('images.cached') }}
-              </el-tag>
-              <span v-else class="muted">{{ t('common.none') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="170">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openDistribute(row.fingerprint)">
-                {{ t('images.distribute') }}
-              </el-button>
-              <el-button v-if="row.cached" link type="primary" @click="refreshImage(row.fingerprint)">
-                {{ t('images.refresh') }}
-              </el-button>
-              <el-button link type="danger" @click="deleteImage(row.fingerprint)">
-                {{ t('common.delete') }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('images.empty')" />
-          </template>
-        </el-table>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('iso.title') }}</h3>
-            <p class="subtitle">{{ t('iso.hint') }}</p>
-          </div>
-          <div class="page-actions">
-            <el-button :icon="Plus" type="primary" @click="isoImportOpen = true">
-              {{ t('iso.import') }}
-            </el-button>
-          </div>
-        </div>
-
-        <el-table v-loading="instances.saving" :data="clusterISOs" size="small" stripe>
-          <el-table-column :label="t('iso.name')" min-width="180">
-            <template #default="{ row }">
-              <strong>{{ row.name }}</strong>
-              <span v-if="row.description" class="mini-label">{{ row.description }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('iso.pool')" width="140">
-            <template #default="{ row }">
-              <span class="mono">{{ row.pool }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="200">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openIsoLaunch(row)">
-                {{ t('iso.launch') }}
-              </el-button>
-              <el-button link type="danger" @click="deleteISO(row)">
-                {{ t('common.delete') }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('iso.empty')" />
-          </template>
-        </el-table>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('cluster.networks') }}</h3>
-            <p class="subtitle">{{ t('cluster.networksHint') }}</p>
-          </div>
-          <div class="page-actions">
-            <el-button :icon="Plus" @click="openNetworkDialog()">
-              {{ t('admin.addNetwork') }}
-            </el-button>
-          </div>
-        </div>
-
-        <el-table v-loading="instances.resourcesLoading" :data="networkRows" stripe>
-          <el-table-column :label="t('cluster.networkName')" min-width="150">
-            <template #default="{ row }">
-              <strong>{{ row.name }}</strong>
-              <span v-if="row.description" class="mini-label">{{ row.description }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.networkType')" width="120" prop="type" />
-          <el-table-column :label="t('cluster.locations')" min-width="130">
-            <template #default="{ row }">
-              <!-- Managed networks exist on every member; physical NICs live
-                   on one node, so their member is the identity that matters. -->
-              <span v-if="row.managed" class="muted">{{ t('cluster.allMembers') }}</span>
-              <span v-else class="mono">{{ row.locations.join(', ') || t('cluster.unknownMember') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.managed')" width="110">
-            <template #default="{ row }">
-              <el-tag :type="row.managed ? 'success' : 'info'" size="small" effect="light">
-                {{ row.managed ? t('common.yes') : t('common.no') }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.ipv4')" min-width="150">
-            <template #default="{ row }">
-              <span class="mono">{{ row.ipv4 || t('common.none') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.ipv6')" min-width="150">
-            <template #default="{ row }">
-              <span class="mono">{{ row.ipv6 || t('common.none') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.usedBy')" width="130">
-            <template #default="{ row }">
-              {{ t('cluster.usedByCount', { count: row.used_by.length }) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="150" fixed="right">
-            <template #default="{ row }">
-              <template v-if="row.managed">
-                <el-button link type="primary" @click="openNetworkDialog(row)">
+          <el-table :data="summary.members" size="small" stripe>
+            <el-table-column :label="t('common.name')" min-width="160">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openNodeDetail(row)">
+                  {{ row.name }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.status')" width="110">
+              <template #default="{ row }">
+                <el-tag :type="row.status === 'Online' ? 'success' : 'info'" size="small" effect="plain">
+                  {{ memberStatusLabel(row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.memberRoles')" min-width="150">
+              <template #default="{ row }">
+                <span class="mono">{{ row.roles?.join(', ') || t('common.none') }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.architectures')" width="120">
+              <template #default="{ row }">{{ row.architecture || t('common.none') }}</template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.memberAddress')" min-width="190">
+              <template #default="{ row }">
+                <span class="mono">{{ row.url || summary.endpoint }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="220" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openNodeDetail(row)">
+                  {{ t('cluster.manageNode') }}
+                </el-button>
+                <el-button link type="primary" @click="openMemberDialog(row)">
                   {{ t('common.edit') }}
                 </el-button>
-                <el-button link type="danger" @click="confirmDeleteNetwork(row)">
+                <el-button
+                  v-if="row.status === 'Online'"
+                  link
+                  type="warning"
+                  @click="openNodeUpgrade(row)"
+                >
+                  {{ t('node.upgrade') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </section>
+      </el-tab-pane>
+
+      <el-tab-pane :label="t('cluster.tabInstances')" name="instances">
+      <section class="panel">
+        <div class="panel-body">
+          <div class="page-header" style="margin-bottom: 14px">
+            <div>
+              <h3 class="section-title">{{ t('cluster.instances') }}</h3>
+              <p class="subtitle">
+                {{ t('common.shown', { count: filtered.length }) }} ·
+                {{ t('cluster.migrationTargets', { count: onlineTargets.length }) }}
+              </p>
+            </div>
+            <div class="page-actions">
+              <el-input
+                v-model="instanceSearch"
+                clearable
+                :placeholder="t('instances.searchPlaceholder')"
+                style="width: 200px"
+              />
+              <el-select v-model="typeFilter" aria-label="Instance type" style="width: 180px">
+                <el-option :label="t('common.allTypes')" value="any" />
+                <el-option :label="t('common.containers')" value="container" />
+                <el-option :label="t('common.virtualMachines')" value="virtual-machine" />
+              </el-select>
+            </div>
+          </div>
+
+          <el-table v-loading="instances.loading" :data="pagedInstances" stripe>
+            <el-table-column :label="t('common.name')" min-width="170">
+              <template #default="{ row }">
+                <div class="status-cell">
+                  <div>
+                    <el-button link type="primary" class="name-link" @click="openDetail(row)">
+                      {{ row.name }}
+                    </el-button>
+                    <span class="mini-label">{{ row.description || t('common.none') }}</span>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.type')" width="130">
+              <template #default="{ row }">
+                <el-tag size="small" effect="plain">{{ instanceTypeLabel(row.type) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.status')" width="120">
+              <template #default="{ row }">
+                <StatusTag :status="row.status" :status-code="row.status_code" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="location" :label="t('common.node')" width="140" />
+            <el-table-column :label="t('common.address')" min-width="150">
+              <template #default="{ row }">
+                <span class="mono">{{ primaryAddress(row.ipv4, row.ipv6) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.memory')" width="110">
+              <template #default="{ row }">{{ formatBytes(row.memory) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('common.live')" width="90">
+              <template #default="{ row }">
+                <el-tag v-if="row.live_migratable" size="small" type="success" effect="light">
+                  {{ t('common.yes') }}
+                </el-tag>
+                <span v-else class="muted">{{ t('common.none') }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="420" fixed="right">
+              <template #default="{ row }">
+                <InstanceActions
+                  :instance="row"
+                  :busy="isBusy(row)"
+                  @action="act(row, $event)"
+                  @edit="openEdit(row)"
+                  @migrate="openMigrate(row)"
+                  @delete="confirmDelete(row)"
+                />
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty :description="t('cluster.noInstances')" />
+            </template>
+          </el-table>
+          <el-pagination
+            v-model:current-page="instancePage"
+            v-model:page-size="instancePageSize"
+            class="table-pagination"
+            layout="total, sizes, prev, pager, next"
+            :total="filtered.length"
+            :page-sizes="[20, 50, 100]"
+          />
+        </div>
+      </section>
+      </el-tab-pane>
+
+      <el-tab-pane :label="t('cluster.tabStorage')" name="storage">
+      <section class="panel">
+        <div class="panel-body">
+          <div class="section-heading page-header">
+            <div>
+              <h3 class="section-title">{{ t('cluster.storagePools') }}</h3>
+              <p class="subtitle">{{ t('cluster.storagePoolsHint') }}</p>
+            </div>
+            <div class="page-actions">
+              <el-button :icon="Plus" @click="openPoolDialog()">{{ t('admin.addPool') }}</el-button>
+            </div>
+          </div>
+
+          <el-table v-loading="instances.resourcesLoading" :data="resources?.storage_pools ?? []" stripe>
+            <el-table-column :label="t('cluster.poolName')" min-width="140">
+              <template #default="{ row }">
+                <strong>{{ row.name }}</strong>
+                <span v-if="row.description" class="mini-label">{{ row.description }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.driver')" width="110" prop="driver" />
+            <el-table-column :label="t('cluster.source')" min-width="150">
+              <template #default="{ row }">
+                <span class="mono">{{ row.source || t('common.none') }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.usage')" min-width="220">
+              <template #default="{ row }">
+                <StorageBar v-if="row.total > 0" :used="row.used" :total="row.total" />
+                <span v-else class="muted">{{ formatBytes(row.used) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.usedBy')" width="130">
+              <template #default="{ row }">
+                {{ t('cluster.usedByCount', { count: row.used_by.length }) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="200" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openVolumesDialog(row)">
+                  {{ t('volumes.manage') }}
+                </el-button>
+                <el-button link type="primary" @click="openPoolDialog(row)">
+                  {{ t('common.edit') }}
+                </el-button>
+                <el-button link type="danger" @click="confirmDeletePool(row)">
                   {{ t('common.delete') }}
                 </el-button>
               </template>
-              <span v-else class="muted" :title="t('admin.unmanagedHint')">—</span>
+            </el-table-column>
+            <template #empty>
+              <el-empty :description="t('cluster.noPools')" />
             </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('cluster.noNetworks')" />
-          </template>
-        </el-table>
-      </div>
-    </section>
-
-
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('cluster.overlayTitle') }}</h3>
-            <p class="subtitle">{{ t('cluster.overlayHint') }}</p>
-          </div>
-          <div class="page-actions">
-            <el-button :icon="Plus" @click="openOverlayDialog">
-              {{ t('cluster.overlayCreate') }}
-            </el-button>
-          </div>
+          </el-table>
         </div>
+      </section>
+      </el-tab-pane>
 
-        <el-table v-loading="overlayLoading" :data="overlayItems" stripe>
-          <el-table-column :label="t('cluster.overlaySubnet')" min-width="150">
-            <template #default="{ row }">
-              <strong>{{ row.name }}</strong>
-              <span class="mini-label mono">{{ row.subnet }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.overlayBridge')" width="130" prop="bridge" />
-          <el-table-column :label="t('cluster.overlayVNI')" width="100">
-            <template #default="{ row }">
-              <span class="mono">{{ row.vni }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.overlayGateway')" min-width="130">
-            <template #default="{ row }">
-              {{ row.gateway_member }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.overlayMTU')" width="90">
-            <template #default="{ row }">
-              <span class="mono">{{ row.mtu }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.overlayTunnels', { count: 0 })" width="140">
-            <template #default="{ row }">
-              {{ t('cluster.overlayTunnels', { count: row.tunnels.length }) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.overlayStatus')" width="110">
-            <template #default="{ row }">
-              <el-tag :type="row.enabled ? 'success' : 'info'" size="small" effect="light">
-                {{ row.enabled ? t('cluster.overlayEnabled') : t('cluster.overlayDisabled') }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="180" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="reconcileOverlay(row)">
-                {{ t('cluster.overlayReconcile') }}
+      <el-tab-pane :label="t('cluster.tabMedia')" name="media">
+      <section class="panel">
+        <div class="panel-body">
+          <div class="section-heading page-header">
+            <div>
+              <h3 class="section-title">{{ t('images.title') }}</h3>
+              <p class="subtitle">{{ t('form.imageHint') }}</p>
+            </div>
+            <div class="page-actions">
+              <el-button
+                v-if="cachedImageCount > 0"
+                :loading="instances.saving"
+                @click="cleanupCachedImages"
+              >
+                {{ t('images.cleanup') }} ({{ cachedImageCount }})
               </el-button>
-              <el-button link type="danger" @click="confirmDisableOverlay(row)">
-                {{ t('cluster.overlayDisable') }}
+              <el-button :icon="Plus" type="primary" @click="importDialogOpen = true">
+                {{ t('images.import') }}
               </el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('cluster.overlayEmpty')" />
-          </template>
-        </el-table>
+            </div>
+          </div>
 
-        <div v-for="overlay in overlayItems" :key="`${overlay.name}-members`" class="overlay-members">
-          <h4 class="mini-title">{{ overlay.name }} · {{ t('cluster.overlayMember') }}</h4>
-          <div class="overlay-member-grid">
-            <div v-for="member in overlay.members" :key="member.member" class="overlay-member">
-              <strong>{{ member.member }}</strong>
-              <el-tag :type="member.gateway ? 'warning' : 'info'" size="small" effect="plain">
-                {{ member.gateway ? t('cluster.overlayRoleGateway') : t('cluster.overlayRoleMember') }}
-              </el-tag>
-              <span class="muted mono">{{ member.bridge_ip }}</span>
-              <span class="muted mono">{{ member.underlay_ip }}</span>
+          <el-table v-loading="instances.imagesLoading" :data="clusterImages" size="small" stripe>
+            <el-table-column :label="t('form.image')" min-width="180">
+              <template #default="{ row }">
+                <strong>{{ row.aliases[0] || row.os || row.fingerprint.slice(0, 12) }}</strong>
+                <span v-if="row.release" class="mini-label">{{ row.release }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('images.fingerprint')" min-width="140">
+              <template #default="{ row }">
+                <span class="mono">{{ row.fingerprint.slice(0, 12) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.type')" width="130">
+              <template #default="{ row }">
+                {{ instanceTypeLabel(row.type || 'container') }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.size')" width="100">
+              <template #default="{ row }">
+                {{ formatBytes(row.size) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('images.cached')" width="90">
+              <template #default="{ row }">
+                <el-tag v-if="row.cached" size="small" type="warning" effect="light">
+                  {{ t('images.cached') }}
+                </el-tag>
+                <span v-else class="muted">{{ t('common.none') }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="170">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openDistribute(row.fingerprint)">
+                  {{ t('images.distribute') }}
+                </el-button>
+                <el-button v-if="row.cached" link type="primary" @click="refreshImage(row.fingerprint)">
+                  {{ t('images.refresh') }}
+                </el-button>
+                <el-button link type="danger" @click="deleteImage(row.fingerprint)">
+                  {{ t('common.delete') }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty :description="t('images.empty')" />
+            </template>
+          </el-table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-body">
+          <div class="section-heading page-header">
+            <div>
+              <h3 class="section-title">{{ t('iso.title') }}</h3>
+              <p class="subtitle">{{ t('iso.hint') }}</p>
+            </div>
+            <div class="page-actions">
+              <el-button :icon="Plus" type="primary" @click="isoImportOpen = true">
+                {{ t('iso.import') }}
+              </el-button>
+            </div>
+          </div>
+
+          <el-table v-loading="instances.saving" :data="clusterISOs" size="small" stripe>
+            <el-table-column :label="t('iso.name')" min-width="180">
+              <template #default="{ row }">
+                <strong>{{ row.name }}</strong>
+                <span v-if="row.description" class="mini-label">{{ row.description }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('iso.pool')" width="140">
+              <template #default="{ row }">
+                <span class="mono">{{ row.pool }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="200">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openIsoLaunch(row)">
+                  {{ t('iso.launch') }}
+                </el-button>
+                <el-button link type="danger" @click="deleteISO(row)">
+                  {{ t('common.delete') }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty :description="t('iso.empty')" />
+            </template>
+          </el-table>
+        </div>
+      </section>
+      </el-tab-pane>
+
+      <el-tab-pane :label="t('cluster.tabNetwork')" name="network">
+      <section class="panel">
+        <div class="panel-body">
+          <div class="section-heading page-header">
+            <div>
+              <h3 class="section-title">{{ t('cluster.networks') }}</h3>
+              <p class="subtitle">{{ t('cluster.networksHint') }}</p>
+            </div>
+            <div class="page-actions">
+              <el-button :icon="Plus" @click="openNetworkDialog()">
+                {{ t('admin.addNetwork') }}
+              </el-button>
+            </div>
+          </div>
+
+          <el-table v-loading="instances.resourcesLoading" :data="networkRows" stripe>
+            <el-table-column :label="t('cluster.networkName')" min-width="150">
+              <template #default="{ row }">
+                <strong>{{ row.name }}</strong>
+                <span v-if="row.description" class="mini-label">{{ row.description }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.networkType')" width="120" prop="type" />
+            <el-table-column :label="t('cluster.ipv4')" min-width="150">
+              <template #default="{ row }">
+                <span class="mono">{{ row.ipv4 || t('common.none') }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.ipv6')" min-width="150">
+              <template #default="{ row }">
+                <span class="mono">{{ row.ipv6 || t('common.none') }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.usedBy')" width="130">
+              <template #default="{ row }">
+                {{ t('cluster.usedByCount', { count: row.used_by.length }) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="150" fixed="right">
+              <template #default="{ row }">
+                <template v-if="row.managed">
+                  <el-button link type="primary" @click="openNetworkDialog(row)">
+                    {{ t('common.edit') }}
+                  </el-button>
+                  <el-button link type="danger" @click="confirmDeleteNetwork(row)">
+                    {{ t('common.delete') }}
+                  </el-button>
+                </template>
+                <span v-else class="muted" :title="t('admin.unmanagedHint')">—</span>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty :description="t('cluster.noNetworks')" />
+            </template>
+          </el-table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-body">
+          <div class="section-heading page-header">
+            <div>
+              <h3 class="section-title">{{ t('cluster.overlayTitle') }}</h3>
+              <p class="subtitle">{{ t('cluster.overlayHint') }}</p>
+            </div>
+            <div class="page-actions">
+              <el-button :icon="Plus" @click="openOverlayDialog">
+                {{ t('cluster.overlayCreate') }}
+              </el-button>
+            </div>
+          </div>
+
+          <el-table v-loading="overlayLoading" :data="overlayItems" stripe>
+            <el-table-column :label="t('cluster.overlaySubnet')" min-width="150">
+              <template #default="{ row }">
+                <strong>{{ row.name }}</strong>
+                <span class="mini-label mono">{{ row.subnet }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.overlayBridge')" width="130" prop="bridge" />
+            <el-table-column :label="t('cluster.overlayVNI')" width="100">
+              <template #default="{ row }">
+                <span class="mono">{{ row.vni }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.overlayGateway')" min-width="130">
+              <template #default="{ row }">
+                {{ row.gateway_member }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.overlayMTU')" width="90">
+              <template #default="{ row }">
+                <span class="mono">{{ row.mtu }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.overlayTunnels', { count: 0 })" width="140">
+              <template #default="{ row }">
+                {{ t('cluster.overlayTunnels', { count: row.tunnels.length }) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.overlayStatus')" width="110">
+              <template #default="{ row }">
+                <el-tag :type="row.enabled ? 'success' : 'info'" size="small" effect="light">
+                  {{ row.enabled ? t('cluster.overlayEnabled') : t('cluster.overlayDisabled') }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="180" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="reconcileOverlay(row)">
+                  {{ t('cluster.overlayReconcile') }}
+                </el-button>
+                <el-button link type="danger" @click="confirmDisableOverlay(row)">
+                  {{ t('cluster.overlayDisable') }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty :description="t('cluster.overlayEmpty')" />
+            </template>
+          </el-table>
+
+          <div v-for="overlay in overlayItems" :key="`${overlay.name}-members`" class="overlay-members">
+            <h4 class="mini-title">{{ overlay.name }} · {{ t('cluster.overlayMember') }}</h4>
+            <div class="overlay-member-grid">
+              <div v-for="member in overlay.members" :key="member.member" class="overlay-member">
+                <strong>{{ member.member }}</strong>
+                <el-tag :type="member.gateway ? 'warning' : 'info'" size="small" effect="plain">
+                  {{ member.gateway ? t('cluster.overlayRoleGateway') : t('cluster.overlayRoleMember') }}
+                </el-tag>
+                <span class="muted mono">{{ member.bridge_ip }}</span>
+                <span class="muted mono">{{ member.underlay_ip }}</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </section>
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('cluster.profiles') }}</h3>
-            <p class="subtitle">{{ t('cluster.profilesHint') }}</p>
-          </div>
-          <div class="page-actions">
-            <el-button :icon="Plus" @click="openProfileDialog()">
-              {{ t('admin.addProfile') }}
-            </el-button>
-          </div>
-        </div>
+      </section>
+      </el-tab-pane>
 
-        <el-table v-loading="instances.profilesLoading" :data="profiles" stripe>
-          <el-table-column :label="t('common.name')" min-width="160">
-            <template #default="{ row }">
-              <strong>{{ row.name }}</strong>
-              <span v-if="row.description" class="mini-label">{{ row.description }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('admin.config')" min-width="180">
-            <template #default="{ row }">
-              <span v-if="Object.keys(row.config).length" class="mono config-preview">
-                {{ Object.keys(row.config).join(', ') }}
-              </span>
-              <span v-else class="muted">{{ t('common.none') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('admin.profileDevices')" width="110">
-            <template #default="{ row }">
-              {{ Object.keys(row.devices).length }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('cluster.usedBy')" width="130">
-            <template #default="{ row }">
-              {{ t('cluster.usedByCount', { count: row.used_by.length }) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="150" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openProfileDialog(row)">
-                {{ t('common.edit') }}
+      <el-tab-pane :label="t('cluster.tabProfiles')" name="profiles">
+      <section class="panel">
+        <div class="panel-body">
+          <div class="section-heading page-header">
+            <div>
+              <h3 class="section-title">{{ t('cluster.profiles') }}</h3>
+              <p class="subtitle">{{ t('cluster.profilesHint') }}</p>
+            </div>
+            <div class="page-actions">
+              <el-button :icon="Plus" @click="openProfileDialog()">
+                {{ t('admin.addProfile') }}
               </el-button>
-              <el-button link type="danger" @click="confirmDeleteProfile(row)">
-                {{ t('common.delete') }}
-              </el-button>
+            </div>
+          </div>
+
+          <el-table v-loading="instances.profilesLoading" :data="profiles" stripe>
+            <el-table-column :label="t('common.name')" min-width="160">
+              <template #default="{ row }">
+                <strong>{{ row.name }}</strong>
+                <span v-if="row.description" class="mini-label">{{ row.description }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('admin.config')" min-width="180">
+              <template #default="{ row }">
+                <span v-if="Object.keys(row.config).length" class="mono config-preview">
+                  {{ Object.keys(row.config).join(', ') }}
+                </span>
+                <span v-else class="muted">{{ t('common.none') }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('admin.profileDevices')" width="110">
+              <template #default="{ row }">
+                {{ Object.keys(row.devices).length }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('cluster.usedBy')" width="130">
+              <template #default="{ row }">
+                {{ t('cluster.usedByCount', { count: row.used_by.length }) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="150" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openProfileDialog(row)">
+                  {{ t('common.edit') }}
+                </el-button>
+                <el-button link type="danger" @click="confirmDeleteProfile(row)">
+                  {{ t('common.delete') }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty :description="t('cluster.noProfiles')" />
             </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('cluster.noProfiles')" />
-          </template>
-        </el-table>
-      </div>
-    </section>
+          </el-table>
+        </div>
+      </section>
+      </el-tab-pane>
+    </el-tabs>
 
     <InstanceDetailDrawer
       v-model="detailOpen"

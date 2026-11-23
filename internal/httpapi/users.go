@@ -62,6 +62,11 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 // createUser adds an account. It also serves as the first-run bootstrap: while
 // no account exists, the shared token may create the initial administrator.
 func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
+	if a.rateLimit && !applyRateLimit(registrationLimiter, r) {
+		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many account requests; try again later")
+		return
+	}
+
 	var req userRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -295,7 +300,8 @@ func (a *API) changePassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// listSessions returns the caller's own sessions.
+// listSessions returns sessions for the caller, or for any account when the
+// caller is an administrator and supplies user_id.
 func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	session, ok := sessionFromContext(r.Context())
 	if !ok {
@@ -303,13 +309,49 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"sessions": []map[string]any{{
-			"id":         session.ID,
-			"username":   session.Username,
-			"role":       session.Role,
-			"expires_at": session.ExpiresAt,
-			"current":    true,
-		}},
-	})
+	userID := session.UserID
+	if requested := strings.TrimSpace(r.URL.Query().Get("user_id")); requested != "" {
+		if !session.Role.CanAdmin() {
+			writeError(w, http.StatusForbidden, "forbidden", "administrator role required")
+			return
+		}
+		userID = requested
+	}
+
+	rows, err := a.auth.SessionsForUser(r.Context(), userID)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, map[string]any{
+			"id":         row.ID,
+			"username":   row.Username,
+			"role":       row.Role,
+			"expires_at": row.ExpiresAt,
+			"current":    row.ID == session.ID,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": out})
+}
+
+// revokeUserSessions signs out every session of an account.
+func (a *API) revokeUserSessions(w http.ResponseWriter, r *http.Request) {
+	userID := r.PathValue("id")
+	if _, err := a.store.GetUser(r.Context(), userID); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	current, _ := sessionFromContext(r.Context())
+	revoked, err := a.auth.RevokeUserSessions(r.Context(), userID, current.ID)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"revoked": revoked})
 }

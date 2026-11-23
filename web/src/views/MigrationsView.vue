@@ -10,6 +10,8 @@ import { useMigrationsStore } from '@/stores/migrations'
 import { errorMessage } from '@/utils/errors'
 import { formatDateTime, formatDuration, shortID } from '@/utils/format'
 
+withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
+
 const migrations = useMigrationsStore()
 const { t, te } = useI18n()
 
@@ -85,6 +87,21 @@ function statusLabel(status: string): string {
 // stage information and renders as-is.
 const progressMarkers: Record<string, string> = {
   complete: 'migrationStatus.done',
+  validated: 'migrations.stage.validated',
+  'live migration': 'migrations.stage.live',
+  'stopping source': 'migrations.stage.stopping',
+  'transferring instance': 'migrations.stage.transferring',
+  'verifying target': 'migrations.stage.verifying',
+  'starting target': 'migrations.stage.starting',
+  'removing source': 'migrations.stage.removingSource',
+  'restarting source': 'migrations.stage.restartingSource',
+  'restoring guest network': 'migrations.stage.restoringNetwork',
+  'stop source': 'migrations.stage.stopSource',
+  'copy instance': 'migrations.stage.copyInstance',
+  'transfer instance': 'migrations.stage.transferInstance',
+  'start target': 'migrations.stage.startTarget',
+  'delete source': 'migrations.stage.deleteSource',
+  'restart source': 'migrations.stage.restartSource',
 }
 
 /** Renders the Progress column value, replacing raw terminal markers. */
@@ -166,7 +183,7 @@ async function onRetry(migration: Migration): Promise<void> {
 
 <template>
   <div class="page">
-    <div class="page-header">
+    <div v-if="!embedded" class="page-header">
       <div>
         <h2>{{ t('migrations.title') }}</h2>
         <p class="subtitle">

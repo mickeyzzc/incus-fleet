@@ -26,7 +26,7 @@ Prerequisites:
 9. [Image upgrades and cloning](#image-upgrades-and-cloning)
 10. [Port forwarding](#port-forwarding)
 11. [Walkthrough: deploy a PostgreSQL container](#walkthrough-deploy-a-postgresql-container)
-12. [Shared asset library and batch operations](#shared-asset-library-and-batch-operations)
+12. [Images & automation, batch operations](#images--automation-batch-operations)
 13. [Resource monitoring](#resource-monitoring)
 14. [Storage pools and networks](#storage-pools-and-networks)
 15. [Private interconnect networks](#private-interconnect-networks)
@@ -212,9 +212,9 @@ installation media, forces the installer's default boot entry, and watches for c
 3. Supply the answers in one of three ways:
    - Fill the template fields: hostname (defaults to the VM name), user account, password,
      timezone, target disk, locale, and keyboard layout;
-   - Pick a saved **Answer profile** from the dropdown — configurations are managed under the
-     **Answer profiles** page, can be marked as the default for their installer, and are applied
-     automatically when a launch supplies no answer content;
+   - Pick a saved **Answer profile** from the dropdown — configurations are managed under
+     **Images & automation → Answer profiles**, can be marked as the default for their installer,
+     and are applied automatically when a launch supplies no answer content;
    - Enable **Provide my own answer file** and paste a complete preseed.cfg / ks.cfg / user-data.
 
    **Preview answer file** renders exactly what will be shipped.
@@ -239,7 +239,7 @@ Notes and requirements:
 
 - Unattended install is **fully self-contained**: everything runs inside Fleet and the cluster.
   No external downloader, artifact service, or internet access is required — it works in isolated
-  cluster networks. Images only need to be present in the asset library (they can be uploaded
+  cluster networks. Images only need to be present under **Images & automation** (they can be uploaded
   from a local file, so an external download helper is optional and never a prerequisite).
 - **xorriso** must be installed on the fleet server (`apt install xorriso`); it remasters the
   installer ISO and builds the seed media. The scratch directory `unattended.work_dir`
@@ -255,10 +255,10 @@ Notes and requirements:
   attached until you detach it or the watch window expires.
 
 ISO files live in the storage pool and can be deleted from the list at any time. Downloaded
-installer images (for example the current Debian netinst and Arch Linux ISOs) appear in the
-shared asset library once uploaded:
+installer images (for example the current Debian netinst and Arch Linux ISOs) appear under
+**Images & automation → Install media (ISO)** once uploaded:
 
-![Imported installer ISOs in the shared asset library](images/iso/asset-library-isos.png)
+![Imported installer ISOs under Images & automation](images/iso/asset-library-isos.png)
 
 The installer boots into a GRUB menu or the distribution's splash screen; the remote desktop
 follows the framebuffer size automatically.
@@ -286,12 +286,11 @@ Open a cluster → **Instances** → **Create instance**. Key fields:
 ### Choosing a network: same-subnet IPs
 
 The network dropdown groups its options so heterogeneous clusters stay readable: managed
-networks (usable on every member) come first, then one group of physical NICs per member.
-The cluster network table shows a **Members** column with the same information; bond member
-NICs are hidden from the parent candidates because a macvlan over a bond slave cannot come
-up.
-
-![Cluster network table with the Members column](images-en/networks-members.png)
+networks (usable on every member) come first, then one group of physical NICs per member;
+bond member NICs are hidden from the parent candidates because a macvlan over a bond slave
+cannot come up. Note that the cluster overview only lists **managed networks**; physical
+NICs, addresses, routes and firewall rules are node-local and live under
+**Cluster → Node → Node network**.
 
 The instance address depends on the selected network:
 
@@ -522,20 +521,23 @@ working connectivity — no manual `dhclient` needed.
 If the guest uses a static address, or has no DHCP client installed, the migration still
 succeeds and the fleet only logs a warning; you then need to adjust that address yourself.
 
-## Shared asset library and batch operations
+## Images & automation, batch operations
 
-Keeping common content in one place and reusing it is key to reducing repetitive operations.
-Fleet provides an **Asset library** for SSH public keys and frequently used scripts, plus
-one-click batch execution against many instances.
+Fleet organises resources by the task users are doing: images and install media for building
+instances, and reusable automation content, all on the **Images & automation** page.
 
-### Asset library: one place to keep shared content
+### Images & automation: grouped by task
 
-Open **Asset library** in the left menu:
+Open **Images & automation** in the left menu and switch tabs:
 
-- **SSH public keys**: stores keys (name + key material, one or more lines; identical content
-  is de-duplicated). Storing a key does not deploy it; you decide when to inject it.
-- **Scripts**: stores maintenance scripts (name + description + body), such as bootstrap,
-  package installation, or tuning scripts, ready to reuse.
+- **Images**: local images from every cluster; import, copy between clusters, refresh cache.
+- **Install media (ISO)**: upload ISOs and boot blank VMs to install an OS.
+- **SSH public keys**: stores keys (name + key material; identical content is de-duplicated).
+  Storing a key does not deploy it; you decide when to inject it.
+- **Scripts**: stores maintenance scripts (name + description + body), ready to reuse.
+- **Answer profiles**: unattended-install answer templates, defaultable per installer.
+
+Batch operations still start from the **Instances** page; see below.
 
 ### Batch operations: apply to many instances at once
 
@@ -614,13 +616,13 @@ core metrics needed for routine operations.
 
 ## Storage pools and networks
 
-The cluster detail page provides:
+The cluster detail page is organised into tabs: Overview & nodes, Instances, Storage,
+Images & media, Network, and Profiles.
 
-- **Storage pools**: view driver and capacity; create, edit, and delete pools; create and
-  delete custom volumes under each pool (for device mounts).
-- **Networks**: list networks; managed networks can be created, edited, and deleted, while
-  physical NICs are read-only (macvlan is defined by the instance device, not as a separate
-  network).
+- **Storage**: view driver and capacity; create, edit, and delete pools; create and delete
+  custom volumes under each pool (for device mounts).
+- **Network**: list and manage cluster-wide managed networks. Physical NICs, addresses,
+  routes, firewall and Wi-Fi are node-local and live under **Cluster → Node → Node network**.
 - **Profiles**: create, update, and delete configuration templates; select them when creating
   instances.
 

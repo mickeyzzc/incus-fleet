@@ -667,7 +667,23 @@ POST /api/v1/tasks
 `virtual-machine`）、`image`（必填，本地镜像的指纹）、`description`、`profiles`、
 `cpu`（核数、范围或列表）、`memory`（例如 `512MiB`）、`root_disk_size`、
 `storage_pool`（默认 `default`）、`network`、`ipv4`、`ipv6`（静态地址需要
-`network`）以及 `start`（默认 `true`）。等待时间：最长 15 分钟。
+`network`）、`start`（默认 `true`）以及可选的 `disks`——创建时额外挂载的空数据盘：
+
+```json
+{
+  "name": "web-01", "image": "053059ea4e28", "storage_pool": "default",
+  "disks": [
+    { "name": "data0", "path": "/data", "size": "50GiB" },
+    { "name": "data1", "path": "/backup", "size": "20GiB", "pool": "fast" }
+  ]
+}
+```
+
+`disks[].name` 必须唯一且不能是 `root`/`eth0`，`path` 必须是绝对路径，`pool` 默认
+使用实例的存储池。容量单位接受 `MiB`/`GiB`/`TiB` 等；等待时间：最长 15 分钟。
+
+`GET /instances`（跨集群清单）在部分集群不可达时仍返回其余集群的数据，并在
+`unavailable_clusters` 中列出失败的集群；只有全部集群都失败时才返回 `503`。
 
 `PATCH .../instances/{instance}` 接受可为 null 的字段；空字符串会清除取值。NIC
 变更以 `device` 为目标（默认 `eth0`）。

@@ -7,6 +7,7 @@ import { Back } from '@element-plus/icons-vue'
 import HostMetricsPanel from '@/components/HostMetricsPanel.vue'
 import NodeNetworkPanel from '@/components/NodeNetworkPanel.vue'
 import type { ClusterMember } from '@/api/types'
+import { useAuthStore } from '@/stores/auth'
 import { useClustersStore } from '@/stores/clusters'
 
 const props = defineProps<{
@@ -16,6 +17,7 @@ const props = defineProps<{
 
 const router = useRouter()
 const clusters = useClustersStore()
+const auth = useAuthStore()
 const { t } = useI18n()
 
 const summary = computed(() => clusters.byName(props.cluster))
@@ -64,7 +66,33 @@ watch(() => props.cluster, ensureCluster)
     </div>
 
     <el-alert
-      v-if="!memberInfo"
+      v-if="clusters.error"
+      class="fleet-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      :title="clusters.error"
+    />
+
+    <el-alert
+      class="fleet-alert"
+      type="info"
+      :closable="false"
+      show-icon
+      :title="t('nodeDetail.instructions', { cluster: summary?.display_name || cluster })"
+    />
+
+    <el-alert
+      v-if="!auth.canWrite"
+      class="fleet-alert"
+      type="warning"
+      :closable="false"
+      show-icon
+      :title="t('nodeDetail.readOnlyHint')"
+    />
+
+    <el-alert
+      v-if="!clusters.loading && !memberInfo"
       class="fleet-alert"
       type="warning"
       :closable="false"
@@ -72,7 +100,7 @@ watch(() => props.cluster, ensureCluster)
       :title="t('nodeDetail.notFound', { member })"
     />
 
-    <template v-else-if="memberInfo">
+    <template v-if="memberInfo">
       <section class="panel">
         <div class="panel-body member-grid">
           <div class="detail-item">
@@ -96,7 +124,7 @@ watch(() => props.cluster, ensureCluster)
 
       <HostMetricsPanel :cluster="cluster" :member="memberInfo.name" />
 
-      <NodeNetworkPanel :cluster="cluster" :member="memberInfo.name" />
+      <NodeNetworkPanel :cluster="cluster" :member="memberInfo.name" :can-write="auth.canWrite" />
     </template>
   </div>
 </template>
