@@ -57,7 +57,7 @@ func (f *fakePlugin) HandleEvent(_ context.Context, e Event) error {
 	return nil
 }
 
-func (f *fakePlugin) counts() (init, start, close int, events int) {
+func (f *fakePlugin) counts() (init, start, closed, events int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 

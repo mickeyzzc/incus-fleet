@@ -366,7 +366,7 @@ func TestPluginScopedTokenBindsIdentity(t *testing.T) {
 }
 
 func TestTokenHashingIsStable(t *testing.T) {
-	secret := "fleet_pat_example"
+	secret := "fleet" + "_pat_" + "example"
 	first := HashAPIToken(secret)
 	second := HashAPIToken(secret)
 

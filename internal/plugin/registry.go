@@ -160,14 +160,10 @@ func (r *Registry) Start(ctx context.Context) error {
 		r.mu.Unlock()
 
 		if err := p.Init(r.host); err != nil {
-			closeAll(started)
-
-			return fmt.Errorf("plugin: init %s: %w", id, err)
+			return errors.Join(fmt.Errorf("plugin: init %s: %w", id, err), closeAll(started))
 		}
 		if err := p.Start(ctx); err != nil {
-			closeAll(started)
-
-			return fmt.Errorf("plugin: start %s: %w", id, err)
+			return errors.Join(fmt.Errorf("plugin: start %s: %w", id, err), closeAll(started))
 		}
 
 		started = append(started, p)

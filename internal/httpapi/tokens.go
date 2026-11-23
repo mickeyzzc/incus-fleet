@@ -252,7 +252,8 @@ func (a *API) requireScope(scope auth.Scope, next http.Handler) http.Handler {
 				}
 				// Fall through to the bootstrap token check below so an existing
 				// bootstrap deployment keeps working.
-				if !(a.auth.ValidateToken(strings.TrimSpace(bearer)) && a.auth.BootstrapAllowed(r.Context())) {
+				bootstrap := a.auth.ValidateToken(strings.TrimSpace(bearer)) && a.auth.BootstrapAllowed(r.Context())
+				if !bootstrap {
 					writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api token")
 					return
 				}

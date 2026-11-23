@@ -108,7 +108,7 @@ func (s *SQLStore) queryAPITokens(ctx context.Context, query string, args ...any
 	if err != nil {
 		return nil, fmt.Errorf("store: list api tokens: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tokens []*APIToken
 	for rows.Next() {
