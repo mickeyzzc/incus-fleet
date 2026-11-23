@@ -176,7 +176,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	// can share state: a mesh deployment, rqlite, or PostgreSQL. Only a
 	// single-node SQLite deployment keeps sessions in process memory.
 	authStore := auth.NewStoreAdapter(st)
-	authOptions := []auth.Option{auth.WithUserStore(authStore)}
+	authOptions := []auth.Option{auth.WithUserStore(authStore), auth.WithTokenStore(authStore)}
 	if cfg.Mesh.Enabled || cfg.Database.IsShared() {
 		authOptions = append(authOptions, auth.WithSessionStore(authStore))
 	}
@@ -405,6 +405,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 			PublicURL: cfg.Metrics.HTTPSD.PublicURL, Mode: cfg.Metrics.HTTPSD.Mode,
 		},
 		Auth:     authenticator,
+		Plugins:  cfg.Plugins,
 		StaticFS: o.staticFS,
 		// This instance's dispatcher, or any instance's dispatcher through a
 		// shared database, can claim queued host tasks.

@@ -131,4 +131,25 @@ describe('fleet router role guard', () => {
 
     expect(router.currentRoute.value.name).toBe('users')
   })
+
+  it('exposes the plugin manager route for authenticated accounts', async () => {
+    const { useAuthStore } = await import('@/stores/auth')
+    const auth = useAuthStore()
+    auth.authenticated = true
+    auth.initialized = true
+    auth.role = 'admin'
+
+    const router = createFleetRouter(createMemoryHistory())
+    await router.push('/plugins')
+    await router.isReady()
+
+    expect(router.currentRoute.value.name).toBe('plugins')
+    expect(router.currentRoute.value.meta.titleKey).toBe('titles.plugins')
+  })
+
+  it('resolves the plugin route component', async () => {
+    const route = createFleetRouter(createMemoryHistory()).getRoutes().find((r) => r.name === 'plugins')
+    expect(route).toBeDefined()
+    expect(typeof route!.components?.default).toBe('function')
+  })
 })

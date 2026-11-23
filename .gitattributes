@@ -1,0 +1,13 @@
+# Normalise line endings so a Windows checkout and a Linux CI runner see the
+# same bytes. Without this, core.autocrlf writes CRLF into the working tree and
+# every gofmt/lint check reports the whole tree as unformatted.
+* text=auto eol=lf
+
+# Binary assets keep their bytes untouched.
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.svg text eol=lf
+*.woff binary
+*.woff2 binary

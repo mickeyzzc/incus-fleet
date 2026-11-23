@@ -954,3 +954,51 @@ export interface PrometheusQueryResponse {
   }
   error?: string
 }
+
+/** One plugin registered with fleet. */
+export interface PluginEntry {
+  id: string
+  name: string
+  version: string
+  enabled: boolean
+  upstream?: string
+  role: string
+  kind: string
+  health_path?: string
+  ui: PluginUI
+}
+
+export interface PluginUI {
+  path?: string
+  icon?: string
+  title_key?: string
+  requires_role?: string
+}
+
+export interface PluginListResponse {
+  plugins: PluginEntry[] | null
+  enabled: boolean
+}
+
+/** One issued API token. The secret is only present in the creation response. */
+export interface APIToken {
+  id: string
+  name: string
+  user_id: string
+  username?: string
+  scopes: string[]
+  created_at: string
+  expires_at?: string
+  last_used_at?: string
+  plugin_id?: string
+  instance_id?: string
+}
+
+export interface CreatedAPIToken extends APIToken {
+  token: string
+}
+
+export interface TokenScopesResponse {
+  scopes: string[]
+  enabled: boolean
+}

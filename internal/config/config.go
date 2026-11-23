@@ -27,8 +27,69 @@ type Config struct {
 	HA          HAConfig      `yaml:"ha"`
 	Mesh        MeshConfig    `yaml:"mesh"`
 	Unattended  Unattended    `yaml:"unattended"`
+	Plugins     PluginsConfig `yaml:"plugins"`
 	LocalMember string        `yaml:"local_member"`
 	Clusters    []Cluster     `yaml:"clusters"`
+}
+
+// Plugin defaults applied by applyDefaults.
+const (
+	defaultPluginDir            = "data/plugins"
+	defaultPluginHealthInterval = "15s"
+)
+
+// PluginsConfig registers plugins that fleet surfaces in its UI and proxies to.
+// Plugins are external services; fleet stores only the descriptor, the UI entry,
+// and the proxy target. See docs/plugins.md.
+type PluginsConfig struct {
+	// Enabled turns on the plugin manager, proxy routes, and navigation entries.
+	Enabled bool `yaml:"enabled"`
+	// Dir is where plugin packages (.fleetplugin archives) are unpacked.
+	Dir string `yaml:"dir"`
+	// HealthInterval is how often installed plugin health endpoints are polled.
+	HealthInterval string `yaml:"health_interval"`
+	// Entries are the statically declared plugins.
+	Entries []PluginEntry `yaml:"entries"`
+}
+
+// PluginEntry declares one externally hosted plugin.
+type PluginEntry struct {
+	// ID is the plugin identifier: a lowercase DNS label, matching the
+	// manifest's id so proxy paths and tokens stay stable.
+	ID string `yaml:"id"`
+	// Enabled allows disabling an entry without deleting its block.
+	Enabled bool `yaml:"enabled"`
+	// Upstream is the plugin's base URL, reachable from the fleet server.
+	Upstream string `yaml:"upstream"`
+	// UpstreamPort is the port the plugin listens on inside its instance. It is
+	// used when constructing the proxy target from the instance address.
+	UpstreamPort int `yaml:"upstream_port"`
+	// BearerTokenFile holds a token sent to the plugin as Authorization bearer.
+	BearerTokenFile string `yaml:"bearer_token_file"`
+	// Role is the minimum fleet role allowed to reach the plugin namespace.
+	Role string `yaml:"role"`
+	// UI declares the navigation entry for the plugin.
+	UI PluginUIManifest `yaml:"ui"`
+}
+
+// PluginUIManifest describes how the plugin appears in the fleet UI.
+type PluginUIManifest struct {
+	// NavGroup groups the entry in the sidebar.
+	NavGroup string `yaml:"nav_group"`
+	// Path is the SPA route the plugin page is served at.
+	Path string `yaml:"path"`
+	// Icon names a client-side icon component.
+	Icon string `yaml:"icon"`
+	// TitleKey is an i18n key for the nav label.
+	TitleKey string `yaml:"title_key"`
+	// RequiresRole restricts the entry to a minimum role.
+	RequiresRole string `yaml:"requires_role"`
+}
+
+// reservedPluginPaths are core SPA routes a plugin UI path must not shadow.
+var reservedPluginPaths = []string{
+	"/login", "/clusters", "/instances", "/assets", "/answer-profiles",
+	"/volumes", "/node", "/users", "/migrations",
 }
 
 // Unattended configures the unattended OS installation pipeline. The work
@@ -364,6 +425,22 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.HA.Interval) == "" {
 		c.HA.Interval = "2s"
 	}
+	if strings.TrimSpace(c.Plugins.Dir) == "" {
+		c.Plugins.Dir = defaultPluginDir
+	}
+	if strings.TrimSpace(c.Plugins.HealthInterval) == "" {
+		c.Plugins.HealthInterval = defaultPluginHealthInterval
+	}
+	for i := range c.Plugins.Entries {
+		c.Plugins.Entries[i].Upstream = strings.TrimRight(strings.TrimSpace(c.Plugins.Entries[i].Upstream), "/")
+		c.Plugins.Entries[i].UI.Path = strings.TrimRight(strings.TrimSpace(c.Plugins.Entries[i].UI.Path), "/")
+		if c.Plugins.Entries[i].Role == "" {
+			c.Plugins.Entries[i].Role = string(roleViewer)
+		}
+		if c.Plugins.Entries[i].UI.RequiresRole == "" {
+			c.Plugins.Entries[i].UI.RequiresRole = c.Plugins.Entries[i].Role
+		}
+	}
 
 	for i := range c.Clusters {
 		if strings.TrimSpace(c.Clusters[i].Endpoint) == "" && len(c.Clusters[i].Endpoints) > 0 {
@@ -423,6 +500,9 @@ func (c *Config) Validate() error {
 	if err := c.NodeAccess.validate(); err != nil {
 		return err
 	}
+	if err := c.Plugins.validate(); err != nil {
+		return err
+	}
 
 	if len(c.Clusters) == 0 {
 		return errors.New("config: at least one cluster is required")
@@ -469,6 +549,116 @@ func ReadPEMOrFile(value string) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+// roleViewer mirrors auth.RoleViewer. config cannot import auth (auth imports
+// config's siblings), so the string is duplicated deliberately and compared in
+// one place only.
+const roleViewer = "viewer"
+
+// Validate checks the plugin registry declarations. Entries are ignored while
+// the plugin manager is disabled so a draft block cannot break startup.
+func (p *PluginsConfig) validate() error {
+	if !p.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(p.Dir) == "" {
+		return errors.New("config: plugins.dir is required when plugins are enabled")
+	}
+	if _, err := time.ParseDuration(p.HealthInterval); err != nil {
+		return fmt.Errorf("config: plugins.health_interval %q is not a duration", p.HealthInterval)
+	}
+
+	seen := make(map[string]struct{}, len(p.Entries))
+	seenPath := make(map[string]struct{}, len(p.Entries))
+
+	for i := range p.Entries {
+		entry := &p.Entries[i]
+		label := fmt.Sprintf("config: plugins.entries[%d] (%s)", i, entry.ID)
+
+		if !clusterNameRE.MatchString(entry.ID) {
+			return fmt.Errorf("%s: id must be a lowercase DNS label", label)
+		}
+		if _, dup := seen[entry.ID]; dup {
+			return fmt.Errorf("config: duplicate plugin id %q", entry.ID)
+		}
+		seen[entry.ID] = struct{}{}
+
+		switch entry.Role {
+		case "admin", "operator", "viewer":
+		default:
+			return fmt.Errorf("%s: role must be admin, operator, or viewer", label)
+		}
+		if entry.UI.RequiresRole != "" {
+			switch entry.UI.RequiresRole {
+			case "admin", "operator", "viewer":
+			default:
+				return fmt.Errorf("%s: ui.requires_role must be admin, operator, or viewer", label)
+			}
+		}
+
+		if err := entry.validateUpstream(label); err != nil {
+			return err
+		}
+		if err := entry.validateUI(label); err != nil {
+			return err
+		}
+
+		if entry.UI.Path != "" {
+			if _, dup := seenPath[entry.UI.Path]; dup {
+				return fmt.Errorf("config: duplicate plugin ui.path %q", entry.UI.Path)
+			}
+			seenPath[entry.UI.Path] = struct{}{}
+		}
+	}
+
+	return nil
+}
+
+func (e *PluginEntry) validateUpstream(label string) error {
+	if strings.TrimSpace(e.Upstream) == "" && e.UpstreamPort == 0 {
+		return fmt.Errorf("%s: upstream or upstream_port is required", label)
+	}
+	if e.Upstream == "" {
+		return nil
+	}
+
+	u, err := url.Parse(e.Upstream)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("%s: upstream must be an absolute http(s) URL", label)
+	}
+	if e.UpstreamPort < 0 || e.UpstreamPort > 65535 {
+		return fmt.Errorf("%s: upstream_port must be 1-65535", label)
+	}
+
+	return nil
+}
+
+func (e *PluginEntry) validateUI(label string) error {
+	path := e.UI.Path
+	if path == "" {
+		return nil
+	}
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Errorf("%s: ui.path must be absolute", label)
+	}
+	// /plugins is the plugin manager page; a plugin entry must never claim it or
+	// share its prefix, or the management UI stops resolving.
+	if path == "/plugins" || strings.HasPrefix(path, "/plugins/") || path == "/plugin-ui" {
+		return fmt.Errorf("%s: ui.path %q is reserved by the plugin manager", label, path)
+	}
+	// Check core routes before the namespace rule so the error explains the real
+	// conflict: a path like /instances is reserved, not merely out of namespace.
+	for _, reserved := range reservedPluginPaths {
+		if path == reserved || (reserved != "/" && strings.HasPrefix(path, reserved+"/")) {
+			return fmt.Errorf("%s: ui.path %q is reserved by a core route", label, path)
+		}
+	}
+	if !strings.HasPrefix(path, "/plugin-ui/") {
+		return fmt.Errorf("%s: ui.path must live under /plugin-ui/", label)
+	}
+
+	return nil
 }
 
 // ValidateFiles verifies that certificate files referenced by the config exist.

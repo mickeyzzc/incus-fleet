@@ -8,6 +8,12 @@
 # Run `make hooks` once after cloning to install the pre-commit scanner that
 # backs these rules with a content check (see .githooks/pre-commit).
 
+# --- Local tool and build artifacts -----------------------------------------
+/.v2c/
+/.video_agent/
+/bin-linux/
+/dist/
+
 # --- Local-only instructions and working notes ------------------------------
 # Never commit operator notes, audit trails, or agent instructions. They carry
 # real subnets, hostnames, and credentials by design.

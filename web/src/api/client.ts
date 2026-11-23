@@ -1,4 +1,5 @@
 import type {
+  APIToken,
   BatchItem,
   ClusterMemberJoinRequest,
   ClusterMemberJoinResult,
@@ -14,12 +15,16 @@ import type {
   NodeSnapshot,
   NodeTask,
   NodeTaskEvent,
+  PluginEntry,
+  PluginListResponse,
   TelemetrySeries,
+  TokenScopesResponse,
   PrometheusQueryResponse,
   BatchKeysRequest,
   BatchPowerRequest,
   BatchScriptsRequest,
   ClusterImage,
+  CreatedAPIToken,
   ClusterResources,
   ClusterSummary,
   CloneRequest,
@@ -1302,6 +1307,42 @@ export class ApiClient {
   /** Removes one dynamically registered cluster. */
   async unregisterCluster(name: string): Promise<void> {
     await this.request<void>('DELETE', `/api/v1/clusters/${encodeURIComponent(name)}`)
+  }
+
+  /** Lists plugins registered with fleet. */
+  async listPlugins(): Promise<PluginListResponse> {
+    return this.request<PluginListResponse>('GET', '/api/v1/plugins')
+  }
+
+  /** Loads one plugin descriptor. */
+  async getPlugin(id: string): Promise<PluginEntry> {
+    return this.request<PluginEntry>('GET', `/api/v1/plugins/${encodeURIComponent(id)}`)
+  }
+
+  /** Lists API tokens visible to the caller. */
+  async listAPITokens(): Promise<{ tokens: APIToken[] | null }> {
+    return this.request<{ tokens: APIToken[] | null }>('GET', '/api/v1/tokens')
+  }
+
+  /** Issues a token; the response carries the one-time secret. */
+  async createAPIToken(request: {
+    name: string
+    scopes: string[]
+    ttl_seconds?: number
+    plugin_id?: string
+    instance_id?: string
+  }): Promise<CreatedAPIToken> {
+    return this.request<CreatedAPIToken>('POST', '/api/v1/tokens', request)
+  }
+
+  /** Revokes one token. */
+  async revokeAPIToken(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/tokens/${encodeURIComponent(id)}`)
+  }
+
+  /** Returns the scope vocabulary and whether tokens are enabled. */
+  async tokenScopes(): Promise<TokenScopesResponse> {
+    return this.request<TokenScopesResponse>('GET', '/api/v1/tokens/scopes')
   }
 
   /** Builds the websocket URL for an instance console or exec session. */

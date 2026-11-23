@@ -13,6 +13,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/assets"
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
+	"github.com/mickeyzzc/incus-fleet/internal/config"
 	"github.com/mickeyzzc/incus-fleet/internal/console"
 	"github.com/mickeyzzc/incus-fleet/internal/guestagent"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
@@ -51,6 +52,7 @@ type Deps struct {
 	MetricsQuery   *metricsquery.Proxy
 	CertIssuer     CertificateIssuer
 	Auth           *auth.Authenticator
+	Plugins        config.PluginsConfig
 	StaticFS       fs.FS
 	Logger         *slog.Logger
 	Version        string
@@ -91,6 +93,8 @@ type API struct {
 	metricsQuery   *metricsquery.Proxy
 	certIssuer     CertificateIssuer
 	auth           *auth.Authenticator
+	pluginsConfig  config.PluginsConfig
+	pluginsEnabled bool
 	logger         *slog.Logger
 	version        string
 	static         fs.FS
@@ -126,6 +130,8 @@ func New(deps Deps) *API {
 		metricsQuery:   deps.MetricsQuery,
 		certIssuer:     deps.CertIssuer,
 		auth:           deps.Auth,
+		pluginsConfig:  deps.Plugins,
+		pluginsEnabled: deps.Plugins.Enabled,
 		logger:         logger,
 		version:        deps.Version,
 		taskWorker:     deps.TaskWorker,
@@ -171,6 +177,14 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/users/{id}", a.requireAdmin(http.HandlerFunc(a.deleteUser)))
 	mux.Handle("POST /api/v1/users/{id}/sessions/revoke", a.requireAdmin(http.HandlerFunc(a.revokeUserSessions)))
 	mux.Handle("GET /api/v1/auth/session", a.requireAuth(http.HandlerFunc(a.session)))
+	// Every signed-in account manages its own tokens; the handlers narrow the
+	// result to the caller unless the account is an administrator. read:own-tokens
+	// is implied by every role, so no one is locked out of their own credentials.
+	mux.Handle("GET /api/v1/tokens", a.requireScope(auth.ScopeReadOwnTokens, http.HandlerFunc(a.listAPITokens)))
+	mux.Handle("POST /api/v1/tokens", a.requireScope(auth.ScopeReadOwnTokens, http.HandlerFunc(a.createAPIToken)))
+	mux.Handle("DELETE /api/v1/tokens/{id}", a.requireScope(auth.ScopeReadOwnTokens, http.HandlerFunc(a.revokeAPIToken)))
+	mux.Handle("GET /api/v1/tokens/scopes", a.requireScope(auth.ScopeReadOwnTokens, http.HandlerFunc(a.availableScopes)))
+	a.registerPluginRoutes(mux)
 	mux.Handle("GET /api/v1/clusters", a.requireAuth(http.HandlerFunc(a.listClusters)))
 	mux.Handle("GET /api/v1/clusters/{cluster}", a.requireAuth(http.HandlerFunc(a.getCluster)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/reconnect", a.requireWriter(http.HandlerFunc(a.reconnectCluster)))

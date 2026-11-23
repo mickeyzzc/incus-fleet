@@ -185,6 +185,18 @@ p {
   font-size: 13px;
 }
 
+.nav-count {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
 .sidebar-footer {
   display: flex;
   align-items: center;

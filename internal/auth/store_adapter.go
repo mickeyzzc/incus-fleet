@@ -163,3 +163,114 @@ func mapStoreError(err error) error {
 
 	return err
 }
+
+// CreateAPIToken implements TokenStore.
+func (a *StoreAdapter) CreateAPIToken(ctx context.Context, token *APIToken) error {
+	return a.store.CreateAPIToken(ctx, toStoreAPIToken(token))
+}
+
+// ListAPITokens implements TokenStore.
+func (a *StoreAdapter) ListAPITokens(ctx context.Context) ([]*APIToken, error) {
+	tokens, err := a.store.ListAPITokens(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return fromStoreAPITokens(tokens), nil
+}
+
+// ListAPITokensForUser implements TokenStore.
+func (a *StoreAdapter) ListAPITokensForUser(ctx context.Context, userID string) ([]*APIToken, error) {
+	tokens, err := a.store.ListAPITokensForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return fromStoreAPITokens(tokens), nil
+}
+
+// GetAPITokenByHash implements TokenStore.
+func (a *StoreAdapter) GetAPITokenByHash(ctx context.Context, hash string) (*APIToken, error) {
+	token, err := a.store.GetAPITokenByHash(ctx, hash)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, ErrTokenNotFound
+		}
+
+		return nil, err
+	}
+
+	return fromStoreAPIToken(token), nil
+}
+
+// DeleteAPIToken implements TokenStore.
+func (a *StoreAdapter) DeleteAPIToken(ctx context.Context, id string) error {
+	if err := a.store.DeleteAPIToken(ctx, id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return ErrTokenNotFound
+		}
+
+		return err
+	}
+
+	return nil
+}
+
+// TouchAPIToken implements TokenStore.
+func (a *StoreAdapter) TouchAPIToken(ctx context.Context, id string, at time.Time) error {
+	if err := a.store.TouchAPIToken(ctx, id, at); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return ErrTokenNotFound
+		}
+
+		return err
+	}
+
+	return nil
+}
+
+func toStoreAPIToken(token *APIToken) *store.APIToken {
+	return &store.APIToken{
+		ID:         token.ID,
+		Name:       token.Name,
+		UserID:     token.UserID,
+		Username:   token.Username,
+		Scopes:     token.Scopes.Strings(),
+		CreatedAt:  token.CreatedAt,
+		ExpiresAt:  token.ExpiresAt,
+		LastUsedAt: token.LastUsedAt,
+		PluginID:   token.PluginID,
+		InstanceID: token.InstanceID,
+		TokenHash:  token.TokenHash,
+	}
+}
+
+func fromStoreAPIToken(token *store.APIToken) *APIToken {
+	scopes := make(Scopes, 0, len(token.Scopes))
+	for _, scope := range token.Scopes {
+		scopes = append(scopes, Scope(scope))
+	}
+
+	return &APIToken{
+		ID:         token.ID,
+		Name:       token.Name,
+		UserID:     token.UserID,
+		Username:   token.Username,
+		Scopes:     scopes,
+		CreatedAt:  token.CreatedAt,
+		ExpiresAt:  token.ExpiresAt,
+		LastUsedAt: token.LastUsedAt,
+		PluginID:   token.PluginID,
+		InstanceID: token.InstanceID,
+		TokenHash:  token.TokenHash,
+	}
+}
+
+func fromStoreAPITokens(tokens []*store.APIToken) []*APIToken {
+	out := make([]*APIToken, 0, len(tokens))
+	for _, token := range tokens {
+		out = append(out, fromStoreAPIToken(token))
+	}
+
+	return out
+}
