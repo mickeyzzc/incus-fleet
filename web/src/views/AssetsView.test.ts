@@ -267,6 +267,58 @@ describe('AssetsView fleet-wide images and ISOs', () => {
     expect(api.deleteISO).toHaveBeenCalledWith('c1', 'default', 'debian.iso')
   })
 
+  it('opens the tab requested in the URL and updates it when switching', async () => {
+    window.history.replaceState(null, '', '/assets?tab=answers')
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.el-tabs__item.is-active').text()).toBe('Answer profiles')
+
+    await wrapper.findAll('.el-tabs__item').find((tab) => tab.text() === 'Scripts')!.trigger('click')
+    await flushPromises()
+    expect(window.location.search).toBe('?tab=scripts')
+
+    window.history.replaceState(null, '', '/assets')
+  })
+
+  it('labels partial inventory failures instead of hiding them', async () => {
+    vi.mocked(api.listAllImagesWithErrors).mockResolvedValue({
+      items: [imageFixture],
+      failedClusters: ['c2'],
+    })
+    vi.mocked(api.listAllISOsWithErrors).mockResolvedValue({
+      items: [isoFixture],
+      failedClusters: ['c9'],
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.text()).toContain('c2')
+    expect(wrapper.text()).toContain('c9')
+    expect(wrapper.text()).toContain('could not be loaded')
+  })
+
+  it('shows inventory errors when every cluster fails', async () => {
+    vi.mocked(api.listAllImagesWithErrors).mockRejectedValue(new Error('images down'))
+    vi.mocked(api.listAllISOsWithErrors).mockRejectedValue(new Error('isos down'))
+
+    const wrapper = await mountView()
+
+    expect(wrapper.text()).toContain('images down')
+    expect(wrapper.text()).toContain('isos down')
+  })
+
+  it('keeps the copy action disabled until a target is chosen', async () => {
+    const wrapper = await mountView()
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Distribute')!.trigger('click')
+    await flushPromises()
+    const dialog = wrapper.findAllComponents({ name: 'ElDialog' }).find((d) => d.text().includes('Target cluster'))!
+    const submit = dialog.findAll('button').find((b) => b.text() === 'Distribute')!
+
+    expect(submit.attributes('disabled')).toBeDefined()
+    expect(api.copyImage).not.toHaveBeenCalled()
+  })
+
   it('uploads an ISO through the background upload task with progress', async () => {
     const wrapper = await mountView()
 

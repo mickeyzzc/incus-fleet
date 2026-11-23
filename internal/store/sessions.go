@@ -63,7 +63,7 @@ func (s *SQLStore) ListSessionsByUser(ctx context.Context, userID string) ([]Ses
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var sessions []Session
 	for rows.Next() {

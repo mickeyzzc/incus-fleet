@@ -4,7 +4,8 @@ import ElementPlus, { ElMessage, ElMessageBox } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
-import type { User } from '@/api/types'
+import type { SessionInfo, User } from '@/api/types'
+import { useAuthStore } from '@/stores/auth'
 import UsersView from './UsersView.vue'
 
 const admin: User = {
@@ -121,6 +122,63 @@ describe('UsersView', () => {
     expect(api.createUser).not.toHaveBeenCalled()
     expect(error).toHaveBeenCalled()
     error.mockRestore()
+  })
+
+  it('rejects a password shorter than the server policy', async () => {
+    const error = vi.spyOn(ElMessage, 'error').mockImplementation(() => undefined as never)
+
+    const wrapper = await mountView()
+    await wrapper.findAll('button').find((b) => b.text().includes('Add user'))!.trigger('click')
+    await flushPromises()
+    await wrapper.find('.el-dialog input').setValue('shorty')
+    await wrapper.findAll('.el-dialog input')[1]!.setValue('short')
+
+    await wrapper.findAll('.el-dialog button').find((b) => b.text().includes('Create'))!.trigger('click')
+    await flushPromises()
+
+    expect(api.createUser).not.toHaveBeenCalled()
+    expect(error).toHaveBeenCalledWith('The password must be at least 8 characters.')
+    error.mockRestore()
+  })
+
+  it('refuses to delete the signed-in account', async () => {
+    const error = vi.spyOn(ElMessage, 'error').mockImplementation(() => undefined as never)
+    const auth = useAuthStore()
+    auth.username = 'admin'
+
+    const wrapper = await mountView()
+    await wrapper.findAll('button').find((b) => b.text() === 'Delete')!.trigger('click')
+    await flushPromises()
+
+    expect(ElMessageBox.confirm).not.toHaveBeenCalled()
+    expect(api.deleteUser).not.toHaveBeenCalled()
+    expect(error).toHaveBeenCalledWith('You cannot delete the account you are signed in with.')
+    error.mockRestore()
+  })
+
+  it('lists and revokes sessions for an account', async () => {
+    const sessions: SessionInfo[] = [
+      { id: 's1', username: 'reader', role: 'viewer', expires_at: '2026-11-24T10:00:00Z', current: true },
+      { id: 's2', username: 'reader', role: 'viewer', expires_at: '2026-11-25T10:00:00Z', current: false },
+    ]
+    vi.mocked(api.listSessions).mockResolvedValue(sessions)
+    vi.mocked(api.revokeUserSessions).mockResolvedValue(1)
+    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
+    const success = vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
+
+    const wrapper = await mountView()
+    await wrapper.findAll('button').filter((b) => b.text() === 'Sessions').at(-1)!.trigger('click')
+    await flushPromises()
+
+    expect(api.listSessions).toHaveBeenCalledWith('u2')
+    expect(wrapper.text()).toContain('reader')
+
+    await wrapper.findAll('.el-dialog button').find((b) => b.text().includes('Revoke all sessions'))!.trigger('click')
+    await flushPromises()
+
+    expect(api.revokeUserSessions).toHaveBeenCalledWith('u2')
+    expect(success).toHaveBeenCalled()
+    success.mockRestore()
   })
 
   it('reports create failures', async () => {

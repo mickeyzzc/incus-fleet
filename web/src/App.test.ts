@@ -26,6 +26,13 @@ function createTestRouter() {
       },
       { path: '/', name: 'dashboard', component: DashboardStub, meta: { title: 'Dashboard' } },
       { path: '/instances', name: 'instances', component: Blank, meta: { title: 'Instances' } },
+      { path: '/clusters/:cluster', name: 'cluster', component: Blank, meta: { title: 'Cluster' } },
+      {
+        path: '/clusters/:cluster/members/:member',
+        name: 'node-detail',
+        component: Blank,
+        meta: { title: 'Node' },
+      },
     ],
   })
 }
@@ -130,6 +137,25 @@ describe('App shell', () => {
 
     expect(api.listClusters).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('Cluster 62')
+  })
+
+  it('renders the fleet → cluster → node breadcrumb on node pages', async () => {
+    const { wrapper, router } = await mountApp('/clusters/c1/members/node-1')
+
+    expect(router.currentRoute.value.name).toBe('node-detail')
+    expect(wrapper.find('.breadcrumbs').text()).toContain('Clusters')
+    expect(wrapper.find('.breadcrumbs').text()).toContain('Cluster 62')
+    expect(wrapper.find('.breadcrumbs').text()).toContain('node-1')
+  })
+
+  it('toggles the mobile navigation', async () => {
+    const { wrapper } = await mountApp()
+
+    expect(wrapper.find('.app-shell').classes()).not.toContain('sidebar-collapsed')
+    await wrapper.find('.mobile-menu-toggle').trigger('click')
+    expect(wrapper.find('.app-shell').classes()).toContain('sidebar-collapsed')
+    await wrapper.find('.mobile-menu-toggle').trigger('click')
+    expect(wrapper.find('.app-shell').classes()).not.toContain('sidebar-collapsed')
   })
 
   it('shows an empty cluster hint when nothing is available', async () => {
