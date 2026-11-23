@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/mickeyzzc/incus-fleet/internal/store"
 )
 
 // PasswordHasher hashes and verifies passwords.
@@ -313,6 +315,59 @@ func (a *Authenticator) Logout(ctx context.Context, id string) {
 	if a.store != nil {
 		_ = a.store.DeleteSession(ctx, id)
 	}
+}
+
+// SessionsForUser lists active sessions for an account. With a shared store
+// the store is authoritative; the local cache is the fallback.
+func (a *Authenticator) SessionsForUser(ctx context.Context, userID string) ([]Session, error) {
+	if lister, ok := a.store.(interface {
+		ListSessionsByUser(context.Context, string) ([]store.Session, error)
+	}); ok {
+		rows, err := lister.ListSessionsByUser(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		sessions := make([]Session, 0, len(rows))
+		for _, row := range rows {
+			if !a.now().Before(row.ExpiresAt) {
+				continue
+			}
+			sessions = append(sessions, Session{
+				ID: row.ID, UserID: row.UserID, Username: row.Username,
+				Role: Role(row.Role), ExpiresAt: row.ExpiresAt,
+			})
+		}
+		return sessions, nil
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	sessions := make([]Session, 0)
+	for _, session := range a.sessions {
+		if session.UserID == userID && a.now().Before(session.ExpiresAt) {
+			sessions = append(sessions, session)
+		}
+	}
+	return sessions, nil
+}
+
+// RevokeUserSessions removes every session of an account except keepID.
+func (a *Authenticator) RevokeUserSessions(ctx context.Context, userID, keepID string) (int, error) {
+	sessions, err := a.SessionsForUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	revoked := 0
+	for _, session := range sessions {
+		if session.ID == keepID {
+			continue
+		}
+		a.Logout(ctx, session.ID)
+		revoked++
+	}
+
+	return revoked, nil
 }
 
 // Cleanup removes expired sessions.

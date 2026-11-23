@@ -57,7 +57,11 @@ async function load(): Promise<void> {
   error.value = ''
   try {
     clusters.value = (await api.listClusters()).map((cluster) => cluster.name)
-    volumes.value = await api.listAllVolumes()
+    const result = await api.listAllVolumesWithErrors()
+    volumes.value = result.items
+    if (result.failedClusters.length > 0) {
+      error.value = t('assets.partialFailure', { clusters: result.failedClusters.join(', ') })
+    }
   } catch (err) {
     error.value = errorMessage(err)
   } finally {

@@ -42,21 +42,30 @@ const (
 
 var instanceNamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9_.-]*[A-Za-z0-9])?$`)
 
+// DiskSpec describes one additional empty data disk created with an instance.
+type DiskSpec struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Size string `json:"size,omitempty"`
+	Pool string `json:"pool,omitempty"`
+}
+
 // CreateRequest describes a new instance.
 type CreateRequest struct {
-	Name         string   `json:"name"`
-	Type         string   `json:"type,omitempty"`
-	Image        string   `json:"image"`
-	Description  string   `json:"description,omitempty"`
-	Profiles     []string `json:"profiles,omitempty"`
-	CPU          string   `json:"cpu,omitempty"`
-	Memory       string   `json:"memory,omitempty"`
-	RootDiskSize string   `json:"root_disk_size,omitempty"`
-	StoragePool  string   `json:"storage_pool,omitempty"`
-	Network      string   `json:"network,omitempty"`
-	IPv4         string   `json:"ipv4,omitempty"`
-	IPv6         string   `json:"ipv6,omitempty"`
-	Start        *bool    `json:"start,omitempty"`
+	Name         string     `json:"name"`
+	Type         string     `json:"type,omitempty"`
+	Image        string     `json:"image"`
+	Description  string     `json:"description,omitempty"`
+	Profiles     []string   `json:"profiles,omitempty"`
+	CPU          string     `json:"cpu,omitempty"`
+	Memory       string     `json:"memory,omitempty"`
+	RootDiskSize string     `json:"root_disk_size,omitempty"`
+	StoragePool  string     `json:"storage_pool,omitempty"`
+	Network      string     `json:"network,omitempty"`
+	IPv4         string     `json:"ipv4,omitempty"`
+	IPv6         string     `json:"ipv6,omitempty"`
+	Start        *bool      `json:"start,omitempty"`
+	Disks        []DiskSpec `json:"disks,omitempty"`
 }
 
 // UpdateRequest changes selected instance settings. Nil pointers are unchanged;
@@ -202,6 +211,25 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 		root["size"] = req.RootDiskSize
 	}
 	devices := api.DevicesMap{"root": root}
+
+	for _, disk := range req.Disks {
+		diskPool := strings.TrimSpace(disk.Pool)
+		if diskPool == "" {
+			diskPool = pool
+		} else if !containsString(pools, diskPool) {
+			return Detail{}, fmt.Errorf("%w: storage pool %q does not exist on %s", ErrInvalidRequest, diskPool, clusterName)
+		}
+
+		device := map[string]string{
+			"type": "disk",
+			"path": strings.TrimSpace(disk.Path),
+			"pool": diskPool,
+		}
+		if size := strings.TrimSpace(disk.Size); size != "" {
+			device["size"] = size
+		}
+		devices[strings.TrimSpace(disk.Name)] = device
+	}
 
 	if network != "" {
 		nic := map[string]string{"type": "nic"}
@@ -744,6 +772,29 @@ func validateCreateRequest(req CreateRequest) error {
 	}
 	if err := validateIP("ipv6", req.IPv6, true); err != nil {
 		return err
+	}
+
+	seen := map[string]struct{}{"root": {}, "eth0": {}}
+	for i, disk := range req.Disks {
+		name := strings.TrimSpace(disk.Name)
+		if name == "" {
+			return fmt.Errorf("%w: disks[%d].name is required", ErrInvalidRequest, i)
+		}
+		if !instanceNamePattern.MatchString(name) {
+			return fmt.Errorf("%w: disks[%d].name must be letters, digits, dots, dashes, or underscores", ErrInvalidRequest, i)
+		}
+		if _, exists := seen[name]; exists {
+			return fmt.Errorf("%w: duplicate device name %q", ErrInvalidRequest, name)
+		}
+		seen[name] = struct{}{}
+		if !strings.HasPrefix(strings.TrimSpace(disk.Path), "/") {
+			return fmt.Errorf("%w: disks[%d].path must be an absolute path", ErrInvalidRequest, i)
+		}
+		if strings.TrimSpace(disk.Size) != "" {
+			if err := validateSize("disk size", disk.Size); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

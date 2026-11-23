@@ -54,6 +54,33 @@ func (s *SQLStore) GetSession(ctx context.Context, id string) (*Session, error) 
 	return &session, nil
 }
 
+// ListSessionsByUser returns every persisted session of one account.
+func (s *SQLStore) ListSessionsByUser(ctx context.Context, userID string) ([]Session, error) {
+	rows, err := s.db.QueryContext(ctx, s.rebind(
+		`SELECT id, user_id, username, role, expires_at FROM sessions WHERE user_id = ?`), //nolint:gosec // query is a constant
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []Session
+	for rows.Next() {
+		var (
+			session   Session
+			expiresNS int64
+		)
+		if err := rows.Scan(&session.ID, &session.UserID, &session.Username, &session.Role, &expiresNS); err != nil {
+			return nil, err
+		}
+		session.ExpiresAt = time.Unix(0, expiresNS).UTC()
+		sessions = append(sessions, session)
+	}
+
+	return sessions, rows.Err()
+}
+
 // DeleteSession removes one session.
 func (s *SQLStore) DeleteSession(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM sessions WHERE id = ?`), id)

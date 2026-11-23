@@ -61,8 +61,8 @@ describe('AssetsView', () => {
   it('creates a key through the dialog', async () => {
     const wrapper = await mountView()
 
-    await wrapper.find('.page-actions button').trigger('click')
-    const dialog = wrapper.findComponent({ name: 'ElDialog' })
+    await wrapper.findAll('button').find((b) => b.text() === 'Add key')!.trigger('click')
+    const dialog = wrapper.findAllComponents({ name: 'ElDialog' }).find((d) => d.props('title') === 'Add key')!
     await dialog.findAll('input')[0]!.setValue('ci')
     await dialog.find('textarea').setValue('ssh-ed25519 BBB ci@host')
     await dialog.findAll('button').at(-1)!.trigger('click')
@@ -79,11 +79,11 @@ describe('AssetsView', () => {
   it('edits an existing key with prefilled values', async () => {
     const wrapper = await mountView()
 
-    const edit = wrapper.findAll('button').filter((b) => b.text() !== '')[1]!
+    const edit = wrapper.findAll('button').find((b) => b.text() === 'Edit')!
     await edit.trigger('click')
     await flushPromises()
 
-    const dialog = wrapper.findComponent({ name: 'ElDialog' })
+    const dialog = wrapper.findAllComponents({ name: 'ElDialog' }).find((d) => d.props('title') === 'Edit key')!
     expect((dialog.findAll('input')[0]!.element as HTMLInputElement).value).toBe('desk')
     await dialog.findAll('button').at(-1)!.trigger('click')
     await flushPromises()
@@ -98,8 +98,7 @@ describe('AssetsView', () => {
   it('deletes a key after confirmation', async () => {
     const wrapper = await mountView()
 
-    const buttons = wrapper.findAll('button').filter((b) => b.text() !== '')
-    await buttons[2]!.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text() === 'Delete')!.trigger('click')
     await flushPromises()
 
     expect(ElMessageBox.confirm).toHaveBeenCalled()
@@ -112,8 +111,7 @@ describe('AssetsView', () => {
     vi.mocked(api.deleteKey).mockRejectedValueOnce(new Error('permission denied'))
     const wrapper = await mountView()
 
-    const buttons = wrapper.findAll('button').filter((b) => b.text() !== '')
-    await buttons[2]!.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text() === 'Delete')!.trigger('click')
     await flushPromises()
 
     // The old `.catch(() => {})` hid real API failures (#12).
@@ -125,10 +123,8 @@ describe('AssetsView', () => {
   it('creates a script through the dialog', async () => {
     const wrapper = await mountView()
 
-    // The script panel has its own add button.
-    const addButtons = wrapper.findAll('.page-actions button')
-    await addButtons[1]!.trigger('click')
-    const dialog = wrapper.findAllComponents({ name: 'ElDialog' })[1]!
+    await wrapper.findAll('button').find((b) => b.text() === 'Add script')!.trigger('click')
+    const dialog = wrapper.findAllComponents({ name: 'ElDialog' }).find((d) => d.props('title') === 'Add script')!
     const inputs = dialog.findAll('input')
     await inputs[0]!.setValue('cleanup')
     await inputs[1]!.setValue('remove temp files')
@@ -161,8 +157,8 @@ describe('AssetsView', () => {
     vi.mocked(api.createKey).mockRejectedValue(new Error('duplicate name'))
     const wrapper = await mountView()
 
-    await wrapper.find('.page-actions button').trigger('click')
-    const dialog = wrapper.findComponent({ name: 'ElDialog' })
+    await wrapper.findAll('button').find((b) => b.text() === 'Add key')!.trigger('click')
+    const dialog = wrapper.findAllComponents({ name: 'ElDialog' }).find((d) => d.props('title') === 'Add key')!
     await dialog.findAll('input')[0]!.setValue('dup')
     await dialog.find('textarea').setValue('ssh-ed25519 CCC dup')
     await dialog.findAll('button').at(-1)!.trigger('click')
@@ -193,8 +189,11 @@ describe('AssetsView fleet-wide images and ISOs', () => {
       { name: 'c1', display_name: 'C1', online: true },
       { name: 'c2', display_name: 'C2', online: true },
     ] as never)
-    vi.mocked(api.listAllImages).mockResolvedValue([imageFixture])
-    vi.mocked(api.listAllISOs).mockResolvedValue([isoFixture, smallIsoFixture, brokenIsoFixture])
+    vi.mocked(api.listAllImagesWithErrors).mockResolvedValue({ items: [imageFixture], failedClusters: [] })
+    vi.mocked(api.listAllISOsWithErrors).mockResolvedValue({
+      items: [isoFixture, smallIsoFixture, brokenIsoFixture],
+      failedClusters: [],
+    })
     vi.mocked(api.copyImage).mockResolvedValue(undefined)
     vi.mocked(api.deleteISO).mockResolvedValue(undefined)
     vi.mocked(api.importISOWithProgress).mockResolvedValue({ name: 'debian.iso', pool: 'default' })
@@ -203,7 +202,7 @@ describe('AssetsView fleet-wide images and ISOs', () => {
   it('renders images and ISOs from every cluster with cluster tags', async () => {
     const wrapper = await mountView()
 
-    expect(api.listAllImages).toHaveBeenCalled()
+    expect(api.listAllImagesWithErrors).toHaveBeenCalled()
     expect(wrapper.text()).toContain('debian/13')
     expect(wrapper.text()).toContain('fp-123456789…')
     expect(wrapper.text()).toContain('debian.iso')
@@ -288,6 +287,7 @@ describe('AssetsView fleet-wide images and ISOs', () => {
       'c1',
       { file, pool: 'default' },
       expect.any(Function),
+      expect.any(AbortSignal),
     )
   })
 })

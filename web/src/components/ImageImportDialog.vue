@@ -108,6 +108,7 @@ async function submit(): Promise<void> {
       tabindex="0"
       @click="pickFile"
       @keyup.enter="pickFile"
+      @keyup.space.prevent="pickFile"
     >
       <el-icon :size="32" class="upload-icon"><UploadFilled /></el-icon>
       <p v-if="file" class="upload-file">{{ file.name }} · {{ (file.size / 1024 / 1024).toFixed(1) }} MB</p>

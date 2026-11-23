@@ -115,7 +115,9 @@ export const useMigrationsStore = defineStore('migrations', () => {
     stopPolling()
 
     pollTimer = setInterval(() => {
-      void poll()
+      if (document.visibilityState === 'visible') {
+        void poll()
+      }
     }, pollIntervalMs)
   }
 

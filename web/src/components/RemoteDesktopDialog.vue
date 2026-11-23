@@ -465,7 +465,11 @@ onBeforeUnmount(stopConsole)
   border: 1px solid var(--fleet-line, #dcdfe6);
   border-radius: 8px;
   background: #000;
-  outline: none;
+}
+
+.desktop-host:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
 }
 
 .desktop-hint {

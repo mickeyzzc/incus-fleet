@@ -66,9 +66,12 @@ describe('fleet router', () => {
     expect(router.currentRoute.value.name).toBe('instances')
     expect(document.title).toBe('Instances · Incus Fleet')
 
+    // Migration history now lives inside the instances workspace.
     await router.push('/migrations')
     await router.isReady()
-    expect(document.title).toBe('Migrations · Incus Fleet')
+    expect(router.currentRoute.value.path).toBe('/instances')
+    expect(router.currentRoute.value.query).toEqual({ view: 'migrations' })
+    expect(document.title).toBe('Instances · Incus Fleet')
     expect(api.session).toHaveBeenCalledTimes(1)
   })
 

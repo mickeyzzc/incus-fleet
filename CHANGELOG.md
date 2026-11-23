@@ -10,6 +10,39 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Instance creation accepts `disks` for extra empty data volumes, and the form
+  offers a guided disk editor with name, mount path and size validation.
+- Size inputs (memory, root disk, volumes, ISO installs) share one validator:
+  clear unit hints, MiB/GiB/TiB suffixes, bare numbers normalized to MiB, and
+  inline errors instead of server round-trips.
+- Information architecture reworked around user tasks: Workspace (overview,
+  instances, storage), Resources (images & automation), Clusters → Nodes, and
+  Administration. Migration history moved into the instances page; answer
+  profiles, SSH keys, and scripts joined images/ISO under one tabbed page with
+  the clearer name **Images & automation**. Cluster pages became scoped tabs
+  (overview & nodes, instances, storage, media, network, profiles) and no
+  longer list node-local physical NICs.
+- Sidebar navigation is grouped into Fleet / Clusters → Nodes / Administration,
+  with breadcrumbs and an auto-expanded current node. Node pages explain their
+  scope and hide mutations from read-only roles.
+- Administrators can list and revoke an account's sessions.
+
+### Fixed
+
+- Batch power confirmation, cluster unregistration title, and image delete
+  errors showed wrong text.
+- Failed asset/instance/inventory requests no longer masquerade as empty data;
+  partial cluster failures are labelled and the fleet instance view degrades
+  gracefully instead of returning 503.
+- Migration deduplication is checked against the database, so two centers
+  sharing a store cannot start the same migration.
+- Auth endpoints are rate limited per client in production, forwarded-proto
+  headers are only trusted from local proxies, and task audit records keep the
+  real operator name.
+- Polling recovers to its base interval after outages and pauses in background
+  tabs; ISO uploads can be canceled and survive navigation; concurrent instance
+  actions track busy state per row.
+
 - Leak prevention is now enforced rather than remembered: a hardened
   `.gitignore` denies whole local-material directories and credential-shaped
   files, `scripts/secret-scan.sh` inspects real content (private keys,

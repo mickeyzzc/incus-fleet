@@ -144,14 +144,23 @@ func (s *Service) List(clusterName string, instanceType api.InstanceType) ([]Sum
 	return list, nil
 }
 
-// ListAll returns instances from every configured cluster.
-func (s *Service) ListAll(instanceType api.InstanceType) ([]Summary, error) {
-	var all []Summary
+// ListAll returns instances from every configured cluster. A cluster that is
+// unreachable is reported in unavailable instead of failing the whole fleet
+// view; the caller decides whether partial data is acceptable.
+func (s *Service) ListAll(instanceType api.InstanceType) ([]Summary, []string, error) {
+	var (
+		all         []Summary
+		unavailable []string
+		names       = s.clusters.Names()
+		lastErr     error
+	)
 
-	for _, name := range s.clusters.Names() {
+	for _, name := range names {
 		list, err := s.List(name, instanceType)
 		if err != nil {
-			return nil, err
+			unavailable = append(unavailable, name)
+			lastErr = err
+			continue
 		}
 		all = append(all, list...)
 	}
@@ -164,7 +173,11 @@ func (s *Service) ListAll(instanceType api.InstanceType) ([]Summary, error) {
 		return all[i].Cluster < all[j].Cluster
 	})
 
-	return all, nil
+	if len(names) > 0 && len(unavailable) == len(names) {
+		return nil, unavailable, lastErr
+	}
+
+	return all, unavailable, nil
 }
 
 // Get returns one instance from a cluster.

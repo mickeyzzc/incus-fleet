@@ -27,6 +27,7 @@ const path = ref('/')
 const folderName = ref('')
 const creatingFolder = ref(false)
 const uploadInput = ref<HTMLInputElement | null>(null)
+const uploading = ref(false)
 
 const visible = computed({
   get: () => props.modelValue,
@@ -93,10 +94,11 @@ function pickUpload(): void {
 async function onUploadChange(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
-  if (!file) {
+  if (!file || uploading.value) {
     return
   }
 
+  uploading.value = true
   try {
     await instances.uploadFile(props.cluster, props.instance, path.value, file)
     ElMessage.success(t('files.uploaded'))
@@ -104,6 +106,7 @@ async function onUploadChange(event: Event): Promise<void> {
   } catch (err) {
     ElMessage.error(t('files.failed', { error: errorMessage(err) }))
   } finally {
+    uploading.value = false
     input.value = ''
   }
 }
@@ -169,7 +172,7 @@ async function remove(entry: FileEntry): Promise<void> {
         <el-button :icon="Plus" size="small" @click="toggleFolderForm">
           {{ t('files.mkdir') }}
         </el-button>
-        <el-button :icon="Upload" size="small" @click="pickUpload">
+        <el-button :icon="Upload" size="small" :loading="uploading" :disabled="uploading" @click="pickUpload">
           {{ t('files.upload') }}
         </el-button>
         <el-button :icon="Refresh" size="small" :loading="instances.filesLoading" @click="refresh">

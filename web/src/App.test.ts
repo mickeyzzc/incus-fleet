@@ -86,6 +86,30 @@ describe('App shell', () => {
     expect(api.listClusters).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a deep link while the initial session is unresolved', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const auth = useAuthStore()
+    auth.authenticated = false
+    auth.initialized = false
+
+    const router = createTestRouter()
+    await router.push('/instances')
+    await router.isReady()
+
+    mount(App, { global: { plugins: [pinia, router, ElementPlus] } })
+    await flushPromises()
+
+    expect(router.currentRoute.value.name).toBe('instances')
+
+    // Session resolution completes: the URL must not be replaced by the
+    // dashboard or the login page.
+    auth.initialized = true
+    auth.authenticated = true
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('instances')
+  })
+
   it('uses cached clusters instead of refetching them', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

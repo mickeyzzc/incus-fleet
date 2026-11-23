@@ -8,6 +8,8 @@ import type { AnswerProfile, UnattendedProfile } from '@/api/types'
 import { useAnswerProfilesStore } from '@/stores/answerProfiles'
 import { errorMessage } from '@/utils/errors'
 
+const props = defineProps<{ embedded?: boolean }>()
+
 const store = useAnswerProfilesStore()
 const { t } = useI18n()
 
@@ -63,6 +65,10 @@ async function submit(): Promise<void> {
     ElMessage.error(t('answerProfiles.nameRequired'))
     return
   }
+  if (form.custom && !form.answer.trim()) {
+    ElMessage.error(t('answerProfiles.answerRequired'))
+    return
+  }
   const payload = {
     name: form.name.trim(),
     profile: form.profile,
@@ -112,7 +118,7 @@ onMounted(() => { void store.fetch() })
 
 <template>
   <div class="page">
-    <div class="page-header">
+    <div v-if="!props.embedded" class="page-header">
       <h2>{{ t('answerProfiles.title') }}</h2>
       <p class="subtitle">{{ t('answerProfiles.subtitle') }}</p>
     </div>
@@ -130,7 +136,13 @@ onMounted(() => { void store.fetch() })
         </div>
       </div>
       <div class="panel-body">
-        <el-table :data="store.cache" size="small" stripe v-loading="store.loading">
+        <el-table
+          v-loading="store.loading"
+          :data="store.cache"
+          size="small"
+          stripe
+          :empty-text="t('answerProfiles.empty')"
+        >
           <el-table-column :label="t('answerProfiles.name')" prop="name" min-width="160" />
           <el-table-column :label="t('answerProfiles.profile')" min-width="160">
             <template #default="{ row }">
@@ -157,7 +169,6 @@ onMounted(() => { void store.fetch() })
             </template>
           </el-table-column>
         </el-table>
-        <el-empty v-if="!store.loading && !store.hasProfiles" :description="t('answerProfiles.empty')" />
       </div>
     </section>
 
@@ -185,18 +196,21 @@ onMounted(() => { void store.fetch() })
         <template v-else>
           <el-form-item :label="t('iso.specHostname')">
             <el-input v-model="form.hostname" :placeholder="t('answerProfiles.hostnamePlaceholder')" />
+            <p class="field-hint">{{ t('answerProfiles.hostnameHint') }}</p>
           </el-form-item>
           <el-form-item :label="t('iso.specUsername')">
             <el-input v-model="form.username" placeholder="fleet" />
           </el-form-item>
           <el-form-item :label="t('iso.specPassword')">
             <el-input v-model="form.password" type="password" show-password />
+            <p class="field-hint">{{ t('answerProfiles.passwordHint') }}</p>
           </el-form-item>
           <el-form-item :label="t('iso.specTimezone')">
             <el-input v-model="form.timezone" placeholder="UTC" />
           </el-form-item>
           <el-form-item :label="t('iso.specDisk')">
             <el-input v-model="form.disk" placeholder="/dev/vda" />
+            <p class="field-hint">{{ t('answerProfiles.diskHint') }}</p>
           </el-form-item>
           <el-form-item :label="t('iso.specLocale')">
             <el-input v-model="form.locale" placeholder="en_US" />

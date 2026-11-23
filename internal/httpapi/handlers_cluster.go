@@ -188,8 +188,8 @@ func (a *API) listMigrations(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed <= 0 {
-			writeError(w, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
+		if err != nil || parsed < 1 || parsed > 200 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "limit must be between 1 and 200")
 			return
 		}
 		limit = parsed

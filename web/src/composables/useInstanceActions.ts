@@ -16,14 +16,26 @@ export function useInstanceActions(refresh: () => Promise<void>) {
   const instances = useInstancesStore()
   const { t } = useI18n()
 
-  const actionKey = ref('')
+  // A set keeps concurrent actions on different instances independent; a
+  // single key used to unlock one row while another was still in flight.
+  const busyKeys = ref(new Set<string>())
 
   function keyOf(instance: InstanceRef): string {
     return `${instance.cluster}/${instance.name}`
   }
 
+  function setBusy(key: string, busy: boolean): void {
+    const next = new Set(busyKeys.value)
+    if (busy) {
+      next.add(key)
+    } else {
+      next.delete(key)
+    }
+    busyKeys.value = next
+  }
+
   function isBusy(instance: InstanceRef): boolean {
-    return actionKey.value === keyOf(instance)
+    return busyKeys.value.has(keyOf(instance))
   }
 
   async function confirmAction(action: InstanceAction, name: string): Promise<boolean> {
@@ -71,7 +83,11 @@ export function useInstanceActions(refresh: () => Promise<void>) {
       return
     }
 
-    actionKey.value = keyOf(instance)
+    if (isBusy(instance)) {
+      return
+    }
+    const key = keyOf(instance)
+    setBusy(key, true)
     try {
       try {
         await runAction(instance, action, false)
@@ -101,7 +117,7 @@ export function useInstanceActions(refresh: () => Promise<void>) {
     } catch (err) {
       ElMessage.error(t('instances.actionFailed', { error: errorMessage(err) }))
     } finally {
-      actionKey.value = ''
+      setBusy(key, false)
     }
   }
 
@@ -111,7 +127,7 @@ export function useInstanceActions(refresh: () => Promise<void>) {
   const deleteTarget = ref<InstanceRef | null>(null)
   const deleteVolumes = ref(false)
   const deleting = computed(() =>
-    deleteTarget.value ? actionKey.value === keyOf(deleteTarget.value) : false,
+    deleteTarget.value ? busyKeys.value.has(keyOf(deleteTarget.value)) : false,
   )
 
   function confirmDelete(instance: InstanceRef): void {
@@ -129,7 +145,11 @@ export function useInstanceActions(refresh: () => Promise<void>) {
       return
     }
 
-    actionKey.value = keyOf(instance)
+    if (isBusy(instance)) {
+      return
+    }
+    const key = keyOf(instance)
+    setBusy(key, true)
     try {
       await instances.deleteInstance(instance.cluster, instance.name, true, deleteVolumes.value)
       ElMessage.success(t('instances.deleteSuccess', { name: instance.name }))
@@ -138,11 +158,11 @@ export function useInstanceActions(refresh: () => Promise<void>) {
     } catch (err) {
       ElMessage.error(t('instances.actionFailed', { error: errorMessage(err) }))
     } finally {
-      actionKey.value = ''
+      setBusy(key, false)
     }
   }
 
-  return { actionKey, isBusy, act, confirmDelete, deleteTarget, deleteVolumes, deleting, cancelDelete, submitDelete }
+  return { busyKeys, isBusy, act, confirmDelete, deleteTarget, deleteVolumes, deleting, cancelDelete, submitDelete }
 }
 
 /**
@@ -168,7 +188,13 @@ export function useVisiblePolling(loader: () => Promise<void>, intervalMs = 1500
     busy = true
     void loader()
       .then(() => {
-        failures = 0
+        if (failures > 0) {
+          failures = 0
+          if (timer !== undefined) {
+            clearInterval(timer)
+            timer = setInterval(tick, intervalMs)
+          }
+        }
       })
       .catch(() => {
         failures += 1

@@ -279,7 +279,7 @@ onBeforeUnmount(closeSession)
         :placeholder="t('terminal.commandPlaceholder')"
         @keyup.enter="submitCommand"
       />
-      <el-button type="primary" @click="submitCommand">
+      <el-button type="primary" :disabled="!command" @click="submitCommand">
         {{ t('common.start') }}
       </el-button>
       <el-button :disabled="!connected" @click="onResize">{{ t('common.refresh') }}</el-button>

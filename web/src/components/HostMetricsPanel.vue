@@ -93,7 +93,9 @@ async function refresh(): Promise<void> {
 onMounted(() => {
   void refresh()
   timer = setInterval(() => {
-    void refresh()
+    if (document.visibilityState === 'visible') {
+      void refresh()
+    }
   }, REFRESH_MS)
 })
 
@@ -132,10 +134,10 @@ watch([() => props.cluster, () => props.member, source], () => {
       </div>
 
       <el-alert v-if="error" :title="t('hostMetrics.failed', { error })" type="error" :closable="false" show-icon />
-      <p v-else-if="loading && series.length === 0" class="metrics-empty">{{ t('hostMetrics.loading') }}</p>
-      <p v-else-if="series.length === 0" class="metrics-empty">{{ t('hostMetrics.empty') }}</p>
+      <p v-if="!error && loading && series.length === 0" class="metrics-empty">{{ t('hostMetrics.loading') }}</p>
+      <p v-if="!error && series.length === 0" class="metrics-empty">{{ t('hostMetrics.empty') }}</p>
 
-      <template v-else>
+      <template v-if="series.length > 0">
         <div class="host-metric-grid">
           <div class="metric-block">
             <div class="metric-head">

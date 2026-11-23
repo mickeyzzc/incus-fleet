@@ -26,6 +26,45 @@
   color-scheme: light;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fleet-bg: #0e1420;
+    --fleet-panel: #182131;
+    --fleet-panel-muted: #131c2b;
+    --fleet-ink: #e7edf9;
+    --fleet-ink-soft: #9aa9c4;
+    --fleet-line: #2a3850;
+    --fleet-sidebar: #070c16;
+    --fleet-sidebar-soft: #111b2e;
+
+    --el-color-primary: #7d93f9;
+    --el-color-primary-light-3: #5d77e8;
+    --el-color-primary-light-5: #4a62c9;
+    --el-color-primary-light-7: #35488f;
+    --el-color-primary-light-8: #273661;
+    --el-color-primary-light-9: #1b2542;
+
+    --el-bg-color: #182131;
+    --el-bg-color-page: #0e1420;
+    --el-bg-color-overlay: #182131;
+    --el-fill-color-blank: #182131;
+    --el-fill-color-light: #202c40;
+    --el-fill-color-lighter: #1a2436;
+    --el-text-color-primary: #e7edf9;
+    --el-text-color-regular: #c5cfe1;
+    --el-text-color-secondary: #9aa9c4;
+    --el-border-color: #2a3850;
+    --el-border-color-light: #243149;
+    --el-border-color-lighter: #1f2a3d;
+
+    color-scheme: dark;
+  }
+
+  .topbar {
+    background: rgba(24, 33, 49, 0.85);
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -110,6 +149,15 @@ p {
   text-transform: uppercase;
 }
 
+.nav-group-label {
+  padding: 16px 12px 4px;
+  color: #7184ad;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
 .nav-menu {
   --el-menu-bg-color: transparent;
   --el-menu-text-color: #aab8d8;
@@ -178,6 +226,26 @@ p {
   position: sticky;
   top: 0;
   z-index: 10;
+}
+
+.topbar-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.breadcrumbs {
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.breadcrumbs a {
+  color: var(--el-color-primary);
+}
+
+.mobile-menu-toggle {
+  display: none;
 }
 
 .topbar h1 {
@@ -571,8 +639,10 @@ p {
 
 @media (max-width: 960px) {
   .sidebar {
-    position: static;
+    position: sticky;
     height: auto;
+    max-height: 55vh;
+    overflow-y: auto;
     width: 100% !important;
   }
 
@@ -584,10 +654,25 @@ p {
     flex: none;
   }
 
+  .mobile-menu-toggle {
+    display: inline-flex;
+  }
+
+  .sidebar-collapsed .sidebar {
+    display: none;
+  }
+
   .topbar,
   .content {
     padding-left: 18px;
     padding-right: 18px;
+  }
+}
+
+@media (max-width: 900px) {
+  .el-dialog,
+  .el-drawer {
+    max-width: calc(100vw - 24px) !important;
   }
 }
 

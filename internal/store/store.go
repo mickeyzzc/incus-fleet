@@ -47,6 +47,7 @@ type Store interface {
 	UpdateMigration(ctx context.Context, migration *Migration) error
 	GetMigration(ctx context.Context, id string) (*Migration, error)
 	ListMigrations(ctx context.Context, limit int) ([]*Migration, error)
+	FindActiveMigration(ctx context.Context, sourceCluster, instance string) (*Migration, error)
 	MarkInterrupted(ctx context.Context, owner string) error
 	CreateKeystone(ctx context.Context, key *Keystone) error
 	ListKeystones(ctx context.Context) ([]*Keystone, error)
@@ -266,6 +267,26 @@ func (s *SQLStore) ListMigrations(ctx context.Context, limit int) ([]*Migration,
 	}
 
 	return migrations, nil
+}
+
+// FindActiveMigration returns the newest non-terminal migration for one
+// source instance, across every center sharing the database. It is the
+// cross-process counterpart of the in-memory dedup map.
+func (s *SQLStore) FindActiveMigration(ctx context.Context, sourceCluster, instance string) (*Migration, error) {
+	const query = `SELECT id, source_cluster, target_cluster, instance, instance_type, mode, live, status, progress, error, owner, created_at, updated_at
+		FROM migrations
+		WHERE source_cluster = ? AND instance = ? AND status NOT IN ('done', 'failed', 'canceled')
+		ORDER BY created_at DESC LIMIT 1`
+
+	migration, err := scanMigration(s.db.QueryRowContext(ctx, s.rebind(query), sourceCluster, instance))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: find active migration: %w", err)
+	}
+
+	return migration, nil
 }
 
 // MarkInterrupted fails in-flight tasks owned by the given instance. Tasks

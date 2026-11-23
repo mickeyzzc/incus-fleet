@@ -60,6 +60,8 @@ export const useInstancesStore = defineStore('instances', () => {
   const filesLoading = ref(false)
   const saving = ref(false)
   const error = ref('')
+  /** Clusters that could not be reached during the last fleet-wide fetch. */
+  const unavailableClusters = ref<string[]>([])
   const filter = ref<InstanceType>('any')
   const lastUpdated = ref<Date | null>(null)
 
@@ -94,9 +96,11 @@ export const useInstancesStore = defineStore('instances', () => {
 
     try {
       items.value = await api.listInstances(type)
+      unavailableClusters.value = api.lastInventoryFailures ?? []
       lastUpdated.value = new Date()
     } catch (err) {
       error.value = errorMessage(err)
+      unavailableClusters.value = []
     } finally {
       loading.value = false
     }
@@ -550,12 +554,14 @@ export const useInstancesStore = defineStore('instances', () => {
     if (!force && isoCache.value[cluster]) {
       return
     }
+    error.value = ''
     try {
       isoCache.value[cluster] = await api.listISOs(cluster)
     } catch (err) {
       error.value = errorMessage(err)
       delete isoCache.value[cluster]
-      throw err
+      // Consistent with other list fetches: surface the error in store state
+      // instead of rejecting, so callers composing Promise.all stay stable.
     }
   }
 
@@ -1046,6 +1052,7 @@ export const useInstancesStore = defineStore('instances', () => {
     filesLoading,
     saving,
     error,
+    unavailableClusters,
     overlayCache,
     overlayLoading,
     filter,

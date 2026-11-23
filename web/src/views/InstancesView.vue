@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
+import MigrationsView from '@/views/MigrationsView.vue'
 import BatchOpsDialog from '@/components/BatchOpsDialog.vue'
 import CloneInstanceDialog from '@/components/CloneInstanceDialog.vue'
 import { useAssetsStore } from '@/stores/assets'
@@ -27,6 +28,23 @@ import { formatBytes, formatDateTime, primaryAddress } from '@/utils/format'
 const clusters = useClustersStore()
 const instances = useInstancesStore()
 const { t } = useI18n()
+
+type InstancesTab = 'list' | 'migrations'
+const activeTab = ref<InstancesTab>(
+  new URLSearchParams(window.location.search).get('view') === 'migrations' ? 'migrations' : 'list',
+)
+
+// Keep the tab shareable/bookmarkable without coupling the view to the router
+// (the route redirect from /migrations already lands here with the query).
+watch(activeTab, (tab) => {
+  const url = new URL(window.location.href)
+  if (tab === 'migrations') {
+    url.searchParams.set('view', 'migrations')
+  } else {
+    url.searchParams.delete('view')
+  }
+  window.history.replaceState(null, '', url.toString())
+})
 
 const search = ref('')
 const clusterFilter = ref('')
@@ -112,6 +130,7 @@ const assets = useAssetsStore()
 const selected = ref<Array<{ cluster: string; name: string }>>([])
 const batchOpen = ref(false)
 const batchMode = ref<'keys' | 'script'>('keys')
+const batchBusy = ref(false)
 const batchTargets = computed(() =>
   selected.value.map((entry) => ({ cluster: entry.cluster, instance: entry.name })),
 )
@@ -134,7 +153,7 @@ function openBatch(mode: 'keys' | 'script'): void {
 }
 
 async function batchPower(action: 'start' | 'stop' | 'restart'): Promise<void> {
-  if (selected.value.length === 0) {
+  if (selected.value.length === 0 || batchBusy.value) {
     return
   }
 
@@ -149,6 +168,7 @@ async function batchPower(action: 'start' | 'stop' | 'restart'): Promise<void> {
     return
   }
 
+  batchBusy.value = true
   try {
     const items = await assets.batchPower(batchTargets.value, action)
     const failed = items.filter((item) => !item.ok)
@@ -160,6 +180,8 @@ async function batchPower(action: 'start' | 'stop' | 'restart'): Promise<void> {
     await load()
   } catch (err) {
     ElMessage.error(t('batch.failed', { error: errorMessage(err) }))
+  } finally {
+    batchBusy.value = false
   }
 }
 
@@ -223,6 +245,14 @@ async function onSaved(): Promise<void> {
 
 <template>
   <div class="page">
+    <el-tabs v-model="activeTab" class="page-tabs">
+      <el-tab-pane :label="t('instances.tabList')" name="list" />
+      <el-tab-pane :label="t('instances.tabMigrations')" name="migrations" />
+    </el-tabs>
+
+    <MigrationsView v-if="activeTab === 'migrations'" embedded />
+
+    <template v-else>
     <div class="page-header">
       <div>
         <h2>{{ t('instances.title') }}</h2>
@@ -253,6 +283,16 @@ async function onSaved(): Promise<void> {
       :closable="false"
       show-icon
       :title="instances.error"
+    />
+
+    <el-alert
+      v-if="instances.unavailableClusters.length > 0"
+      class="fleet-alert"
+      type="warning"
+      :closable="false"
+      show-icon
+      aria-live="polite"
+      :title="t('assets.partialFailure', { clusters: instances.unavailableClusters.join(', ') })"
     />
 
     <section class="panel">
@@ -295,9 +335,9 @@ async function onSaved(): Promise<void> {
           <el-button size="small" type="primary" @click="openBatch('script')">
             {{ t('batch.scriptAction') }}
           </el-button>
-          <el-button size="small" @click="batchPower('start')">{{ t('batch.action.start') }}</el-button>
-          <el-button size="small" @click="batchPower('stop')">{{ t('batch.action.stop') }}</el-button>
-          <el-button size="small" @click="batchPower('restart')">{{ t('batch.action.restart') }}</el-button>
+          <el-button size="small" :loading="batchBusy" @click="batchPower('start')">{{ t('batch.action.start') }}</el-button>
+          <el-button size="small" :loading="batchBusy" @click="batchPower('stop')">{{ t('batch.action.stop') }}</el-button>
+          <el-button size="small" :loading="batchBusy" @click="batchPower('restart')">{{ t('batch.action.restart') }}</el-button>
           <el-button size="small" type="danger" plain @click="selected = []">
             {{ t('batch.clearSelection') }}
           </el-button>
@@ -422,6 +462,7 @@ async function onSaved(): Promise<void> {
       @cancel="cancelDelete"
       @confirm="submitDelete"
     />
+    </template>
   </div>
 </template>
 

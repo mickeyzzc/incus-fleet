@@ -740,7 +740,24 @@ Create (`POST /clusters/{cluster}/instances`) takes `name` (required, `[A-Za-z0-
 max 63 chars), `type` (`container` default, or `virtual-machine`), `image` (required, fingerprint of
 a local image), `description`, `profiles`, `cpu` (count, range, or list), `memory` (e.g. `512MiB`),
 `root_disk_size`, `storage_pool` (default `default`), `network`, `ipv4`, `ipv6` (static addresses
-require `network`), and `start` (default `true`). Wait: up to 15 minutes.
+require `network`), `start` (default `true`), and optional `disks` — extra empty data disks created
+with the instance:
+
+```json
+{
+  "name": "web-01", "image": "053059ea4e28", "storage_pool": "default",
+  "disks": [
+    { "name": "data0", "path": "/data", "size": "50GiB" },
+    { "name": "data1", "path": "/backup", "size": "20GiB", "pool": "fast" }
+  ]
+}
+```
+
+`disks[].name` must be unique and must not be `root`/`eth0`; `path` must be absolute; `pool`
+defaults to the instance pool. Sizes accept `MiB`/`GiB`/`TiB` and similar. Wait: up to 15 minutes.
+
+`GET /instances` (fleet inventory) keeps returning reachable clusters and lists failures in
+`unavailable_clusters`; it returns `503` only when every cluster is unreachable.
 
 `PATCH .../instances/{instance}` accepts nullable fields; empty strings clear values. NIC changes
 target `device` (default `eth0`).

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Plus, Delete } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 import type {
   ClusterSummary,
+  CreateInstanceDisk,
   CreateInstanceRequest,
   InstanceDetail,
   InstanceImage,
@@ -14,6 +16,7 @@ import type {
 import { useInstancesStore } from '@/stores/instances'
 import { errorMessage } from '@/utils/errors'
 import { formatBytes } from '@/utils/format'
+import { parseSize, validDeviceName, validGuestPath } from '@/utils/size'
 
 const props = withDefaults(
   defineProps<{
@@ -52,7 +55,40 @@ const form = reactive({
   ipv4: '',
   ipv6: '',
   start: true,
+  disks: [] as Array<{ name: string; path: string; size: string }>,
 })
+
+const memorySize = computed(() => parseSize(form.memory, { allowPercent: true }))
+const rootDiskSize = computed(() => parseSize(form.rootDiskSize))
+
+function addDisk(): void {
+  const index = form.disks.length
+  form.disks.push({ name: `data${index}`, path: `/data${index === 0 ? '' : index}`, size: '' })
+}
+
+function removeDisk(index: number): void {
+  form.disks.splice(index, 1)
+}
+
+function diskError(disk: { name: string; path: string; size: string }, index: number): string {
+  const name = disk.name.trim()
+  if (!name || !disk.path.trim()) {
+    return t('validation.required')
+  }
+  if (!validDeviceName(name) || name === 'root' || name === 'eth0') {
+    return t('validation.deviceNameFormat')
+  }
+  if (form.disks.some((other, otherIndex) => otherIndex !== index && other.name.trim() === name)) {
+    return t('validation.duplicateDevice')
+  }
+  if (!validGuestPath(disk.path.trim())) {
+    return t('validation.pathFormat')
+  }
+  if (disk.size.trim() && !parseSize(disk.size).valid) {
+    return t('validation.sizeFormat')
+  }
+  return ''
+}
 
 const visible = computed({
   get: () => props.modelValue,
@@ -159,6 +195,7 @@ function resetForm(): void {
   form.ipv4 = ''
   form.ipv6 = ''
   form.start = true
+  form.disks = []
 
   if (!isEdit.value || !props.instance) {
     return
@@ -275,10 +312,18 @@ function createRequest(): CreateInstanceRequest {
     request.cpu = form.cpu.trim()
   }
   if (form.memory.trim()) {
-    request.memory = form.memory.trim()
+    request.memory = memorySize.value.value
   }
   if (form.rootDiskSize.trim()) {
-    request.root_disk_size = form.rootDiskSize.trim()
+    request.root_disk_size = rootDiskSize.value.value
+  }
+  const disks: CreateInstanceDisk[] = form.disks.map((disk) => ({
+    name: disk.name.trim(),
+    path: disk.path.trim(),
+    size: disk.size.trim() ? parseSize(disk.size).value : undefined,
+  }))
+  if (disks.length > 0) {
+    request.disks = disks
   }
   if (form.storagePool) {
     request.storage_pool = form.storagePool
@@ -300,8 +345,8 @@ function updateRequest(): UpdateInstanceRequest {
   const request: UpdateInstanceRequest = {
     description: form.description,
     cpu: form.cpu.trim(),
-    memory: form.memory.trim(),
-    root_disk_size: form.rootDiskSize.trim(),
+    memory: memorySize.value.value,
+    root_disk_size: rootDiskSize.value.value,
   }
 
   if (nicDevice.value) {
@@ -336,7 +381,36 @@ function validate(): string {
     }
   }
 
+  if (form.memory.trim() && !memorySize.value.valid) {
+    return t('validation.sizeFormat')
+  }
+  if (form.rootDiskSize.trim() && !rootDiskSize.value.valid) {
+    return t('validation.sizeFormat')
+  }
+  if (form.ipv4.trim() && !validIPv4(form.ipv4)) {
+    return t('validation.ipv4Format')
+  }
+  for (const [index, disk] of form.disks.entries()) {
+    const error = diskError(disk, index)
+    if (error) {
+      return error
+    }
+  }
+
   return ''
+}
+
+/** Accepts plain IPv4 or CIDR used by Incus device addresses. */
+function validIPv4(value: string): boolean {
+  const [address, prefix, ...rest] = value.trim().split('/')
+  if (!address || rest.length > 0) {
+    return false
+  }
+  if (prefix !== undefined && (!/^\d{1,2}$/.test(prefix) || Number(prefix) > 32)) {
+    return false
+  }
+  const parts = address.split('.')
+  return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
 }
 
 async function submit(): Promise<void> {
@@ -448,11 +522,18 @@ async function submit(): Promise<void> {
 
         <el-form-item :label="t('form.memory')">
           <el-input v-model="form.memory" :placeholder="t('form.memoryPlaceholder')" />
+          <p class="field-hint">{{ t('validation.memoryHint') }}</p>
+          <p v-if="form.memory.trim() && !memorySize.valid" class="field-error">
+            {{ t('validation.sizeFormat') }}
+          </p>
         </el-form-item>
 
         <el-form-item :label="t('form.rootDisk')">
           <el-input v-model="form.rootDiskSize" :placeholder="t('form.rootDiskPlaceholder')" />
-          <p class="field-hint">{{ t('form.rootDiskHint') }}</p>
+          <p class="field-hint">{{ t('validation.diskHint') }}</p>
+          <p v-if="form.rootDiskSize.trim() && !rootDiskSize.valid" class="field-error">
+            {{ t('validation.sizeFormat') }}
+          </p>
         </el-form-item>
 
         <el-form-item v-if="!isEdit" :label="t('form.storagePool')">
@@ -464,6 +545,24 @@ async function submit(): Promise<void> {
               :value="pool.name"
             />
           </el-select>
+        </el-form-item>
+
+        <el-form-item v-if="!isEdit" :label="t('form.extraDisks')" class="form-span">
+          <div class="disk-list">
+            <div v-for="(disk, index) in form.disks" :key="index" class="disk-row">
+              <el-input v-model="disk.name" :placeholder="t('form.diskNamePlaceholder')" />
+              <el-input v-model="disk.path" :placeholder="t('form.diskPathPlaceholder')" />
+              <el-input v-model="disk.size" :placeholder="t('form.diskSizePlaceholder')" />
+              <el-button link type="danger" :icon="Delete" @click="removeDisk(index)">
+                {{ t('form.removeDisk') }}
+              </el-button>
+              <p v-if="diskError(disk, index)" class="field-error disk-error">
+                {{ diskError(disk, index) }}
+              </p>
+            </div>
+            <el-button :icon="Plus" @click="addDisk">{{ t('form.addDisk') }}</el-button>
+          </div>
+          <p class="field-hint">{{ t('form.extraDisksHint') }}</p>
         </el-form-item>
 
         <el-form-item :label="t('form.network')">
@@ -510,6 +609,7 @@ async function submit(): Promise<void> {
       </div>
 
       <p v-if="isEdit" class="field-hint">{{ t('form.editHint') }}</p>
+      <p v-if="isEdit" class="field-hint">{{ t('form.extraDisksEditHint') }}</p>
     </el-form>
 
     <template #footer>
@@ -543,6 +643,40 @@ async function submit(): Promise<void> {
   color: var(--fleet-ink-soft);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.field-error {
+  margin-top: 4px;
+  color: var(--el-color-danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.disk-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.disk-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 8px;
+  width: 100%;
+  align-items: start;
+}
+
+.disk-row .disk-error {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+@media (max-width: 720px) {
+  .disk-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {

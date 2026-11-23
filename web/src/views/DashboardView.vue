@@ -87,7 +87,11 @@ async function collectTrafficSamples(): Promise<void> {
 function startTrafficPolling(): void {
   if (trafficTimer === null) {
     void pollTraffic()
-    trafficTimer = window.setInterval(() => void pollTraffic(), 3000)
+    trafficTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void pollTraffic()
+      }
+    }, 3000)
   }
 }
 
@@ -198,7 +202,7 @@ async function refresh(): Promise<void> {
 
 async function removeCluster(name: string): Promise<void> {
   try {
-    await ElMessageBox.confirm(t('clusterRegister.removeConfirm', { name }), t('clusterRegister.add'), {
+    await ElMessageBox.confirm(t('clusterRegister.removeConfirm', { name }), t('clusterRegister.removeTitle', { name }), {
       type: 'warning',
       confirmButtonText: t('common.delete'),
       cancelButtonText: t('common.cancel'),

@@ -193,10 +193,11 @@ describe('InstanceDevices', () => {
     await flushPromises()
 
     const dialog = wrapper.findComponent({ name: 'ElDialog' })
+    await dialog.find('input').setValue('')
     await dialog.findAll('button').at(-1)?.trigger('click')
 
     expect(api.attachDevice).not.toHaveBeenCalled()
-    expect(ElMessage.error).toHaveBeenCalledWith('Enter a name.')
+    expect(ElMessage.error).toHaveBeenCalledWith('This field is required.')
   })
 
   it('detaches a device after confirmation', async () => {

@@ -226,6 +226,18 @@ func (s *Service) Submit(ctx context.Context, req Request) (*store.Migration, er
 		return nil, fmt.Errorf("%w: migration already running for %s", ErrConflict, key)
 	}
 
+	// With a shared database another center may already own this instance's
+	// migration; the local map alone cannot see it.
+	if s.store != nil {
+		if active, err := s.store.FindActiveMigration(ctx, plan.request.SourceCluster, plan.request.Instance); err == nil {
+			s.release(key)
+			return nil, fmt.Errorf("%w: migration %s is already running for %s", ErrConflict, active.ID, key)
+		} else if !errors.Is(err, store.ErrNotFound) {
+			s.release(key)
+			return nil, err
+		}
+	}
+
 	release := func() { s.release(key) }
 
 	now := time.Now().UTC()

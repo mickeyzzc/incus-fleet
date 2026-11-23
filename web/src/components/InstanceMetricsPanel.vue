@@ -107,7 +107,9 @@ async function poll(): Promise<void> {
 onMounted(() => {
   void poll()
   timer = setInterval(() => {
-    void poll()
+    if (document.visibilityState === 'visible') {
+      void poll()
+    }
   }, POLL_MS)
 })
 

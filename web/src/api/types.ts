@@ -1,5 +1,11 @@
 /** Shared API types mirroring the Go JSON responses. */
 
+/** Fleet-wide inventory result, including clusters that could not be reached. */
+export interface InventoryResult<T> {
+  items: T[]
+  failedClusters: string[]
+}
+
 export type InstanceType = 'any' | 'container' | 'virtual-machine'
 
 export type MigrationMode = 'move' | 'copy'
@@ -267,6 +273,13 @@ export interface MemberUpdateRequest {
 }
 
 /** Request used to create an instance from a local image. */
+export interface CreateInstanceDisk {
+  name: string
+  path: string
+  size?: string
+  pool?: string
+}
+
 export interface CreateInstanceRequest {
   name: string
   type?: 'container' | 'virtual-machine'
@@ -281,6 +294,8 @@ export interface CreateInstanceRequest {
   ipv4?: string
   ipv6?: string
   start?: boolean
+  /** Additional empty disk volumes created with the instance. */
+  disks?: CreateInstanceDisk[]
 }
 
 /** Request used to change instance limits, disk size, or networking. */
@@ -667,6 +682,15 @@ export interface SessionResponse {
   expires_at?: string
   username?: string
   role?: UserRole
+}
+
+/** A server-side browser session as returned by /auth/sessions. */
+export interface SessionInfo {
+  id: string
+  username: string
+  role: UserRole
+  expires_at: string
+  current: boolean
 }
 
 /** Permission level of a signed-in account. */

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -28,10 +29,27 @@ func requestIsSecure(r *http.Request) bool {
 		return true
 	}
 
-	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	// Only trust the forwarding header from a local/private reverse proxy;
+	// a client on the public internet must not be able to mark its own
+	// request as secure and force a Secure cookie on a plain-HTTP session.
+	if !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
 }
 
 func (a *API) login(w http.ResponseWriter, r *http.Request) {
+	if a.rateLimit && !applyRateLimit(loginLimiter, r) {
+		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many sign-in attempts; try again later")
+		return
+	}
+
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`

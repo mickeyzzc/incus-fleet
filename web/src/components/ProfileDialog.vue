@@ -92,6 +92,11 @@ function validate(): string {
     return t('admin.deviceNameRequired')
   }
 
+  const names = form.devices.map((device) => device.name.trim()).filter(Boolean)
+  if (new Set(names).size !== names.length) {
+    return t('validation.duplicateDevice')
+  }
+
   return ''
 }
 
