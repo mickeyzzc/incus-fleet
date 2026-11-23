@@ -116,6 +116,12 @@ var schemaMigrations = []schemaMigration{
 		version:    9,
 		statements: []string{overlaySchema},
 	},
+	{
+		// API tokens with explicit scopes. They replace ad-hoc shared secrets for
+		// machine callers and are the credential a plugin install receives.
+		version:    10,
+		statements: []string{apiTokenSchema, apiTokenIndexes},
+	},
 }
 
 // userSchema holds local accounts. Usernames are compared case-insensitively by

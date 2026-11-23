@@ -37,12 +37,17 @@ function createTestRouter() {
   })
 }
 
-async function mountApp(path = '/', authenticated = true) {
+async function mountApp(
+  path = '/',
+  authenticated = true,
+  role: 'admin' | 'operator' | 'viewer' = 'admin',
+) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const auth = useAuthStore()
   auth.authenticated = authenticated
   auth.initialized = true
+  auth.role = role
 
   const router = createTestRouter()
   await router.push(path)
@@ -201,4 +206,36 @@ describe('App shell', () => {
     expect(router.currentRoute.value.name).toBe('login')
     expect(router.currentRoute.value.query.redirect).toBe('/instances')
   })
+
+  it('loads the plugin list once for administrators', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: false })
+
+    const { wrapper } = await mountApp('/', true, 'admin')
+    await flushPromises()
+
+    expect(api.listPlugins).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Plugins')
+  })
+
+  it('hides the plugin manager entry from non-administrators', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+
+    const { wrapper } = await mountApp('/', true, 'viewer')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('Plugins')
+  })
 })
+
+  it('keeps the active menu highlight for a trailing-slash deep link', async () => {
+    vi.mocked(api.listClusters).mockResolvedValue([])
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+
+    const { wrapper, router } = await mountApp('/users', true, 'admin')
+    await router.push('/users/')
+    await flushPromises()
+
+    const active = wrapper.find('.el-menu-item.is-active')
+    expect(active.exists()).toBe(true)
+    expect(active.text()).toContain('Users')
+  })

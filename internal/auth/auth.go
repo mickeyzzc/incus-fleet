@@ -59,6 +59,7 @@ type Authenticator struct {
 	lockoutAfter  int
 	lockoutWindow time.Duration
 	hasher        PasswordHasher
+	tokens        TokenStore
 
 	mu       sync.Mutex
 	sessions map[string]Session

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   Box,
+  Grid,
   Odometer,
   SwitchButton,
   Collection,
@@ -18,11 +19,13 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import LocaleSwitch from '@/components/LocaleSwitch.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useClustersStore } from '@/stores/clusters'
+import { usePluginsStore } from '@/stores/plugins'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const clusters = useClustersStore()
+const plugins = usePluginsStore()
 const { t, locale } = useI18n()
 
 const publicPage = computed(() => route.meta.public === true)
@@ -67,7 +70,10 @@ const activeMenu = computed(() => {
     return `/clusters/${String(route.params.cluster ?? '')}/members/${String(route.params.member ?? '')}`
   }
 
-  return route.path
+  // A deep link may arrive with a trailing slash; menu indexes never have one,
+  // so normalise before matching or the active highlight silently disappears.
+  const path = route.path
+  return path.length > 1 ? path.replace(/\/+$/, '') : path
 })
 
 interface Crumb {
@@ -121,6 +127,9 @@ watch(
 
     if (clusters.items.length === 0) {
       void clusters.fetchAll()
+    }
+    if (auth.canAdmin && !plugins.loaded) {
+      void plugins.fetch()
     }
   },
   { immediate: true },
@@ -177,6 +186,12 @@ async function logout(): Promise<void> {
           <el-menu-item index="/assets">
             <el-icon><Collection /></el-icon>
             <span>{{ t('nav.assets') }}</span>
+          </el-menu-item>
+
+          <el-menu-item v-if="auth.canAdmin" index="/plugins">
+            <el-icon><Grid /></el-icon>
+            <span>{{ t('nav.plugins') }}</span>
+            <span v-if="plugins.count > 0" class="nav-count">{{ plugins.count }}</span>
           </el-menu-item>
 
           <div class="nav-group-label">{{ t('nav.clusters') }}</div>

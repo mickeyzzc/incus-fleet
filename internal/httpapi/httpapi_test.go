@@ -204,6 +204,24 @@ func (f *apiFixture) login(t *testing.T) *http.Cookie {
 	return cookies[0]
 }
 
+// loginAs signs in with a username and password, for role-based tests.
+func (f *apiFixture) loginAs(t *testing.T, username, password string) *http.Cookie {
+	t.Helper()
+
+	rec := f.request(t, http.MethodPost, "/api/v1/auth/login",
+		map[string]string{"username": username, "password": password}, nil, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("loginAs status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("loginAs returned no cookie")
+	}
+
+	return cookies[0]
+}
+
 func testContainer(name string) *api.Instance {
 	return &api.Instance{
 		Name:       name,
