@@ -7,7 +7,7 @@ import { currentLocale, setLocale } from '@/i18n'
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const visible = computed({
   get: () => props.modelValue,
@@ -24,10 +24,10 @@ const docs = computed<Record<string, Record<string, string>>>(() => ({
       <p>Incus Fleet is a single control plane for many independent Incus clusters.
       Register clusters with an admin token, then manage everything from one web UI.</p>
       <ul>
-        <li><strong>Clusters</strong> — health, members, storage pools, networks, profiles.</li>
-        <li><strong>Instances</strong> — create, snapshot, clone, rebuild, migrate, delete.</li>
+        <li><strong>Clusters</strong> — health, members, storage pools, managed networks, profiles.</li>
+        <li><strong>Instances</strong> — create, snapshot, clone, rebuild, migrate, delete; the migration records tab keeps the history.</li>
         <li><strong>Browser sessions</strong> — exec terminals, serial consoles, SPICE desktops.</li>
-        <li><strong>Assets</strong> — shared SSH keys, scripts, images, and ISOs across clusters.</li>
+        <li><strong>Images &amp; automation</strong> — images/ISO install media plus shared SSH keys, scripts, and answer profiles.</li>
         <li><strong>Monitoring</strong> — CPU/memory/disk/network for clusters, nodes, instances.</li>
       </ul>
     `,
@@ -36,10 +36,10 @@ const docs = computed<Record<string, Record<string, string>>>(() => ({
       <p>Incus Fleet 是面向多个独立 Incus 集群的统一控制平面。
       使用管理员 token 注册集群后,即可在一个 Web 界面中管理全部资源。</p>
       <ul>
-        <li><strong>集群</strong> — 健康状态、成员、存储池、网络、配置文件。</li>
-        <li><strong>实例</strong> — 创建、快照、克隆、重建、迁移、删除。</li>
+        <li><strong>集群</strong> — 健康状态、成员、存储池、受管网络、配置文件；物理网卡在节点页管理。</li>
+        <li><strong>实例</strong> — 创建、快照、克隆、重建、迁移、删除；迁移历史在同页的“迁移记录”标签。</li>
         <li><strong>浏览器会话</strong> — 命令行终端、串行控制台、SPICE 远程桌面。</li>
-        <li><strong>资产库</strong> — 跨集群共享的 SSH 公钥、脚本、镜像与 ISO。</li>
+        <li><strong>镜像与自动化</strong> — 镜像与 ISO 安装介质，以及共享公钥、脚本与应答配置。</li>
         <li><strong>监控</strong> — 集群/节点/实例的 CPU、内存、磁盘、网络指标。</li>
       </ul>
     `,
@@ -76,8 +76,8 @@ const docs = computed<Record<string, Record<string, string>>>(() => ({
       <ul>
         <li><strong>ISO install</strong> — upload an installer ISO on the cluster page, launch a
         blank VM from it, open the console and finish the OS install.</li>
-        <li><strong>Images &amp; ISO library</strong> — the Assets page lists images and ISOs from
-        every cluster and copies them between clusters.</li>
+        <li><strong>Images &amp; automation</strong> — one page groups fleet images, ISO install
+        media, SSH keys, scripts, and answer profiles; images copy between clusters.</li>
         <li><strong>Background uploads</strong> — large uploads minimize to the corner with
         progress, speed, and ETA; a toast appears when finished.</li>
         <li><strong>Node networks</strong> — edit NICs, bridges, DNS, routes on each member.</li>
@@ -89,7 +89,7 @@ const docs = computed<Record<string, Record<string, string>>>(() => ({
       <ul>
         <li><strong>ISO 安装系统</strong> — 在集群页上传安装 ISO,从它启动空白虚拟机,
         打开控制台完成操作系统安装。</li>
-        <li><strong>镜像与 ISO 库</strong> — 资产库页汇总所有集群的镜像与 ISO,并可跨集群复制。</li>
+        <li><strong>镜像与自动化</strong> — 一个页面汇总镜像、ISO 安装介质、SSH 公钥、脚本与应答配置；镜像可跨集群复制。</li>
         <li><strong>后台上传</strong> — 大文件上传可最小化到角落,显示进度、速度与预计时间,
         完成后右下角弹窗提示。</li>
         <li><strong>节点网络</strong> — 在每个成员上编辑网卡、网桥、DNS、路由。</li>
@@ -105,7 +105,18 @@ const localeLabel = computed(() => (lang.value === 'zh-CN' ? 'zh' : 'en'))
 
 const lang = ref(currentLocale())
 
-watch(lang, (value) => setLocale(value))
+// The header switch is authoritative: keep the help selector in sync with it.
+watch(locale, (value) => {
+  const next = value === 'zh-CN' ? 'zh-CN' : 'en'
+  if (lang.value !== next) {
+    lang.value = next
+  }
+})
+watch(lang, (value) => {
+  if (locale.value !== value) {
+    setLocale(value)
+  }
+})
 </script>
 
 <template>

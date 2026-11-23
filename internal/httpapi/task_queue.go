@@ -97,6 +97,11 @@ func (a *API) enqueueHostTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	createdBy := "unknown"
+	if session, ok := sessionFromContext(r.Context()); ok && session.Username != "" {
+		createdBy = session.Username
+	}
+
 	now := time.Now().UTC()
 	task := &store.HostTask{
 		ID:        store.NewID(),
@@ -106,7 +111,7 @@ func (a *API) enqueueHostTask(w http.ResponseWriter, r *http.Request) {
 		State:     store.HostTaskQueued,
 		Plan:      string(req.Plan),
 		PlanHash:  planHash(string(req.Plan)),
-		CreatedBy: "admin",
+		CreatedBy: createdBy,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}

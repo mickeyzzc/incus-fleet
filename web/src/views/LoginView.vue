@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Lock, User } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
@@ -13,6 +13,7 @@ const auth = useAuthStore()
 const { t } = useI18n()
 
 const form = reactive({ username: '', password: '' })
+const submitting = ref(false)
 
 const redirect = computed(() => {
   const value = route.query.redirect
@@ -20,18 +21,23 @@ const redirect = computed(() => {
 })
 
 async function submit(): Promise<void> {
-  if (!form.username.trim() || !form.password) {
+  if (submitting.value || !form.username.trim() || !form.password) {
     return
   }
 
-  const ok = await auth.login(form.username, form.password)
-  if (!ok) {
-    return
-  }
+  submitting.value = true
+  try {
+    const ok = await auth.login(form.username, form.password)
+    if (!ok) {
+      return
+    }
 
-  form.username = ''
-  form.password = ''
-  await router.push(redirect.value)
+    form.username = ''
+    form.password = ''
+    await router.push(redirect.value)
+  } finally {
+    submitting.value = false
+  }
 }
 </script>
 
@@ -80,7 +86,7 @@ async function submit(): Promise<void> {
             :placeholder="t('login.passwordPlaceholder')"
             autocomplete="current-password"
             :prefix-icon="Lock"
-            @keyup.enter="submit"
+            @keydown.enter.prevent="submit"
           />
         </el-form-item>
 

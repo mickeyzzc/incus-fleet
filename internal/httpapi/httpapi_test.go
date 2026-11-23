@@ -282,6 +282,7 @@ func TestSessionCookieSecurity(t *testing.T) {
 	for _, tt := range []struct {
 		name       string
 		forwarded  string
+		remote     string
 		tls        bool
 		wantSecure bool
 	}{
@@ -289,10 +290,19 @@ func TestSessionCookieSecurity(t *testing.T) {
 		{name: "tls", tls: true, wantSecure: true},
 		{name: "forwarded https", forwarded: "https", wantSecure: true},
 		{name: "forwarded http", forwarded: "http", wantSecure: false},
+		{
+			name:      "spoofed forwarded https from public client",
+			forwarded: "https", remote: "203.0.113.9:5555", wantSecure: false,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"token":"secret"}`))
 			req.Header.Set("Content-Type", "application/json")
+			// Forwarding headers are only honoured from a local reverse proxy.
+			req.RemoteAddr = "127.0.0.1:4321"
+			if tt.remote != "" {
+				req.RemoteAddr = tt.remote
+			}
 			if tt.forwarded != "" {
 				req.Header.Set("X-Forwarded-Proto", tt.forwarded)
 			}

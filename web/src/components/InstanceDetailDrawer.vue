@@ -81,7 +81,7 @@ watch(
 )
 
 async function handleAction(action: InstanceAction): Promise<void> {
-  if (!detail.value) {
+  if (!detail.value || actionLoading.value) {
     return
   }
 

@@ -27,6 +27,8 @@ import type {
   DeviceRequest,
   GuestAgentInstallRequest,
   GuestAgentStep,
+  InventoryResult,
+  SessionInfo,
   FileEntry,
   HealthResponse,
   ImportImageRequest,
@@ -111,6 +113,8 @@ export class ApiClient {
   private readonly baseURL: string
   private readonly fetchImpl: typeof fetch
   private bearerToken = ''
+  /** Clusters omitted from the most recent fleet-wide instance response. */
+  lastInventoryFailures: string[] = []
   onUnauthorized?: () => void
 
   constructor(options: ApiClientOptions = {}) {
@@ -157,6 +161,21 @@ export class ApiClient {
     await this.request<void>('DELETE', `/api/v1/users/${encodeURIComponent(id)}`)
   }
 
+  /** Lists sessions of one account (administrators may inspect any account). */
+  async listSessions(userID?: string): Promise<SessionInfo[]> {
+    const query = userID ? `?user_id=${encodeURIComponent(userID)}` : ''
+    const data = await this.request<{ sessions: SessionInfo[] }>('GET', `/api/v1/auth/sessions${query}`)
+    return data.sessions ?? []
+  }
+
+  /** Revokes all sessions of one account. */
+  async revokeUserSessions(id: string): Promise<number> {
+    const data = await this.request<{ revoked: number }>(
+      'POST', `/api/v1/users/${encodeURIComponent(id)}/sessions/revoke`,
+    )
+    return data.revoked ?? 0
+  }
+
   async logout(): Promise<void> {
     await this.request<void>('POST', '/api/v1/auth/logout')
   }
@@ -201,11 +220,18 @@ export class ApiClient {
   }
 
   async listInstances(type: InstanceType = 'any'): Promise<InstanceSummary[]> {
-    const data = await this.request<{ instances: InstanceSummary[] }>(
+    const data = await this.request<{ instances: InstanceSummary[]; unavailable_clusters?: string[] }>(
       'GET',
       `/api/v1/instances?type=${encodeURIComponent(type)}`,
     )
+    this.lastInventoryFailures = data.unavailable_clusters ?? []
     return data.instances ?? []
+  }
+
+  /** Lists fleet instances and reports clusters that could not be reached. */
+  async listInstancesWithErrors(type: InstanceType = 'any'): Promise<InventoryResult<InstanceSummary>> {
+    const items = await this.listInstances(type)
+    return { items, failedClusters: this.lastInventoryFailures }
   }
 
   async getInstance(cluster: string, name: string): Promise<InstanceDetail> {
@@ -517,7 +543,13 @@ export class ApiClient {
    * not blank the whole fleet view.
    */
   async listAllVolumes(): Promise<FleetVolume[]> {
+    return (await this.listAllVolumesWithErrors()).items
+  }
+
+  /** Lists volumes across all clusters and reports which clusters could not be read. */
+  async listAllVolumesWithErrors(): Promise<InventoryResult<FleetVolume>> {
     const clusters = await this.listClusters()
+    const failedClusters: string[] = []
     const perCluster = await Promise.all(
       clusters.map(async (cluster) => {
         try {
@@ -533,18 +565,20 @@ export class ApiClient {
                   pool: pool.name,
                 }))
               } catch {
+                failedClusters.push(`${cluster.name}/${pool.name}`)
                 return []
               }
             }),
           )
           return perPool.flat()
         } catch {
+          failedClusters.push(cluster.name)
           return []
         }
       }),
     )
 
-    return perCluster.flat()
+    return { items: perCluster.flat(), failedClusters }
   }
 
   async listVolumes(cluster: string, pool: string): Promise<StorageVolume[]> {
@@ -951,7 +985,13 @@ export class ApiClient {
 
   /** Lists every image across all reachable clusters, tagged with its cluster. */
   async listAllImages(): Promise<ClusterImage[]> {
+    return (await this.listAllImagesWithErrors()).items
+  }
+
+  /** Lists images and reports which clusters could not be read. */
+  async listAllImagesWithErrors(): Promise<InventoryResult<ClusterImage>> {
     const clusters = await this.listClusters()
+    const failedClusters: string[] = []
     const perCluster = await Promise.all(
       clusters.map(async (cluster) => {
         try {
@@ -969,29 +1009,37 @@ export class ApiClient {
             created_at: img.created_at,
           }))
         } catch {
+          failedClusters.push(cluster.name)
           return []
         }
       }),
     )
 
-    return perCluster.flat()
+    return { items: perCluster.flat(), failedClusters }
   }
 
   /** Lists every ISO volume across all reachable clusters, tagged with its cluster. */
   async listAllISOs(): Promise<ISOSummary[]> {
+    return (await this.listAllISOsWithErrors()).items
+  }
+
+  /** Lists ISOs and reports which clusters could not be read. */
+  async listAllISOsWithErrors(): Promise<InventoryResult<ISOSummary>> {
     const clusters = await this.listClusters()
+    const failedClusters: string[] = []
     const perCluster = await Promise.all(
       clusters.map(async (cluster) => {
         try {
           const isos = await this.listISOs(cluster.name)
           return isos.map((iso) => ({ ...iso, cluster: cluster.name }))
         } catch {
+          failedClusters.push(cluster.name)
           return []
         }
       }),
     )
 
-    return perCluster.flat()
+    return { items: perCluster.flat(), failedClusters }
   }
 
   /**
@@ -1003,11 +1051,23 @@ export class ApiClient {
     path: string,
     form: FormData,
     onProgress: (loaded: number, total: number) => void,
+    signal?: AbortSignal,
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const xhr = new XMLHttpRequest()
       xhr.open('POST', path)
       xhr.responseType = 'json'
+
+      if (signal) {
+        if (signal.aborted) {
+          xhr.abort()
+        }
+        signal.addEventListener('abort', () => xhr.abort(), { once: true })
+      }
+
+      xhr.onabort = () => {
+        reject(new ApiError(0, 'upload_aborted', 'upload canceled'))
+      }
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
@@ -1043,6 +1103,7 @@ export class ApiClient {
     cluster: string,
     request: ImportISORequest,
     onProgress: (loaded: number, total: number) => void,
+    signal?: AbortSignal,
   ): Promise<{ name: string; pool: string }> {
     const query = new URLSearchParams()
     if (request.pool) {
@@ -1056,6 +1117,7 @@ export class ApiClient {
       `/api/v1/clusters/${encodeURIComponent(cluster)}/iso?${query.toString()}`,
       form,
       onProgress,
+      signal,
     )
   }
 

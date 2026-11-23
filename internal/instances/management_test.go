@@ -108,6 +108,53 @@ func TestCreate(t *testing.T) {
 	}
 }
 
+func TestCreateWithAdditionalDisks(t *testing.T) {
+	srv := &incusfake.Server{
+		Instance:  &api.Instance{Name: "vm-disks"},
+		PoolNames: []string{"default", "fast"},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	_, err := svc.Create(context.Background(), "c1", CreateRequest{
+		Name:        "vm-disks",
+		Type:        "virtual-machine",
+		Image:       "debian",
+		StoragePool: "default",
+		Disks: []DiskSpec{
+			{Name: "data0", Path: "/data", Size: "50GiB"},
+			{Name: "data1", Path: "/backup", Size: "20GiB", Pool: "fast"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	post := srv.CreateArgs()[0]
+	if disk := post.Devices["data0"]; disk["type"] != "disk" || disk["path"] != "/data" ||
+		disk["pool"] != "default" || disk["size"] != "50GiB" {
+		t.Fatalf("data0 = %#v", disk)
+	}
+	if disk := post.Devices["data1"]; disk["pool"] != "fast" || disk["size"] != "20GiB" {
+		t.Fatalf("data1 = %#v", disk)
+	}
+
+	_, err = svc.Create(context.Background(), "c1", CreateRequest{
+		Name: "bad-disks", Image: "debian",
+		Disks: []DiskSpec{{Name: "root", Path: "/data"}},
+	})
+	if err == nil {
+		t.Fatal("Create() accepted a duplicate device name")
+	}
+
+	_, err = svc.Create(context.Background(), "c1", CreateRequest{
+		Name: "bad-path", Image: "debian",
+		Disks: []DiskSpec{{Name: "data0", Path: "data"}},
+	})
+	if err == nil {
+		t.Fatal("Create() accepted a relative disk path")
+	}
+}
+
 func TestCreateDefaults(t *testing.T) {
 	srv := &incusfake.Server{Instance: &api.Instance{Name: "ct1"}}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})

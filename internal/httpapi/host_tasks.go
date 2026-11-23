@@ -88,6 +88,13 @@ func (a *API) finishHostTask(r *http.Request, task *store.HostTask, backend host
 	defer cancel()
 
 	now := time.Now().UTC()
+	// A coarse system clock (notably Windows) can return the same instant for
+	// the start and finish events. The timeline is ordered by timestamp, so
+	// force the terminal event to be strictly later; otherwise "succeeded"
+	// can sort before "running".
+	if !now.After(task.StartedAt) {
+		now = task.StartedAt.Add(time.Nanosecond)
+	}
 	state := store.HostTaskSucceeded
 	result := "succeeded"
 	errorCode := ""

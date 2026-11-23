@@ -39,6 +39,10 @@ describe('AssetsView dialogs', () => {
     await add!.trigger('click')
     await flushPromises()
 
+    const inputs = wrapper.findAll('.el-dialog input.el-input__inner')
+    await inputs[0]!.setValue('deploy-key')
+    await wrapper.find('.el-dialog textarea').setValue('ssh-ed25519 AAAAtest')
+
     const save = wrapper.findAll('.el-dialog button').find((b) => b.text().includes('Save'))
     await save!.trigger('click')
     await flushPromises()

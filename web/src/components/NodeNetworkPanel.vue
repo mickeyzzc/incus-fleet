@@ -9,14 +9,57 @@ import { api } from '@/api'
 import { errorMessage } from '@/utils/errors'
 import { formatDateTime } from '@/utils/format'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   cluster: string
   member: string
-}>()
+  /** Read-only roles cannot apply host network changes. */
+  canWrite?: boolean
+}>(), { canWrite: true })
 
 const { t } = useI18n()
 
 const loading = ref(false)
+const loadError = ref('')
+const addressBusy = ref(false)
+const routeBusy = ref(false)
+const firewallBusy = ref(false)
+const wifiBusy = ref(false)
+const nicBusy = ref('')
+
+/** Only a positively known read-only role hides mutations; the backend is authoritative. */
+const mayWrite = computed(() => props.canWrite)
+
+function guardWrite(): boolean {
+  if (mayWrite.value) {
+    return true
+  }
+  ElMessage.error(t('common.readOnly'))
+  return false
+}
+
+/** Accepts plain IPv4 addresses and CIDR notation. */
+function validIPv4(value: string): boolean {
+  const [address, prefix, ...rest] = value.split('/')
+  if (!address || rest.length > 0) {
+    return false
+  }
+  if (prefix !== undefined && (!/^\d{1,2}$/.test(prefix) || Number(prefix) > 32)) {
+    return false
+  }
+  const parts = address.split('.')
+  return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
+}
+
+function validDestination(value: string): boolean {
+  if (value === 'default') {
+    return true
+  }
+  const [address, prefix] = value.split('/')
+  if (!address) {
+    return false
+  }
+  return /^\d{1,2}$/.test(prefix ?? '') && Number(prefix) <= 32 && validIPv4(address)
+}
 const snapshot = ref<{ host: string; nics: NodeNIC[]; routes: { destination: string; gateway?: string; device?: string; metric?: string }[]; firewall: { handle: string; rule: string }[]; wifi_scan?: { ssid: string; signal: number; secure: boolean; frequency: number }[]; wifi_device?: string; backend?: string } | null>(null)
 
 const historyOpen = ref(false)
@@ -53,8 +96,10 @@ async function refresh(): Promise<void> {
   loading.value = true
   try {
     snapshot.value = await api.nodeSnapshot(props.cluster, props.member, wifiDevice.value || undefined)
+    loadError.value = ''
   } catch (err) {
-    ElMessage.error(errorMessage(err))
+    loadError.value = errorMessage(err)
+    ElMessage.error(loadError.value)
   } finally {
     loading.value = false
   }
@@ -88,6 +133,9 @@ function stateTag(state: string): 'success' | 'info' | 'warning' {
 }
 
 async function toggleNIC(nic: NodeNIC): Promise<void> {
+  if (!guardWrite() || nicBusy.value) {
+    return
+  }
   const up = nic.state !== 'up'
   const label = up ? t('nodeActions.bringUp') : t('nodeActions.bringDown')
   try {
@@ -100,12 +148,15 @@ async function toggleNIC(nic: NodeNIC): Promise<void> {
     return
   }
 
+  nicBusy.value = nic.name
   try {
     await api.nodeNICState(props.cluster, props.member, nic.name, up)
     ElMessage.success(t('nodeActions.stateChanged', { name: nic.name }))
     await refresh()
   } catch (err) {
     ElMessage.error(errorMessage(err))
+  } finally {
+    nicBusy.value = ''
   }
 }
 
@@ -119,16 +170,36 @@ function openAddressDialog(nic: NodeNIC): void {
 }
 
 async function submitAddress(): Promise<void> {
+  if (!guardWrite()) {
+    return
+  }
   const target = addressTarget.value
   if (!target) {
     return
   }
+  const address = addressForm.address.trim()
+  const gateway = addressForm.gateway.trim()
+  if (!addressForm.dhcp && (!validIPv4(address) || (gateway !== '' && !validIPv4(gateway)))) {
+    ElMessage.error(t('nodePage.addressInvalid'))
+    return
+  }
 
+  try {
+    await ElMessageBox.confirm(t('nodePage.addressConfirm', { name: target.name }), t('common.confirm'), {
+      type: 'warning',
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
+    })
+  } catch {
+    return
+  }
+
+  addressBusy.value = true
   try {
     await api.nodeApplyAddress(props.cluster, props.member, target.name, {
       dhcp: addressForm.dhcp,
-      address: addressForm.dhcp ? undefined : addressForm.address.trim(),
-      gateway: addressForm.dhcp ? undefined : addressForm.gateway.trim(),
+      address: addressForm.dhcp ? undefined : address,
+      gateway: addressForm.dhcp ? undefined : gateway,
       persist: addressForm.persist,
     })
     ElMessage.success(t('nodeActions.addressApplied', { name: target.name }))
@@ -136,15 +207,27 @@ async function submitAddress(): Promise<void> {
     await refresh()
   } catch (err) {
     ElMessage.error(errorMessage(err))
+  } finally {
+    addressBusy.value = false
   }
 }
 
 async function submitRoute(): Promise<void> {
+  if (!guardWrite()) {
+    return
+  }
+  const destination = routeForm.destination.trim()
+  if (!validDestination(destination)) {
+    ElMessage.error(t('nodePage.routeInvalid'))
+    return
+  }
+
+  routeBusy.value = true
   try {
     await api.nodeAddRoute(
       props.cluster,
       props.member,
-      routeForm.destination.trim(),
+      destination,
       routeForm.gateway.trim(),
       routeForm.device.trim(),
     )
@@ -153,10 +236,15 @@ async function submitRoute(): Promise<void> {
     await refresh()
   } catch (err) {
     ElMessage.error(errorMessage(err))
+  } finally {
+    routeBusy.value = false
   }
 }
 
 async function confirmDeleteRoute(destination: string): Promise<void> {
+  if (!guardWrite()) {
+    return
+  }
   try {
     await ElMessageBox.confirm(t('nodeActions.routeDeleteConfirm', { destination }), t('common.delete'), {
       type: 'warning',
@@ -177,6 +265,10 @@ async function confirmDeleteRoute(destination: string): Promise<void> {
 }
 
 async function submitFirewall(): Promise<void> {
+  if (!guardWrite()) {
+    return
+  }
+  firewallBusy.value = true
   try {
     await api.nodeAddFirewallRule(props.cluster, props.member, {
       port: firewallForm.port,
@@ -189,10 +281,15 @@ async function submitFirewall(): Promise<void> {
     await refresh()
   } catch (err) {
     ElMessage.error(errorMessage(err))
+  } finally {
+    firewallBusy.value = false
   }
 }
 
 async function confirmDeleteFirewall(handle: string): Promise<void> {
+  if (!guardWrite()) {
+    return
+  }
   try {
     await ElMessageBox.confirm(t('nodeActions.firewallDeleteConfirm', { handle }), t('common.delete'), {
       type: 'warning',
@@ -213,14 +310,21 @@ async function confirmDeleteFirewall(handle: string): Promise<void> {
 }
 
 async function connectWiFi(ssid: string): Promise<void> {
+  if (!guardWrite() || wifiBusy.value) {
+    return
+  }
+  const password = wifiForm.password
+  wifiBusy.value = true
   try {
-    await api.nodeWifiConnect(props.cluster, props.member, wifiDevice.value, ssid, wifiForm.password)
+    await api.nodeWifiConnect(props.cluster, props.member, wifiDevice.value, ssid, password)
     ElMessage.success(t('nodeActions.wifiConnected', { ssid }))
     wifiDialogOpen.value = false
     wifiForm.password = ''
     await refresh()
   } catch (err) {
     ElMessage.error(errorMessage(err))
+  } finally {
+    wifiBusy.value = false
   }
 }
 
@@ -260,6 +364,24 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         </el-button>
       </div>
     </div>
+
+    <el-alert
+      v-if="loadError"
+      class="fleet-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      :title="t('common.loadFailed', { error: loadError })"
+    />
+
+    <el-alert
+      v-if="!mayWrite"
+      class="fleet-alert"
+      type="info"
+      :closable="false"
+      show-icon
+      :title="t('common.readOnly')"
+    />
 
     <el-alert
       class="fleet-alert"
@@ -309,10 +431,16 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
           </el-table-column>
           <el-table-column :label="t('common.actions')" width="170" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click="openAddressDialog(row)">
+              <el-button link type="primary" :disabled="!mayWrite" @click="openAddressDialog(row)">
                 {{ t('nodePage.configure') }}
               </el-button>
-              <el-button link :type="row.state === 'up' ? 'danger' : 'success'" @click="toggleNIC(row)">
+              <el-button
+                link
+                :type="row.state === 'up' ? 'danger' : 'success'"
+                :disabled="!mayWrite"
+                :loading="nicBusy === row.name"
+                @click="toggleNIC(row)"
+              >
                 {{ row.state === 'up' ? t('nodeActions.bringDown') : t('nodeActions.bringUp') }}
               </el-button>
             </template>
@@ -328,7 +456,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
             <h3 class="section-title">{{ t('nodePage.routesTitle') }}</h3>
           </div>
           <div class="page-actions">
-            <el-button :icon="Plus" type="primary" @click="routeDialogOpen = true">
+            <el-button :icon="Plus" type="primary" :disabled="!mayWrite" @click="routeDialogOpen = true">
               {{ t('nodePage.addRoute') }}
             </el-button>
           </div>
@@ -348,7 +476,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
           <el-table-column prop="device" :label="t('nodePage.device')" width="120" />
           <el-table-column :label="t('common.actions')" width="100">
             <template #default="{ row }">
-              <el-button v-if="row.destination !== 'default'" link type="danger" @click="confirmDeleteRoute(row.destination)">
+              <el-button v-if="row.destination !== 'default'" link type="danger" :disabled="!mayWrite" @click="confirmDeleteRoute(row.destination)">
                 {{ t('common.delete') }}
               </el-button>
             </template>
@@ -365,7 +493,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
             <p class="subtitle">{{ t('nodePage.firewallHint') }}</p>
           </div>
           <div class="page-actions">
-            <el-button :icon="Plus" type="primary" @click="firewallDialogOpen = true">
+            <el-button :icon="Plus" type="primary" :disabled="!mayWrite" @click="firewallDialogOpen = true">
               {{ t('nodePage.addRule') }}
             </el-button>
           </div>
@@ -379,7 +507,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
           </el-table-column>
           <el-table-column :label="t('common.actions')" width="100">
             <template #default="{ row }">
-              <el-button link type="danger" @click="confirmDeleteFirewall(row.handle)">
+              <el-button link type="danger" :disabled="!mayWrite" @click="confirmDeleteFirewall(row.handle)">
                 {{ t('common.delete') }}
               </el-button>
             </template>
@@ -418,6 +546,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
               <el-button
                 link
                 type="primary"
+                :disabled="!mayWrite || wifiBusy"
                 @click="row.secure ? (wifiForm.ssid = row.ssid, wifiDialogOpen = true) : connectSavedNetwork(row.ssid)"
               >
                 {{ t('nodeActions.wifiConnect') }}
@@ -451,7 +580,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
       </el-form>
       <template #footer>
         <el-button @click="addressDialogOpen = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="submitAddress">{{ t('common.save') }}</el-button>
+        <el-button type="primary" :loading="addressBusy" @click="submitAddress">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
 
@@ -469,7 +598,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
       </el-form>
       <template #footer>
         <el-button @click="routeDialogOpen = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="submitRoute">{{ t('common.create') }}</el-button>
+        <el-button type="primary" :loading="routeBusy" @click="submitRoute">{{ t('common.create') }}</el-button>
       </template>
     </el-dialog>
 
@@ -496,7 +625,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
       </el-form>
       <template #footer>
         <el-button @click="firewallDialogOpen = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="submitFirewall">{{ t('common.create') }}</el-button>
+        <el-button type="primary" :loading="firewallBusy" @click="submitFirewall">{{ t('common.create') }}</el-button>
       </template>
     </el-dialog>
 
@@ -508,7 +637,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
       </el-form>
       <template #footer>
         <el-button @click="wifiDialogOpen = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="connectWiFi(wifiForm.ssid)">{{ t('nodeActions.wifiConnect') }}</el-button>
+        <el-button type="primary" :loading="wifiBusy" :disabled="!wifiForm.password" @click="connectWiFi(wifiForm.ssid)">{{ t('nodeActions.wifiConnect') }}</el-button>
       </template>
     </el-dialog>
 

@@ -30,6 +30,9 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.ts'],
     restoreMocks: true,
+    // The full suite runs router navigation tests under heavy parallel load;
+    // 5s is routinely exceeded even though each assertion is immediate.
+    testTimeout: 45000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],

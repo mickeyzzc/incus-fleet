@@ -5,6 +5,9 @@ import { api, ApiError } from '@/api'
 import type { UserRole } from '@/api/types'
 import { errorMessage } from '@/utils/errors'
 
+/** Collapses duplicate sign-in requests (keyboard + form submit). */
+let loginInFlight: Promise<boolean> | null = null
+
 /** Authentication state backed by the server-side session cookie. */
 export const useAuthStore = defineStore('auth', () => {
   const authenticated = ref(false)
@@ -56,22 +59,33 @@ export const useAuthStore = defineStore('auth', () => {
 
   /** Exchanges an admin token for a session cookie. */
   async function login(user: string, password: string): Promise<boolean> {
+    if (loginInFlight) {
+      return loginInFlight
+    }
+
     loading.value = true
     error.value = ''
 
+    loginInFlight = (async () => {
+      try {
+        const session = await api.login(user.trim(), password)
+        authenticated.value = session.authenticated
+        expiresAt.value = session.expires_at ?? null
+        username.value = session.username ?? user.trim()
+        role.value = session.role ?? ''
+        initialized.value = true
+        return true
+      } catch (err) {
+        authenticated.value = false
+        error.value = errorMessage(err)
+        return false
+      }
+    })()
+
     try {
-      const session = await api.login(user.trim(), password)
-      authenticated.value = session.authenticated
-      expiresAt.value = session.expires_at ?? null
-      username.value = session.username ?? user.trim()
-      role.value = session.role ?? ''
-      initialized.value = true
-      return true
-    } catch (err) {
-      authenticated.value = false
-      error.value = errorMessage(err)
-      return false
+      return await loginInFlight
     } finally {
+      loginInFlight = null
       loading.value = false
     }
   }

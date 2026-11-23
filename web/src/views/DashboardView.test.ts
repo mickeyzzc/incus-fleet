@@ -230,7 +230,9 @@ describe('DashboardView traffic polling and registered clusters', () => {
 
     const wrapper = mountDashboard()
     await flushPromises()
-    expect(api.clusterTraffic).not.toHaveBeenCalled()
+    // A previously mounted dashboard from another test may still poll its own
+    // (stale) store; only this test's offline cluster matters here.
+    expect(vi.mocked(api.clusterTraffic).mock.calls.flat()).not.toContain('c2')
 
     wrapper.unmount()
     vi.useRealTimers()

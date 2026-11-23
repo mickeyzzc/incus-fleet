@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
-import type { User, UserRole } from '@/api/types'
+import type { SessionInfo, User, UserRole } from '@/api/types'
 import { api } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { errorMessage } from '@/utils/errors'
@@ -18,6 +18,11 @@ const loading = ref(false)
 const saving = ref(false)
 const dialogOpen = ref(false)
 const editing = ref<User | null>(null)
+
+const sessionsOpen = ref(false)
+const sessionsUser = ref<User | null>(null)
+const sessions = ref<SessionInfo[]>([])
+const sessionsLoading = ref(false)
 
 const form = reactive({
   username: '',
@@ -79,11 +84,15 @@ function openEdit(user: User): void {
 
 async function submit(): Promise<void> {
   if (!form.username.trim()) {
-    ElMessage.error(t('users.username'))
+    ElMessage.error(t('users.usernameRequired'))
     return
   }
   if (!editing.value && !form.password) {
-    ElMessage.error(t('users.password'))
+    ElMessage.error(t('users.passwordRequired'))
+    return
+  }
+  if (form.password && form.password.length < 8) {
+    ElMessage.error(t('users.passwordWeak'))
     return
   }
 
@@ -117,7 +126,51 @@ async function submit(): Promise<void> {
   }
 }
 
+async function openSessions(user: User): Promise<void> {
+  sessionsUser.value = user
+  sessionsOpen.value = true
+  sessionsLoading.value = true
+  try {
+    sessions.value = await api.listSessions(user.id)
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+    sessions.value = []
+  } finally {
+    sessionsLoading.value = false
+  }
+}
+
+async function revokeSessions(): Promise<void> {
+  const user = sessionsUser.value
+  if (!user) {
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      t('users.revokeConfirm', { name: user.username }),
+      t('users.revokeSessions'),
+      { type: 'warning', confirmButtonText: t('users.revokeSessions'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const count = await api.revokeUserSessions(user.id)
+    ElMessage.success(t('users.revoked', { count }))
+    sessions.value = await api.listSessions(user.id)
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  }
+}
+
 async function remove(user: User): Promise<void> {
+  if (user.username === auth.username) {
+    ElMessage.error(t('users.selfDelete'))
+    return
+  }
+
   try {
     await ElMessageBox.confirm(
       t('users.deleteConfirm', { name: user.username }),
@@ -191,10 +244,13 @@ async function remove(user: User): Promise<void> {
           <el-table-column :label="t('common.created')" width="190">
             <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
           </el-table-column>
-          <el-table-column :label="t('common.actions')" width="170" fixed="right">
+          <el-table-column :label="t('common.actions')" width="250" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openEdit(row)">
                 {{ t('common.edit') }}
+              </el-button>
+              <el-button link type="primary" @click="openSessions(row)">
+                {{ t('users.sessions') }}
               </el-button>
               <el-button link type="danger" @click="remove(row)">
                 {{ t('common.delete') }}
@@ -239,6 +295,39 @@ async function remove(user: User): Promise<void> {
         <el-button @click="dialogOpen = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="saving" @click="submit">
           {{ editing ? t('common.save') : t('common.create') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="sessionsOpen"
+      :title="t('users.sessionsTitle', { name: sessionsUser?.username ?? '' })"
+      width="600px"
+    >
+      <div v-loading="sessionsLoading">
+        <el-table :data="sessions" size="small" stripe :empty-text="t('users.noSessions')">
+          <el-table-column :label="t('users.username')" min-width="140">
+            <template #default="{ row }">{{ row.username }}</template>
+          </el-table-column>
+          <el-table-column :label="t('users.role')" width="120">
+            <template #default="{ row }">{{ roleLabel(row.role) }}</template>
+          </el-table-column>
+          <el-table-column :label="t('users.expires')" min-width="190">
+            <template #default="{ row }">{{ formatDateTime(row.expires_at) }}</template>
+          </el-table-column>
+          <el-table-column width="90">
+            <template #default="{ row }">
+              <el-tag v-if="row.current" size="small" type="success" effect="plain">
+                {{ t('users.self') }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button @click="sessionsOpen = false">{{ t('common.close') }}</el-button>
+        <el-button type="danger" :disabled="sessions.length === 0" @click="revokeSessions">
+          {{ t('users.revokeSessions') }}
         </el-button>
       </template>
     </el-dialog>

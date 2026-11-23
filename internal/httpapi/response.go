@@ -54,7 +54,8 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 		errors.Is(err, nodenet.ErrInvalidRequest):
 		status, code = http.StatusBadRequest, "invalid_request"
 	case errors.Is(err, migrations.ErrConflict),
-		errors.Is(err, nodejoin.ErrConflict):
+		errors.Is(err, nodejoin.ErrConflict),
+		errors.Is(err, store.ErrConflict):
 		status, code = http.StatusConflict, "conflict"
 	case errors.Is(err, migrations.ErrNotFound),
 		errors.Is(err, guestagent.ErrNotFound),

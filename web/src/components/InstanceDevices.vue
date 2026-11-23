@@ -7,6 +7,7 @@ import { useI18n } from 'vue-i18n'
 import type { DeviceRequest, InstanceDetail } from '@/api/types'
 import { useInstancesStore } from '@/stores/instances'
 import { errorMessage } from '@/utils/errors'
+import { parseSize, validDeviceName, validGuestPath } from '@/utils/size'
 
 const props = defineProps<{
   cluster: string
@@ -119,7 +120,7 @@ watch(attachOpen, (open) => {
     return
   }
 
-  form.name = ''
+  form.name = 'data0'
   form.type = 'disk'
   form.pool = pools.value[0]?.name ?? ''
   form.source = ''
@@ -157,7 +158,7 @@ function request(): DeviceRequest {
     // A size quota only applies to freshly created disks; sending one for an
     // existing volume fails with "Only root or tmpfs disks can have a size
     // quota".
-    if (form.size.trim() && !form.source.trim()) payload.size = form.size.trim()
+    if (form.size.trim() && !form.source.trim()) payload.size = parseSize(form.size).value
   } else if (form.type === 'proxy') {
     if (form.listen.trim()) payload.listen = form.listen.trim()
     if (form.connect.trim()) payload.connect = form.connect.trim()
@@ -170,9 +171,43 @@ function request(): DeviceRequest {
   return payload
 }
 
+function attachError(): string {
+  const name = form.name.trim()
+  if (!name) {
+    return t('validation.required')
+  }
+  if (!validDeviceName(name)) {
+    return t('validation.deviceNameFormat')
+  }
+  if (rows.value.some((row) => row.name === name)) {
+    return t('validation.duplicateDevice')
+  }
+
+  if (form.type === 'disk') {
+    if (!form.path.trim()) {
+      return t('validation.required')
+    }
+    if (!validGuestPath(form.path.trim())) {
+      return t('validation.pathFormat')
+    }
+    if (form.size.trim() && !form.source.trim() && !parseSize(form.size).valid) {
+      return t('validation.sizeFormat')
+    }
+  }
+  if (form.type === 'nic' && !form.network) {
+    return t('validation.required')
+  }
+  if (form.type === 'proxy' && (!form.listen.trim() || !form.connect.trim())) {
+    return t('validation.required')
+  }
+
+  return ''
+}
+
 async function submitAttach(): Promise<void> {
-  if (!form.name.trim()) {
-    ElMessage.error(t('admin.validationName'))
+  const error = attachError()
+  if (error) {
+    ElMessage.error(error)
     return
   }
 
@@ -223,7 +258,7 @@ function editRequest(): DeviceRequest {
   if (editForm.pool.trim()) payload.pool = editForm.pool.trim()
   if (editForm.source.trim()) payload.source = editForm.source.trim()
   if (editForm.path.trim()) payload.path = editForm.path.trim()
-  if (editForm.size.trim() && !editForm.source.trim()) payload.size = editForm.size.trim()
+  if (editForm.size.trim() && !editForm.source.trim()) payload.size = parseSize(editForm.size).value
   if (device.type === 'proxy') {
     payload.type = 'proxy'
     if (editForm.listen.trim()) payload.listen = editForm.listen.trim()
@@ -319,7 +354,8 @@ async function detach(name: string): Promise<void> {
     <el-dialog v-model="attachOpen" :title="t('devices.attach')" width="480px" destroy-on-close>
       <el-form label-position="top" @submit.prevent="submitAttach">
         <el-form-item :label="t('admin.deviceName')">
-          <el-input v-model="form.name" />
+          <el-input v-model="form.name" :placeholder="t('form.diskNamePlaceholder')" />
+          <p class="field-hint">{{ t('validation.deviceNameFormat') }}</p>
         </el-form-item>
 
         <el-form-item :label="t('devices.deviceType')">
@@ -342,18 +378,23 @@ async function detach(name: string): Promise<void> {
             </el-select>
           </el-form-item>
           <el-form-item :label="t('devices.source')">
-            <el-input v-model="form.source" />
+            <el-input v-model="form.source" :placeholder="t('devices.sourcePlaceholder')" />
+            <p class="field-hint">{{ t('devices.sourceHint') }}</p>
           </el-form-item>
           <el-form-item :label="t('devices.path')">
-            <el-input v-model="form.path" />
+            <el-input v-model="form.path" :placeholder="t('form.diskPathPlaceholder')" />
+            <p class="field-hint">{{ t('devices.pathHint') }}</p>
           </el-form-item>
           <el-form-item :label="t('devices.size')">
             <el-input
               v-model="form.size"
-              :placeholder="t('form.rootDiskPlaceholder')"
+              :placeholder="t('form.diskSizePlaceholder')"
               :disabled="!!form.source.trim()"
             />
-            <p class="field-hint">{{ t('devices.sizeHint') }}</p>
+            <p class="field-hint">{{ t('devices.sizeNewHint') }}</p>
+            <p v-if="form.size.trim() && !form.source.trim() && !parseSize(form.size).valid" class="field-error">
+              {{ t('validation.sizeFormat') }}
+            </p>
           </el-form-item>
         </template>
 
@@ -444,17 +485,22 @@ async function detach(name: string): Promise<void> {
         <template v-else>
           <el-form-item :label="t('devices.source')">
             <el-input v-model="editForm.source" />
+            <p class="field-hint">{{ t('devices.sourceHint') }}</p>
           </el-form-item>
           <el-form-item :label="t('devices.path')">
-            <el-input v-model="editForm.path" />
+            <el-input v-model="editForm.path" :placeholder="t('form.diskPathPlaceholder')" />
+            <p class="field-hint">{{ t('devices.pathHint') }}</p>
           </el-form-item>
           <el-form-item :label="t('devices.size')">
             <el-input
               v-model="editForm.size"
-              :placeholder="t('form.rootDiskPlaceholder')"
+              :placeholder="t('form.diskSizePlaceholder')"
               :disabled="!!editForm.source.trim()"
             />
             <p class="field-hint">{{ t('devices.sizeHint') }}</p>
+            <p v-if="editForm.size.trim() && !editForm.source.trim() && !parseSize(editForm.size).valid" class="field-error">
+              {{ t('validation.sizeFormat') }}
+            </p>
           </el-form-item>
         </template>
       </el-form>

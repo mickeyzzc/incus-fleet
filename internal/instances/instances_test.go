@@ -151,9 +151,12 @@ func TestListAll(t *testing.T) {
 		"c2": {Instances: []api.InstanceFull{fullInstance("db", "container", "Running", api.Running)}},
 	})
 
-	all, err := svc.ListAll(api.InstanceTypeAny)
+	all, unavailable, err := svc.ListAll(api.InstanceTypeAny)
 	if err != nil {
 		t.Fatalf("ListAll() error = %v", err)
+	}
+	if len(unavailable) != 0 {
+		t.Fatalf("ListAll() unavailable = %#v", unavailable)
 	}
 	if len(all) != 2 || all[0].Cluster != "c1" || all[1].Cluster != "c2" {
 		t.Fatalf("ListAll() = %#v", all)
@@ -245,7 +248,28 @@ func TestListAllError(t *testing.T) {
 		"c1": {},
 		"c2": {InstancesErr: errors.New("boom")},
 	})
-	if _, err := svc.ListAll(api.InstanceTypeAny); err == nil {
-		t.Fatal("ListAll() expected error")
+
+	// One reachable cluster is enough: the fleet view stays populated and the
+	// failure is reported per cluster instead of hiding everything.
+	all, unavailable, err := svc.ListAll(api.InstanceTypeAny)
+	if err != nil {
+		t.Fatalf("ListAll() error = %v", err)
+	}
+	if len(all) != 0 {
+		t.Fatalf("ListAll() = %#v", all)
+	}
+	if len(unavailable) != 1 || unavailable[0] != "c2" {
+		t.Fatalf("ListAll() unavailable = %#v", unavailable)
+	}
+}
+
+func TestListAllAllClustersDown(t *testing.T) {
+	svc := newTestService(t, map[string]*incusfake.Server{
+		"c1": {InstancesErr: errors.New("boom")},
+		"c2": {InstancesErr: errors.New("boom")},
+	})
+
+	if _, unavailable, err := svc.ListAll(api.InstanceTypeAny); err == nil || len(unavailable) != 2 {
+		t.Fatalf("ListAll() = %#v, %v; want both clusters unavailable", unavailable, err)
 	}
 }

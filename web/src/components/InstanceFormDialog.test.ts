@@ -291,4 +291,61 @@ describe('InstanceFormDialog', () => {
     const text = wrapper.html()
     expect(text).toContain('fleetbr0')
   })
+
+  it('creates extra data disks and normalizes bare sizes', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    await wrapper.find('input[placeholder="e.g. web-01"]').setValue('newct')
+    selectAt(wrapper, 0, '053059ea4e28')
+    await wrapper.find('input[placeholder="e.g. 512MiB or 2GiB"]').setValue('512')
+    await buttonByText(wrapper, 'Add data disk').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.find('input[placeholder="e.g. data0"]').element as HTMLInputElement).value).toBe('data0')
+    expect((wrapper.find('input[placeholder="e.g. /data"]').element as HTMLInputElement).value).toBe('/data')
+    await wrapper.find('input[placeholder="e.g. 50GiB"]').setValue('50GiB')
+
+    await buttonByText(wrapper, 'Create instance').trigger('click')
+    await flushPromises()
+
+    expect(api.createInstance).toHaveBeenCalledWith(
+      'c1',
+      expect.objectContaining({
+        memory: '512MiB',
+        disks: [{ name: 'data0', path: '/data', size: '50GiB' }],
+      }),
+    )
+  })
+
+  it('rejects a relative data-disk path before calling the API', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    await wrapper.find('input[placeholder="e.g. web-01"]').setValue('newct')
+    selectAt(wrapper, 0, '053059ea4e28')
+    await buttonByText(wrapper, 'Add data disk').trigger('click')
+    await flushPromises()
+    await wrapper.find('input[placeholder="e.g. /data"]').setValue('data')
+
+    await buttonByText(wrapper, 'Create instance').trigger('click')
+    await flushPromises()
+
+    expect(api.createInstance).not.toHaveBeenCalled()
+    expect(ElMessage.error).toHaveBeenCalledWith('Enter an absolute path, for example /data.')
+  })
+
+  it('shows an inline error for a malformed memory limit', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    await wrapper.find('input[placeholder="e.g. 512MiB or 2GiB"]').setValue('abc')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Enter a valid size, for example 512MiB, 2GiB or 10GB.')
+
+    await buttonByText(wrapper, 'Create instance').trigger('click')
+    await flushPromises()
+    expect(api.createInstance).not.toHaveBeenCalled()
+  })
 })

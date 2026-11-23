@@ -29,13 +29,16 @@ func (a *API) listInstances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list, err := a.instances.ListAll(instanceType)
+	list, unavailable, err := a.instances.ListAll(instanceType)
 	if err != nil {
 		a.serviceError(w, r, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"instances": list})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"instances":            list,
+		"unavailable_clusters": unavailable,
+	})
 }
 
 func (a *API) getInstance(w http.ResponseWriter, r *http.Request) {

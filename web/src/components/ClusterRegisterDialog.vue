@@ -69,13 +69,16 @@ function pickFile(target: 'tls_cert' | 'tls_key' | 'tls_server_cert', event: Eve
 
 function validate(): string {
   if (!form.name.trim()) {
-    return t('clusterRegister.name') + ' — ' + t('common.name')
+    return t('validation.required')
   }
   if (!form.endpoint.trim()) {
-    return t('clusterRegister.endpoint')
+    return t('validation.required')
+  }
+  if (!/^https:\/\/[^\s/]+$/i.test(form.endpoint.trim())) {
+    return t('validation.endpointFormat')
   }
   if (!form.tls_cert.trim() || !form.tls_key.trim()) {
-    return t('clusterRegister.cert') + ' / ' + t('clusterRegister.key')
+    return t('validation.required')
   }
 
   return ''
