@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Refresh } from '@element-plus/icons-vue'
 
 import type { InstanceMetrics } from '@/api/types'
 import { api } from '@/api'
@@ -142,6 +143,11 @@ function diskUsageLabel(disk: { usage: number; total: number }): string {
 
 <template>
   <div class="metrics-panel">
+    <div class="metrics-toolbar">
+      <el-button size="small" :icon="Refresh" :loading="loading" @click="poll">
+        {{ t('common.refresh') }}
+      </el-button>
+    </div>
     <el-alert v-if="error" :title="t('metrics.failed', { error })" type="error" :closable="false" show-icon />
     <p v-else-if="!metrics" v-loading="loading" class="metrics-empty">
       {{ t('metrics.loading') }}
@@ -245,6 +251,12 @@ function diskUsageLabel(disk: { usage: number; total: number }): string {
 </template>
 
 <style scoped>
+.metrics-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
 .metrics-panel {
   display: flex;
   flex-direction: column;

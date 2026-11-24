@@ -229,6 +229,21 @@ func TestScanWiFiParsesIwOutput(t *testing.T) {
 	}
 }
 
+func TestScanWiFiDecodesEscapedSSID(t *testing.T) {
+	r := &fakeRunner{
+		outputs: map[string]string{
+			"iw dev wlan0 scan": "BSS ab:cd:ef:01\n\tSSID: \\xe6\\x97\\xa0\\xe7\\xba\\xbf\\xe5\\x90\\x8d\\xe7\\xa7\\xb0\n\tsignal: -40.00 dBm",
+		},
+	}
+	networks, err := NewService(r).ScanWiFi("wlan0")
+	if err != nil {
+		t.Fatalf("ScanWiFi() error = %v", err)
+	}
+	if len(networks) != 1 || networks[0].SSID != "无线名称" {
+		t.Fatalf("escaped SSID not decoded: %#v", networks)
+	}
+}
+
 func TestSnapshotCollectsEverything(t *testing.T) {
 	r := &fakeRunner{
 		outputs: map[string]string{

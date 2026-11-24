@@ -135,7 +135,7 @@ watch([() => props.cluster, () => props.member, source], () => {
 
       <el-alert v-if="error" :title="t('hostMetrics.failed', { error })" type="error" :closable="false" show-icon />
       <p v-if="!error && loading && series.length === 0" class="metrics-empty">{{ t('hostMetrics.loading') }}</p>
-      <p v-if="!error && series.length === 0" class="metrics-empty">{{ t('hostMetrics.empty') }}</p>
+      <p v-else-if="!error && series.length === 0" class="metrics-empty">{{ t('hostMetrics.empty') }}</p>
 
       <template v-if="series.length > 0">
         <div class="host-metric-grid">

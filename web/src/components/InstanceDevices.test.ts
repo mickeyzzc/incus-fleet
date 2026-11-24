@@ -54,9 +54,10 @@ describe('InstanceDevices', () => {
     const dialog = wrapper.findComponent({ name: 'ElDialog' })
     const inputs = dialog.findAll('input[type="text"]')
     await inputs[0]?.setValue('data')
-    await inputs[1]?.setValue('assets-vol')
-    await inputs[2]?.setValue('/data')
-    dialog.findComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', 'default')
+    const selects = dialog.findAllComponents({ name: 'ElSelect' })
+    selects[0]?.vm.$emit('update:modelValue', 'default')
+    selects[1]?.vm.$emit('update:modelValue', 'assets-vol')
+    await inputs[1]?.setValue('/data')
 
     await dialog.findAll('button').at(-1)?.trigger('click')
     await flushPromises()
@@ -81,13 +82,16 @@ describe('InstanceDevices', () => {
 
     const dialog = wrapper.findComponent({ name: 'ElDialog' })
     const inputs = dialog.findAll('input[type="text"]')
-    expect(inputs[3]?.attributes('disabled')).toBeUndefined()
+    const source = dialog.findAllComponents({ name: 'ElSelect' })[1]
+    expect(inputs[2]?.attributes('disabled')).toBeUndefined()
 
-    await inputs[1]?.setValue('assets-vol')
-    expect(inputs[3]?.attributes('disabled')).toBeDefined()
+    source?.vm.$emit('update:modelValue', 'assets-vol')
+    await flushPromises()
+    expect(inputs[2]?.attributes('disabled')).toBeDefined()
 
-    await inputs[1]?.setValue('')
-    expect(inputs[3]?.attributes('disabled')).toBeUndefined()
+    source?.vm.$emit('update:modelValue', '')
+    await flushPromises()
+    expect(inputs[2]?.attributes('disabled')).toBeUndefined()
   })
 
   it('attaches a fresh disk with a size quota', async () => {
@@ -99,8 +103,8 @@ describe('InstanceDevices', () => {
     const dialog = wrapper.findComponent({ name: 'ElDialog' })
     const inputs = dialog.findAll('input[type="text"]')
     await inputs[0]?.setValue('scratch')
-    await inputs[2]?.setValue('/scratch')
-    await inputs[3]?.setValue('10GiB')
+    await inputs[1]?.setValue('/scratch')
+    await inputs[2]?.setValue('10GiB')
 
     await dialog.findAll('button').at(-1)?.trigger('click')
     await flushPromises()

@@ -1,6 +1,6 @@
 # Contributing to Incus Fleet
 
-**English** | [简体中文](CONTRIBUTING.zh-CN.md)
+**English** | [简体中文](docs/zh/CONTRIBUTING.zh-CN.md)
 
 Thanks for helping improve Incus Fleet. This project manages real infrastructure, so changes
 are reviewed for correctness, security, and operational safety before merge.
@@ -47,7 +47,7 @@ bun run dev
 
 ## Standards
 
-Read [docs/standards.md](docs/standards.md) for the complete rules. Highlights:
+Read [docs/en/standards.md](docs/en/standards.md) for the complete rules. Highlights:
 
 - Go coverage must stay at or above 90% (`make coverage-go`).
 - Frontend coverage must meet 90% statements/lines/functions and 85% branches.
@@ -76,7 +76,7 @@ Keep commits focused. Do not mix refactors with behavior changes.
 - [ ] Coverage gates pass.
 - [ ] `make check` passes.
 - [ ] English and Chinese docs are updated.
-- [ ] New API routes and fields are documented in `docs/api.md` and `docs/zh-CN/api.md`.
+- [ ] New API routes and fields are documented in `docs/en/api.md` and `docs/zh/api.md`.
 - [ ] Examples and screenshots are sanitized.
 - [ ] No secrets, local-only files, or build artifacts are included.
 

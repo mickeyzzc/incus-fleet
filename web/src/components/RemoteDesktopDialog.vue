@@ -378,7 +378,7 @@ onBeforeUnmount(stopConsole)
         {{ guest.status }}
       </el-tag>
       <span v-if="frameInfo" class="desktop-frame">{{ frameInfo }}</span>
-      <span v-if="status" class="desktop-error">{{ status }}</span>
+      <span v-if="status" class="desktop-error" :title="status">{{ status }}</span>
       <span v-if="powerBusy" class="desktop-error">{{ t('desktop.powerBusy') }}</span>
       <div class="desktop-actions">
         <el-button

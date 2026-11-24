@@ -27,8 +27,9 @@ PrivateDevices=false
 ProtectSystem=strict
 ProtectHome=read-only
 # SQLite lives in data/; nodenet persists ifupdown snippets and the fleet
-# wpa_supplicant config in the two /etc paths.
-ReadWritePaths=/home/incus/data /etc/network/interfaces.d /etc/wpa_supplicant
+# wpa_supplicant config. The private overlay also writes its dnsmasq config
+# and the per-overlay systemd unit, so those paths must be writable too.
+ReadWritePaths=/home/incus/data /etc/network/interfaces.d /etc/wpa_supplicant /etc/dnsmasq.d /etc/systemd/system/fleet-overlay-dhcp-*.service
 ProtectKernelTunables=true
 ProtectKernelModules=false
 ProtectControlGroups=true

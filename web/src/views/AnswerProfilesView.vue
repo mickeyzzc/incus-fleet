@@ -13,6 +13,31 @@ const props = defineProps<{ embedded?: boolean }>()
 const store = useAnswerProfilesStore()
 const { t } = useI18n()
 
+// Common installer values; the selects stay searchable and allow custom
+// values so uncommon locales/keymaps are still reachable.
+const TIMEZONES = [
+  'UTC',
+  'Asia/Shanghai',
+  'Asia/Tokyo',
+  'Asia/Singapore',
+  'Europe/London',
+  'Europe/Berlin',
+  'America/New_York',
+  'America/Los_Angeles',
+]
+const LOCALES = [
+  'en_US',
+  'en_GB',
+  'zh_CN',
+  'zh_TW',
+  'de_DE',
+  'fr_FR',
+  'es_ES',
+  'ja_JP',
+  'ko_KR',
+]
+const KEYBOARDS = ['us', 'gb', 'cn', 'de', 'fr', 'es', 'jp', 'kr', 'ru']
+
 const dialogOpen = ref(false)
 const editing = ref<AnswerProfile | null>(null)
 
@@ -33,6 +58,7 @@ const form = reactive({
   disk: '',
   locale: '',
   keyboard: '',
+  packages: '',
   custom: false,
   answer: '',
   is_default: false,
@@ -44,7 +70,7 @@ function openCreate(): void {
   editing.value = null
   Object.assign(form, {
     name: '', profile: 'debian-preseed', hostname: '', username: '', password: '',
-    timezone: 'UTC', disk: '', locale: '', keyboard: '', custom: false, answer: '', is_default: false,
+    timezone: 'UTC', disk: '', locale: '', keyboard: '', packages: '', custom: false, answer: '', is_default: false,
   })
   dialogOpen.value = true
 }
@@ -55,6 +81,7 @@ function openEdit(row: AnswerProfile): void {
     name: row.name, profile: row.profile, hostname: row.hostname ?? '',
     username: row.username ?? '', password: row.password ?? '', timezone: row.timezone ?? '',
     disk: row.disk ?? '', locale: row.locale ?? '', keyboard: row.keyboard ?? '',
+    packages: row.packages ?? '',
     custom: Boolean(row.answer_file), answer: row.answer_file ?? '', is_default: row.is_default,
   })
   dialogOpen.value = true
@@ -79,6 +106,7 @@ async function submit(): Promise<void> {
     disk: form.custom ? '' : form.disk.trim(),
     locale: form.custom ? '' : form.locale.trim(),
     keyboard: form.custom ? '' : form.keyboard.trim(),
+    packages: form.custom ? '' : form.packages.trim(),
     answer_file: form.custom ? form.answer : '',
     is_default: form.is_default,
   }
@@ -168,6 +196,13 @@ onMounted(() => { void store.fetch() })
               <el-button link type="danger" @click="confirmDelete(row as AnswerProfile)">{{ t('common.delete') }}</el-button>
             </template>
           </el-table-column>
+          <template #empty>
+            <el-empty :description="t('answerProfiles.empty')">
+              <el-button type="primary" @click="openCreate">
+                {{ t('answerProfiles.add') }}
+              </el-button>
+            </el-empty>
+          </template>
         </el-table>
       </div>
     </section>
@@ -206,17 +241,45 @@ onMounted(() => { void store.fetch() })
             <p class="field-hint">{{ t('answerProfiles.passwordHint') }}</p>
           </el-form-item>
           <el-form-item :label="t('iso.specTimezone')">
-            <el-input v-model="form.timezone" placeholder="UTC" />
+            <el-select
+              v-model="form.timezone"
+              filterable
+              allow-create
+              default-first-option
+              style="width: 100%"
+            >
+              <el-option v-for="zone in TIMEZONES" :key="zone" :label="zone" :value="zone" />
+            </el-select>
           </el-form-item>
           <el-form-item :label="t('iso.specDisk')">
             <el-input v-model="form.disk" placeholder="/dev/vda" />
             <p class="field-hint">{{ t('answerProfiles.diskHint') }}</p>
           </el-form-item>
           <el-form-item :label="t('iso.specLocale')">
-            <el-input v-model="form.locale" placeholder="en_US" />
+            <el-select
+              v-model="form.locale"
+              filterable
+              allow-create
+              default-first-option
+              style="width: 100%"
+            >
+              <el-option v-for="locale in LOCALES" :key="locale" :label="locale" :value="locale" />
+            </el-select>
           </el-form-item>
           <el-form-item :label="t('iso.specKeyboard')">
-            <el-input v-model="form.keyboard" placeholder="us" />
+            <el-select
+              v-model="form.keyboard"
+              filterable
+              allow-create
+              default-first-option
+              style="width: 100%"
+            >
+              <el-option v-for="layout in KEYBOARDS" :key="layout" :label="layout" :value="layout" />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="t('answerProfiles.packages')">
+            <el-input v-model="form.packages" :placeholder="t('answerProfiles.packagesPlaceholder')" />
+            <p class="field-hint">{{ t('answerProfiles.packagesHint') }}</p>
           </el-form-item>
         </template>
         <el-form-item>

@@ -194,7 +194,7 @@ func TestLaunchUnattendedPreseedRemaster(t *testing.T) {
 
 	// The derived installer volume is imported and attached as iso0.
 	imports := source.CreateISOArgs()
-	if len(imports) != 1 || imports[0].Name != "debian-13.7.0-amd64-DVD-1-debian-preseed-auto" {
+	if len(imports) != 1 || imports[0].Name != "debian-13.7.0-amd64-DVD-1-debian-preseed-auto-web-01" {
 		t.Fatalf("iso imports = %#v", imports)
 	}
 
@@ -215,7 +215,7 @@ func TestLaunchUnattendedPreseedRemaster(t *testing.T) {
 		t.Errorf("secureboot = %q", creates[0].Config["security.secureboot"])
 	}
 	iso0 := creates[0].Devices["iso0"]
-	if iso0["source"] != "debian-13.7.0-amd64-DVD-1-debian-preseed-auto" || iso0["boot.priority"] != "1" {
+	if iso0["source"] != "debian-13.7.0-amd64-DVD-1-debian-preseed-auto-web-01" || iso0["boot.priority"] != "1" {
 		t.Fatalf("iso0 device = %#v", iso0)
 	}
 	if _, hasSeed := creates[0].Devices["iso1"]; hasSeed {
@@ -684,7 +684,7 @@ func TestRemasterPatchesBootConfigSkipsUnknown(t *testing.T) {
 		Volumes:        []api.StorageVolume{{Name: "debian.iso", Type: "custom", ContentType: "iso", Location: "m1"}},
 	}}, withIsoTool(tool), withUnattendedWorkDirForTest(t))
 
-	derived, err := svc.remasterInstallerISO(context.Background(), "c1", "m1", "default", "debian.iso",
+	derived, err := svc.remasterInstallerISO(context.Background(), "c1", "m1", "default", "debian.iso", "u-01",
 		unattended.ProfileDebianPreseed, "answer", t.TempDir())
 	if err != nil {
 		t.Fatalf("remasterInstallerISO() error = %v", err)

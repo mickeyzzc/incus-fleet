@@ -213,9 +213,14 @@ func (s *Service) LaunchFromISO(ctx context.Context, clusterName string, req Lau
 	// available from the very first boot without another restart, and
 	// relax secure boot: most distribution installers ship boot loaders the
 	// default VM firmware rejects.
+	spicePort, err := allocateSPICEPort()
+	if err != nil {
+		return Detail{}, fmt.Errorf("instances: allocate spice port: %w", err)
+	}
+
 	config := api.ConfigMap{}
 	config["raw.qemu"] = fmt.Sprintf("%s unix=off,port=%d,disable-ticketing=on,addr=%s", // loopback only; bridged over the Incus API
-		spiceArgMarker, SPICEPortFor(req.Name), spiceListenAddr)
+		spiceArgMarker, spicePort, spiceListenAddr)
 	config["security.secureboot"] = "false"
 
 	// A cluster-wide custom ISO volume only exists on the member that holds it,

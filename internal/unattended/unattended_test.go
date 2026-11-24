@@ -133,6 +133,26 @@ func TestRenderAnswerFileAutoinstall(t *testing.T) {
 	if !strings.Contains(content, "version: 1") || !strings.Contains(content, "install-server: true") {
 		t.Error("autoinstall missing required blocks")
 	}
+	if !strings.Contains(content, "autoinstall:") {
+		t.Error("Subiquity directives must be nested under autoinstall:")
+	}
+}
+
+func TestRenderAutoinstallHashesPlaintextPassword(t *testing.T) {
+	content, err := RenderAnswerFile(ProfileUbuntuAutoinstall, AnswerSpec{
+		Hostname: "u1",
+		Username: "ops",
+		Password: "s3cret-pass",
+	})
+	if err != nil {
+		t.Fatalf("RenderAnswerFile() error = %v", err)
+	}
+	if strings.Contains(content, `password: "s3cret-pass"`) {
+		t.Fatal("autoinstall seed contains the plaintext password")
+	}
+	if !strings.Contains(content, `password: "$2`) {
+		t.Fatalf("autoinstall seed does not contain a bcrypt hash:\n%s", content)
+	}
 }
 
 func TestRenderSeedFiles(t *testing.T) {
@@ -218,6 +238,29 @@ menuentry 'Install Rocky Linux' --class fedora --class gnu-linux {
 	initrdefi /images/pxeboot/initrd.img
 }
 `
+
+func TestPatchBootConfigUbuntu(t *testing.T) {
+	const cfg = `menuentry "Try or Install Ubuntu Server" {
+	linux /casper/vmlinuz --- quiet splash
+	initrd /casper/initrd
+}`
+	if !NeedsBootPatch(ProfileUbuntuAutoinstall) {
+		t.Fatal("Ubuntu autoinstall must patch the boot configuration")
+	}
+	if NeedsRemaster(ProfileUbuntuAutoinstall) {
+		t.Fatal("Ubuntu autoinstall still needs its NoCloud seed")
+	}
+	patched, changed, err := PatchBootConfig(ProfileUbuntuAutoinstall, cfg)
+	if err != nil {
+		t.Fatalf("PatchBootConfig() error = %v", err)
+	}
+	if changed != 1 || !strings.Contains(patched, "linux /casper/vmlinuz autoinstall --- quiet splash") {
+		t.Fatalf("patched = %q, changed = %d", patched, changed)
+	}
+	if !strings.Contains(patched, "set timeout=10") {
+		t.Error("patched Ubuntu config missing timeout")
+	}
+}
 
 func TestPatchBootConfigKickstart(t *testing.T) {
 	// Anaconda images use "linux /images/pxeboot/vmlinuz" on modern

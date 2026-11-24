@@ -122,6 +122,14 @@ var schemaMigrations = []schemaMigration{
 		version:    10,
 		statements: []string{apiTokenSchema, apiTokenIndexes},
 	},
+	{
+		// Additional packages for unattended template installs, so operators do
+		// not have to fall back to a raw answer file for a common need.
+		version: 11,
+		addColumns: []addColumn{
+			{table: "answer_profiles", column: "packages", definition: `TEXT NOT NULL DEFAULT ''`},
+		},
+	},
 }
 
 // userSchema holds local accounts. Usernames are compared case-insensitively by

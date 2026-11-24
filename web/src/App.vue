@@ -30,6 +30,12 @@ const { t, locale } = useI18n()
 
 const publicPage = computed(() => route.meta.public === true)
 const sidebarOpen = ref(true)
+const SIDEBAR_COLLAPSED_KEY = 'incus-fleet.sidebar.collapsed'
+const isCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1')
+
+watch(isCollapsed, (value) => {
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, value ? '1' : '0')
+})
 
 interface MenuHandle {
   open: (index: string) => void
@@ -153,8 +159,12 @@ async function logout(): Promise<void> {
   <el-config-provider :locale="elementLocale">
     <router-view v-if="publicPage" />
 
-    <el-container v-else class="app-shell" :class="{ 'sidebar-collapsed': !sidebarOpen }">
-      <el-aside width="236px" class="sidebar">
+    <el-container
+      v-else
+      class="app-shell"
+      :class="{ 'sidebar-collapsed': !sidebarOpen, 'sidebar-icon-only': isCollapsed }"
+    >
+      <el-aside :width="isCollapsed ? '64px' : '236px'" class="sidebar">
         <router-link to="/" class="brand">
           <span class="brand-mark">IF</span>
           <span class="brand-text">
@@ -163,8 +173,15 @@ async function logout(): Promise<void> {
           </span>
         </router-link>
 
-        <el-menu ref="menuRef" :default-active="activeMenu" router class="nav-menu">
-          <div class="nav-group-label">{{ t('nav.workbench') }}</div>
+        <el-menu
+          ref="menuRef"
+          :default-active="activeMenu"
+          :collapse="isCollapsed"
+          :collapse-transition="false"
+          router
+          class="nav-menu"
+        >
+          <div v-if="!isCollapsed" class="nav-group-label">{{ t('nav.workbench') }}</div>
 
           <el-menu-item index="/">
             <el-icon><Odometer /></el-icon>
@@ -181,7 +198,7 @@ async function logout(): Promise<void> {
             <span>{{ t('nav.fleetVolumes') }}</span>
           </el-menu-item>
 
-          <div class="nav-group-label">{{ t('nav.resources') }}</div>
+          <div v-if="!isCollapsed" class="nav-group-label">{{ t('nav.resources') }}</div>
 
           <el-menu-item index="/assets">
             <el-icon><Collection /></el-icon>
@@ -191,10 +208,10 @@ async function logout(): Promise<void> {
           <el-menu-item v-if="auth.canAdmin" index="/plugins">
             <el-icon><Grid /></el-icon>
             <span>{{ t('nav.plugins') }}</span>
-            <span v-if="plugins.count > 0" class="nav-count">{{ plugins.count }}</span>
+            <span v-if="!isCollapsed && plugins.count > 0" class="nav-count">{{ plugins.count }}</span>
           </el-menu-item>
 
-          <div class="nav-group-label">{{ t('nav.clusters') }}</div>
+          <div v-if="!isCollapsed" class="nav-group-label">{{ t('nav.clusters') }}</div>
 
           <el-sub-menu
             v-for="cluster in clusters.items"
@@ -202,6 +219,7 @@ async function logout(): Promise<void> {
             :index="`/clusters/${cluster.name}/group`"
           >
             <template #title>
+              <el-icon><Grid /></el-icon>
               <span class="health-dot" :class="{ online: cluster.online }" />
               <span>{{ cluster.display_name }}</span>
             </template>
@@ -246,10 +264,18 @@ async function logout(): Promise<void> {
         <el-header class="topbar">
           <div class="topbar-heading">
             <el-button
+              class="sidebar-toggle"
+              text
+              :icon="isCollapsed ? Expand : Fold"
+              :aria-label="isCollapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')"
+              :title="isCollapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')"
+              @click="isCollapsed = !isCollapsed"
+            />
+            <el-button
               class="mobile-menu-toggle"
               text
               :icon="sidebarOpen ? Fold : Expand"
-              :aria-label="t('nav.clusters')"
+              :aria-label="t('nav.toggleSidebar')"
               @click="sidebarOpen = !sidebarOpen"
             />
             <div>

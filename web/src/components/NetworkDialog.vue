@@ -120,8 +120,6 @@ async function submit(): Promise<void> {
           v-model="form.type"
           :disabled="isEdit"
           filterable
-          allow-create
-          default-first-option
           style="width: 100%"
         >
           <el-option v-for="type in types" :key="type" :label="type" :value="type" />

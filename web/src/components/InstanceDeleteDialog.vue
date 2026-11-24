@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
@@ -15,12 +15,17 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const withVolumes = ref(false)
+const typed = ref('')
+const canDelete = computed(
+  () => Boolean(props.target) && typed.value.trim() === props.target?.name,
+)
 
 watch(
   () => props.target,
   (target) => {
     if (target) {
       withVolumes.value = false
+      typed.value = ''
     }
   },
 )
@@ -44,13 +49,18 @@ function submit(): void {
     @update:model-value="onVisibleChange"
   >
     <p v-if="target">{{ t('instances.deleteConfirm', { name: target.name }) }}</p>
+    <el-form label-position="top" class="typed-confirm" @submit.prevent="submit">
+      <el-form-item :label="t('instances.typeToConfirm', { name: target?.name ?? '' })">
+        <el-input v-model="typed" :placeholder="target?.name" autocomplete="off" />
+      </el-form-item>
+    </el-form>
     <el-checkbox v-model="withVolumes">
       {{ t('instances.deleteVolumes') }}
     </el-checkbox>
     <p class="hint">{{ t('instances.deleteVolumesHint') }}</p>
     <template #footer>
       <el-button @click="emit('cancel')">{{ t('common.cancel') }}</el-button>
-      <el-button type="danger" :loading="busy" @click="submit">
+      <el-button type="danger" :loading="busy" :disabled="!canDelete" @click="submit">
         {{ t('common.delete') }}
       </el-button>
     </template>
@@ -58,6 +68,10 @@ function submit(): void {
 </template>
 
 <style scoped>
+.typed-confirm {
+  margin-top: 12px;
+}
+
 .hint {
   margin: 8px 0 0;
   color: var(--el-text-color-secondary);

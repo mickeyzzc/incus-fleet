@@ -6,6 +6,7 @@ import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 import AnswerProfilesView from '@/views/AnswerProfilesView.vue'
+import CopyableText from '@/components/CopyableText.vue'
 import type { ClusterImage, ClusterSummary, ISOSummary, Keystone, StoredScript } from '@/api/types'
 import { api } from '@/api'
 import { useAssetsStore } from '@/stores/assets'
@@ -281,6 +282,7 @@ async function submitCopy(): Promise<void> {
     })
     ElMessage.success(t('assets.imageCopied', { cluster: copyTarget.value }))
     copyDialogOpen.value = false
+    await fetchImages()
   } catch (err) {
     ElMessage.error(t('assets.imageCopyFailed', { error: errorMessage(err) }))
   } finally {
@@ -437,9 +439,13 @@ function sizeLabel(size: string): string {
                 <span v-if="row.release" class="mini-label">{{ row.release }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('images.fingerprint')" min-width="130">
+            <el-table-column :label="t('images.fingerprint')" min-width="190">
               <template #default="{ row }">
-                <span class="mono">{{ shortFingerprint(row.fingerprint) }}</span>
+                <CopyableText
+                  :value="row.fingerprint"
+                  :display="shortFingerprint(row.fingerprint)"
+                  :label="t('images.fingerprint')"
+                />
               </template>
             </el-table-column>
             <el-table-column :label="t('common.size')" width="100">
@@ -489,6 +495,9 @@ function sizeLabel(size: string): string {
               <p class="subtitle">{{ t('assets.isosHint') }}</p>
             </div>
             <div class="page-actions">
+              <el-button :icon="Refresh" :loading="isosLoading" @click="fetchISOs">
+                {{ t('common.refresh') }}
+              </el-button>
               <el-button :icon="Plus" type="primary" @click="openUploadDialog">
                 {{ t('assets.addISO') }}
               </el-button>
@@ -531,7 +540,11 @@ function sizeLabel(size: string): string {
               </template>
             </el-table-column>
             <template #empty>
-              <el-empty :description="t('iso.empty')" />
+              <el-empty :description="t('iso.empty')">
+                <el-button :icon="Plus" type="primary" @click="openUploadDialog">
+                  {{ t('assets.addISO') }}
+                </el-button>
+              </el-empty>
             </template>
           </el-table>
           <el-pagination
@@ -555,12 +568,27 @@ function sizeLabel(size: string): string {
               <p class="subtitle">{{ t('assets.keysHint') }}</p>
             </div>
             <div class="page-actions">
+              <el-button :icon="Refresh" :loading="assets.keysLoading" @click="assets.fetchKeys(true)">
+                {{ t('common.refresh') }}
+              </el-button>
               <el-button :icon="Plus" type="primary" @click="openKeyDialog(null)">
                 {{ t('assets.addKey') }}
               </el-button>
             </div>
           </div>
 
+          <el-alert
+            v-if="assets.error"
+            class="fleet-alert"
+            type="error"
+            :closable="false"
+            show-icon
+            :title="assets.error"
+          >
+            <el-button size="small" @click="assets.fetchKeys(true)">
+              {{ t('common.retry') }}
+            </el-button>
+          </el-alert>
           <el-table v-loading="assets.keysLoading" :data="assets.keyCache" size="small" stripe>
             <el-table-column :label="t('assets.keyName')" min-width="160">
               <template #default="{ row }">
@@ -570,7 +598,7 @@ function sizeLabel(size: string): string {
             </el-table-column>
             <el-table-column :label="t('assets.keyPublic')" min-width="280">
               <template #default="{ row }">
-                <span class="mono key-text">{{ row.public_key }}</span>
+                <CopyableText :value="row.public_key" :label="t('assets.keyPublic')" />
               </template>
             </el-table-column>
             <el-table-column :label="t('common.actions')" width="150">
@@ -584,7 +612,11 @@ function sizeLabel(size: string): string {
               </template>
             </el-table-column>
             <template #empty>
-              <el-empty :description="t('assets.keysEmpty')" />
+              <el-empty :description="t('assets.keysEmpty')">
+                <el-button :icon="Plus" type="primary" @click="openKeyDialog(null)">
+                  {{ t('assets.addKey') }}
+                </el-button>
+              </el-empty>
             </template>
           </el-table>
         </div>
@@ -600,12 +632,27 @@ function sizeLabel(size: string): string {
               <p class="subtitle">{{ t('assets.scriptsHint') }}</p>
             </div>
             <div class="page-actions">
+              <el-button :icon="Refresh" :loading="assets.scriptsLoading" @click="assets.fetchScripts(true)">
+                {{ t('common.refresh') }}
+              </el-button>
               <el-button :icon="Plus" type="primary" @click="openScriptDialog(null)">
                 {{ t('assets.addScript') }}
               </el-button>
             </div>
           </div>
 
+          <el-alert
+            v-if="assets.error"
+            class="fleet-alert"
+            type="error"
+            :closable="false"
+            show-icon
+            :title="assets.error"
+          >
+            <el-button size="small" @click="assets.fetchScripts(true)">
+              {{ t('common.retry') }}
+            </el-button>
+          </el-alert>
           <el-table v-loading="assets.scriptsLoading" :data="assets.scriptCache" size="small" stripe>
             <el-table-column :label="t('assets.scriptName')" min-width="180">
               <template #default="{ row }">
@@ -615,7 +662,11 @@ function sizeLabel(size: string): string {
             </el-table-column>
             <el-table-column :label="t('assets.scriptBody')" min-width="280">
               <template #default="{ row }">
-                <span class="mono key-text">{{ row.body.split('\n')[0] }}</span>
+                <CopyableText
+                  :value="row.body"
+                  :display="row.body.split('\n')[0]"
+                  :label="t('assets.scriptBody')"
+                />
               </template>
             </el-table-column>
             <el-table-column :label="t('common.actions')" width="150">
@@ -629,7 +680,11 @@ function sizeLabel(size: string): string {
               </template>
             </el-table-column>
             <template #empty>
-              <el-empty :description="t('assets.scriptsEmpty')" />
+              <el-empty :description="t('assets.scriptsEmpty')">
+                <el-button :icon="Plus" type="primary" @click="openScriptDialog(null)">
+                  {{ t('assets.addScript') }}
+                </el-button>
+              </el-empty>
             </template>
           </el-table>
         </div>
@@ -768,7 +823,7 @@ function sizeLabel(size: string): string {
     <transition name="upload-slide">
       <div v-if="uploadTask && !uploadMinimized" class="upload-card">
         <div class="upload-head">
-          <strong>{{ uploadTask.name }}</strong>
+          <strong :title="uploadTask.name">{{ uploadTask.name }}</strong>
           <span class="mini-label">→ {{ uploadTask.cluster }}</span>
           <el-button link size="small" @click="uploadMinimized = true">
             {{ t('assets.uploadBackground') }}

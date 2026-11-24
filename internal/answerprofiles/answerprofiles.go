@@ -38,6 +38,7 @@ func validate(p *AnswerProfile) error {
 	spec := unattended.AnswerSpec{
 		Hostname: p.Hostname, Username: p.Username, Password: p.Password,
 		Timezone: p.Timezone, Disk: p.Disk, Locale: p.Locale, Keyboard: p.Keyboard,
+		Packages: p.Packages,
 	}
 	if strings.TrimSpace(p.AnswerFile) == "" {
 		if err := unattended.ValidateAnswerSpec(spec); err != nil {
@@ -105,5 +106,6 @@ func ToSpec(p *AnswerProfile) unattended.AnswerSpec {
 	return unattended.AnswerSpec{
 		Hostname: p.Hostname, Username: p.Username, Password: p.Password,
 		Timezone: p.Timezone, Disk: p.Disk, Locale: p.Locale, Keyboard: p.Keyboard,
+		Packages: p.Packages,
 	}
 }

@@ -1,6 +1,6 @@
 # Changelog
 
-**English** | [简体中文](CHANGELOG.zh-CN.md)
+**English** | [简体中文](docs/zh/CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
@@ -49,7 +49,7 @@ All notable changes to this project are documented here. The format follows
   credential assignments, bearer tokens, operator subnets and hostnames) before
   a commit, and a CI job runs the same scan over every tracked file and every
   commit. Certificates moved out of the repository to
-  `~/.config/incus-fleet/certs`; see docs/security.md.
+  `~/.config/incus-fleet/certs`; see docs/en/security.md.
 - Cluster private interconnect networks: fleet creates a host bridge on every
   member, joins them with point-to-point VXLAN tunnels, and runs DHCP/NAT from
   one gateway member so instances on all nodes share a private network without

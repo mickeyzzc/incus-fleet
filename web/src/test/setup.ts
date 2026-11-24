@@ -209,6 +209,7 @@ vi.mock('element-plus', async (importOriginal) => {
     },
     ElMessageBox: {
       confirm: vi.fn().mockResolvedValue('confirm'),
+      prompt: vi.fn().mockResolvedValue({ value: '', action: 'confirm' }),
     },
   }
 })

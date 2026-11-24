@@ -6,6 +6,7 @@ import { ArrowLeft, Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 import InstanceActions from '@/components/InstanceActions.vue'
+import CopyableText from '@/components/CopyableText.vue'
 import AddClusterMemberDialog from '@/components/AddClusterMemberDialog.vue'
 import InstanceDeleteDialog from '@/components/InstanceDeleteDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
@@ -16,6 +17,7 @@ import IsoImportDialog from '@/components/IsoImportDialog.vue'
 import IsoLaunchDialog from '@/components/IsoLaunchDialog.vue'
 import MemberDialog from '@/components/MemberDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
+import RenameInstanceDialog from '@/components/RenameInstanceDialog.vue'
 import NetworkDialog from '@/components/NetworkDialog.vue'
 import OverlayDialog from '@/components/OverlayDialog.vue'
 import NodeUpgradeDialog from '@/components/NodeUpgradeDialog.vue'
@@ -34,6 +36,7 @@ import type {
   Profile,
   StoragePoolResource,
 } from '@/api/types'
+import { api } from '@/api'
 import { useInstanceActions, useVisiblePolling } from '@/composables/useInstanceActions'
 import { useClustersStore } from '@/stores/clusters'
 import { useInstancesStore } from '@/stores/instances'
@@ -55,6 +58,8 @@ const detailOpen = ref(false)
 const detailName = ref('')
 const migrateOpen = ref(false)
 const migrateInstance = ref<InstanceSummary | null>(null)
+const renameOpen = ref(false)
+const renameName = ref('')
 const formOpen = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const formInstance = ref<InstanceDetail | null>(null)
@@ -63,6 +68,7 @@ const poolEditing = ref<StoragePoolResource | null>(null)
 const networkDialogOpen = ref(false)
 const networkEditing = ref<NetworkResource | null>(null)
 const overlayDialogOpen = ref(false)
+const overlayEditing = ref<OverlayStatus | null>(null)
 const overlayItems = ref<OverlayStatus[]>([])
 const overlayLoading = ref(false)
 const profileDialogOpen = ref(false)
@@ -193,6 +199,43 @@ function openMigrate(instance: InstanceSummary): void {
   migrateOpen.value = true
 }
 
+function openRename(instance: Pick<InstanceSummary, 'name'>): void {
+  renameName.value = instance.name
+  renameOpen.value = true
+}
+
+async function removeMember(member: ClusterMember): Promise<void> {
+  try {
+    await ElMessageBox.prompt(
+      t('cluster.removeMemberPrompt', { name: member.name }),
+      t('cluster.removeMember'),
+      {
+        type: 'warning',
+        inputPlaceholder: member.name,
+        inputValidator: (value) => value === member.name || t('common.typeNameMismatch'),
+        confirmButtonText: t('cluster.removeMember'),
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await api.deleteClusterMember(props.cluster, member.name)
+    ElMessage.success(t('cluster.memberRemoved', { name: member.name }))
+    await clusters.fetchAll()
+    await load()
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  }
+}
+
+async function onRenamed(): Promise<void> {
+  detailOpen.value = false
+  await load()
+}
+
 function openCreate(): void {
   formMode.value = 'create'
   formInstance.value = null
@@ -257,6 +300,12 @@ async function loadOverlays(force = false): Promise<void> {
 }
 
 function openOverlayDialog(): void {
+  overlayEditing.value = null
+  overlayDialogOpen.value = true
+}
+
+function openEditOverlay(overlay: OverlayStatus): void {
+  overlayEditing.value = overlay
   overlayDialogOpen.value = true
 }
 
@@ -272,10 +321,17 @@ async function reconcileOverlay(overlay: OverlayStatus): Promise<void> {
 
 async function confirmDisableOverlay(overlay: OverlayStatus): Promise<void> {
   try {
-    await ElMessageBox.confirm(
-      t('cluster.overlayConfirmDisable', { name: overlay.name }),
+    await ElMessageBox.prompt(
+      t('cluster.overlayDisablePrompt', { name: overlay.name }),
       t('cluster.overlayDisable'),
-      { type: 'warning', confirmButtonText: t('cluster.overlayDisable'), cancelButtonText: t('common.cancel') },
+      {
+        type: 'warning',
+        inputPlaceholder: overlay.name,
+        inputValidator: (value) => value === overlay.name || t('common.typeNameMismatch'),
+        confirmButtonText: t('cluster.overlayDisable'),
+        confirmButtonClass: 'el-button--danger',
+        cancelButtonText: t('common.cancel'),
+      },
     )
   } catch {
     return
@@ -404,7 +460,7 @@ async function deleteImage(fingerprint: string): Promise<void> {
   // action on this page confirms first (#12).
   try {
     await ElMessageBox.confirm(
-      t('images.deleteConfirm', { fingerprint: fingerprint.slice(0, 12) }),
+      t('images.deleteConfirm', { fingerprint }),
       t('common.delete'),
       {
         type: 'warning',
@@ -641,7 +697,7 @@ function openNodeUpgrade(member: ClusterMember): void {
                 <span class="mono">{{ row.url || summary.endpoint }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.actions')" width="220" fixed="right">
+            <el-table-column :label="t('common.actions')" width="300" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openNodeDetail(row)">
                   {{ t('cluster.manageNode') }}
@@ -656,6 +712,9 @@ function openNodeUpgrade(member: ClusterMember): void {
                   @click="openNodeUpgrade(row)"
                 >
                   {{ t('node.upgrade') }}
+                </el-button>
+                <el-button link type="danger" @click="removeMember(row)">
+                  {{ t('cluster.removeMember') }}
                 </el-button>
               </template>
             </el-table-column>
@@ -730,13 +789,14 @@ function openNodeUpgrade(member: ClusterMember): void {
                 <span v-else class="muted">{{ t('common.none') }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.actions')" width="420" fixed="right">
+            <el-table-column :label="t('common.actions')" width="240" fixed="right">
               <template #default="{ row }">
                 <InstanceActions
                   :instance="row"
                   :busy="isBusy(row)"
                   @action="act(row, $event)"
                   @edit="openEdit(row)"
+                  @rename="openRename(row)"
                   @migrate="openMigrate(row)"
                   @delete="confirmDelete(row)"
                 />
@@ -847,7 +907,11 @@ function openNodeUpgrade(member: ClusterMember): void {
             </el-table-column>
             <el-table-column :label="t('images.fingerprint')" min-width="140">
               <template #default="{ row }">
-                <span class="mono">{{ row.fingerprint.slice(0, 12) }}</span>
+                <CopyableText
+                  :value="row.fingerprint"
+                  :display="`${row.fingerprint.slice(0, 12)}…`"
+                  :label="t('images.fingerprint')"
+                />
               </template>
             </el-table-column>
             <el-table-column :label="t('common.type')" width="130">
@@ -1039,8 +1103,11 @@ function openNodeUpgrade(member: ClusterMember): void {
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.actions')" width="180" fixed="right">
+            <el-table-column :label="t('common.actions')" width="240" fixed="right">
               <template #default="{ row }">
+                <el-button link type="primary" @click="openEditOverlay(row)">
+                  {{ t('common.edit') }}
+                </el-button>
                 <el-button link type="primary" @click="reconcileOverlay(row)">
                   {{ t('cluster.overlayReconcile') }}
                 </el-button>
@@ -1095,9 +1162,12 @@ function openNodeUpgrade(member: ClusterMember): void {
             </el-table-column>
             <el-table-column :label="t('admin.config')" min-width="180">
               <template #default="{ row }">
-                <span v-if="Object.keys(row.config).length" class="mono config-preview">
-                  {{ Object.keys(row.config).join(', ') }}
-                </span>
+                <CopyableText
+                  v-if="Object.keys(row.config).length"
+                  :value="Object.entries(row.config).map(([key, value]) => `${key}=${value}`).join('\n')"
+                  :display="Object.keys(row.config).join(', ')"
+                  :label="t('admin.config')"
+                />
                 <span v-else class="muted">{{ t('common.none') }}</span>
               </template>
             </el-table-column>
@@ -1135,8 +1205,15 @@ function openNodeUpgrade(member: ClusterMember): void {
       :cluster="cluster"
       :name="detailName"
       @edit="openEditDetail"
+      @rename="openRename"
       @migrate="openMigrate"
       @delete="confirmDelete"
+    />
+    <RenameInstanceDialog
+      v-model="renameOpen"
+      :cluster="cluster"
+      :instance="renameName"
+      @renamed="onRenamed"
     />
     <InstanceFormDialog
       v-model="formOpen"
@@ -1162,6 +1239,7 @@ function openNodeUpgrade(member: ClusterMember): void {
       v-model="overlayDialogOpen"
       :cluster="cluster"
       :members="summary?.members ?? []"
+      :overlay="overlayEditing"
       @saved="loadOverlays(true)"
     />
     <NetworkDialog

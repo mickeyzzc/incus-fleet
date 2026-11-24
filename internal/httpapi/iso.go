@@ -44,6 +44,13 @@ func (a *API) applyAnswerProfile(r *http.Request, req *instances.UnattendedReque
 	} else {
 		req.Spec = answerprofiles.ToSpec(p)
 	}
+
+	// A stored profile may leave the hostname blank; the answer form documents
+	// that as "use the VM name". Fill it in here so both the preview and the
+	// real install render the same hostname instead of a hard-coded fallback.
+	if strings.TrimSpace(req.AnswerFile) == "" && strings.TrimSpace(req.Spec.Hostname) == "" {
+		req.Spec.Hostname = strings.TrimSpace(req.Name)
+	}
 	return nil
 }
 

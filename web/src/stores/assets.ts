@@ -30,7 +30,7 @@ export const useAssetsStore = defineStore('assets', () => {
     }
     keysLoading.value = true
     try {
-      keyCache.value = await api.listKeys()
+      keyCache.value = (await api.listKeys()) ?? []
     } catch (err) {
       error.value = errorMessage(err)
     } finally {
@@ -87,7 +87,7 @@ export const useAssetsStore = defineStore('assets', () => {
     }
     scriptsLoading.value = true
     try {
-      scriptCache.value = await api.listScripts()
+      scriptCache.value = (await api.listScripts()) ?? []
     } catch (err) {
       error.value = errorMessage(err)
     } finally {

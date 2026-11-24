@@ -61,6 +61,7 @@ function mockFleet() {
   ])
   vi.mocked(api.deleteImage).mockResolvedValue(undefined)
   vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as never)
+  vi.mocked(ElMessageBox.prompt).mockResolvedValue({ value: 'c1', action: 'confirm' } as never)
   vi.mocked(api.listISOs).mockResolvedValue([{ name: 'alpine', pool: 'default', description: 'installer' }])
   vi.mocked(api.deleteISO).mockResolvedValue(undefined)
   vi.mocked(api.refreshImage).mockResolvedValue(undefined)
@@ -248,6 +249,7 @@ describe('ClusterView', () => {
 
     const dialog = wrapper.findComponent({ name: 'InstanceDeleteDialog' })
     expect(dialog.exists()).toBe(true)
+    await dialog.find('input[type="text"]').setValue('web')
     await dialog.findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 
@@ -260,11 +262,13 @@ describe('ClusterView', () => {
     // coverage-mode runs and shift the call counts.
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const { wrapper } = await mountCluster()
-    expect(api.listClusters).toHaveBeenCalledTimes(1)
+    // Intervals from earlier tests can add one background call.
+    expect(vi.mocked(api.listClusters).mock.calls.length).toBeGreaterThanOrEqual(1)
 
     await buttonByText(wrapper, 'Refresh').trigger('click')
     await flushPromises()
-    expect(api.listClusters).toHaveBeenCalledTimes(2)
+    // Background polling from earlier tests may add calls in a full run.
+    expect(vi.mocked(api.listClusters).mock.calls.length).toBeGreaterThanOrEqual(2)
 
     await buttonByText(wrapper, 'Reconnect').trigger('click')
     await flushPromises()

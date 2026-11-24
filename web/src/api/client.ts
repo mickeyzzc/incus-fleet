@@ -684,6 +684,18 @@ export class ApiClient {
     )
   }
 
+  async renameInstance(
+    cluster: string,
+    name: string,
+    newName: string,
+  ): Promise<InstanceDetail> {
+    return this.request<InstanceDetail>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/instances/${encodeURIComponent(name)}/rename`,
+      { name: newName },
+    )
+  }
+
   async instanceAction(
     cluster: string,
     name: string,
@@ -796,6 +808,18 @@ export class ApiClient {
     )
   }
 
+  async updateOverlay(
+    cluster: string,
+    name: string,
+    request: OverlayRequest,
+  ): Promise<OverlayStatus> {
+    return this.request<OverlayStatus>(
+      'PATCH',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/overlay/${encodeURIComponent(name)}`,
+      request,
+    )
+  }
+
   async reconcileOverlay(cluster: string, name: string): Promise<OverlayStatus> {
     return this.request<OverlayStatus>(
       'POST',
@@ -846,6 +870,14 @@ export class ApiClient {
       'PATCH',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/members/${encodeURIComponent(name)}`,
       request,
+    )
+  }
+
+  async deleteClusterMember(cluster: string, name: string, force = false): Promise<void> {
+    const suffix = force ? '?force=true' : ''
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/members/${encodeURIComponent(name)}${suffix}`,
     )
   }
 

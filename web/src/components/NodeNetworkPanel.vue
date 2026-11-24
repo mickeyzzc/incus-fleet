@@ -24,6 +24,8 @@ const addressBusy = ref(false)
 const routeBusy = ref(false)
 const firewallBusy = ref(false)
 const wifiBusy = ref(false)
+const wifiScanning = ref(false)
+const networkTab = ref<'nics' | 'routes' | 'firewall' | 'wifi'>('nics')
 const nicBusy = ref('')
 
 /** Only a positively known read-only role hides mutations; the backend is authoritative. */
@@ -63,6 +65,7 @@ function validDestination(value: string): boolean {
 const snapshot = ref<{ host: string; nics: NodeNIC[]; routes: { destination: string; gateway?: string; device?: string; metric?: string }[]; firewall: { handle: string; rule: string }[]; wifi_scan?: { ssid: string; signal: number; secure: boolean; frequency: number }[]; wifi_device?: string; backend?: string } | null>(null)
 
 const historyOpen = ref(false)
+const historyError = ref('')
 const historyLoading = ref(false)
 const historyTasks = ref<NodeTask[]>([])
 const historyAudit = ref<NodeAudit[]>([])
@@ -105,6 +108,28 @@ async function refresh(): Promise<void> {
   }
 }
 
+// scanWifi refreshes only the Wi-Fi inventory; the NICs/routes/firewall
+// sections stay untouched and the section shows its own progress.
+async function scanWifi(): Promise<void> {
+  if (!wifiDevice.value || wifiScanning.value) {
+    return
+  }
+  wifiScanning.value = true
+  try {
+    const next = await api.nodeSnapshot(props.cluster, props.member, wifiDevice.value)
+    if (snapshot.value) {
+      snapshot.value.wifi_scan = next.wifi_scan
+      snapshot.value.wifi_device = next.wifi_device
+    } else {
+      snapshot.value = next
+    }
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  } finally {
+    wifiScanning.value = false
+  }
+}
+
 async function openHistory(): Promise<void> {
   historyOpen.value = true
   historyLoading.value = true
@@ -115,8 +140,10 @@ async function openHistory(): Promise<void> {
     ])
     historyTasks.value = tasks
     historyAudit.value = audit
+    historyError.value = ''
   } catch (err) {
-    ElMessage.error(errorMessage(err))
+    historyError.value = errorMessage(err)
+    ElMessage.error(historyError.value)
   } finally {
     historyLoading.value = false
   }
@@ -221,6 +248,11 @@ async function submitRoute(): Promise<void> {
     ElMessage.error(t('nodePage.routeInvalid'))
     return
   }
+  const gateway = routeForm.gateway.trim()
+  if (gateway && !/^(\d{1,3}\.){3}\d{1,3}$/.test(gateway)) {
+    ElMessage.error(t('validation.ipv4Format'))
+    return
+  }
 
   routeBusy.value = true
   try {
@@ -228,7 +260,7 @@ async function submitRoute(): Promise<void> {
       props.cluster,
       props.member,
       destination,
-      routeForm.gateway.trim(),
+      gateway,
       routeForm.device.trim(),
     )
     ElMessage.success(t('nodeActions.routeAdded'))
@@ -391,6 +423,8 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
       :title="t('nodePage.warning', { host: displayHost })"
     />
 
+    <el-tabs v-model="networkTab" class="network-tabs">
+      <el-tab-pane :label="t('nodePage.nicsTitle')" name="nics">
     <section class="panel">
       <div class="panel-body">
         <div class="section-heading">
@@ -448,7 +482,9 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         </el-table>
       </div>
     </section>
+      </el-tab-pane>
 
+      <el-tab-pane :label="t('nodePage.routesTitle')" name="routes">
     <section class="panel">
       <div class="panel-body">
         <div class="section-heading page-header">
@@ -462,7 +498,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
           </div>
         </div>
 
-        <el-table :data="snapshot?.routes ?? []" size="small" stripe>
+        <el-table v-loading="loading" :data="snapshot?.routes ?? []" size="small" stripe>
           <el-table-column :label="t('nodePage.destination')" min-width="160">
             <template #default="{ row }">
               <span class="mono">{{ row.destination }}</span>
@@ -484,7 +520,9 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         </el-table>
       </div>
     </section>
+      </el-tab-pane>
 
+      <el-tab-pane :label="t('nodePage.firewallTitle')" name="firewall">
     <section class="panel">
       <div class="panel-body">
         <div class="section-heading page-header">
@@ -499,7 +537,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
           </div>
         </div>
 
-        <el-table :data="snapshot?.firewall ?? []" size="small" stripe>
+        <el-table v-loading="loading" :data="snapshot?.firewall ?? []" size="small" stripe>
           <el-table-column :label="t('nodePage.rule')" min-width="240">
             <template #default="{ row }">
               <span class="mono">{{ row.rule }}</span>
@@ -515,17 +553,22 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         </el-table>
       </div>
     </section>
+      </el-tab-pane>
 
-    <section v-if="wifiDevice" class="panel">
+      <el-tab-pane v-if="wifiDevice" :label="t('nodePage.wifiTitle')" name="wifi">
+    <section class="panel">
       <div class="panel-body">
         <div class="section-heading page-header">
           <div>
             <h3 class="section-title">{{ t('nodePage.wifiTitle') }}</h3>
             <p class="subtitle">{{ t('nodePage.wifiHint', { device: wifiDevice }) }}</p>
           </div>
+          <el-button :icon="Refresh" :loading="wifiScanning" @click="scanWifi">
+            {{ t('nodePage.wifiScan') }}
+          </el-button>
         </div>
 
-        <el-table :data="snapshot?.wifi_scan ?? []" size="small" stripe>
+        <el-table v-loading="loading || wifiScanning" :data="snapshot?.wifi_scan ?? []" size="small" stripe>
           <el-table-column :label="t('nodePage.ssid')" min-width="160">
             <template #default="{ row }">
               <strong>{{ row.ssid }}</strong>
@@ -556,6 +599,8 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         </el-table>
       </div>
     </section>
+      </el-tab-pane>
+    </el-tabs>
 
     <el-dialog v-model="addressDialogOpen" :title="t('nodePage.configureTitle', { name: addressTarget?.name })" width="520px" destroy-on-close>
       <el-form label-position="top">
@@ -593,7 +638,21 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
           <el-input v-model="routeForm.gateway" placeholder="10.0.0.1" />
         </el-form-item>
         <el-form-item :label="t('nodePage.device')">
-          <el-input v-model="routeForm.device" placeholder="eth0" />
+          <el-select
+            v-model="routeForm.device"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="eth0"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="nic in snapshot?.nics ?? []"
+              :key="nic.name"
+              :label="nic.name"
+              :value="nic.name"
+            />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -642,32 +701,80 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
     </el-dialog>
 
     <el-dialog v-model="historyOpen" :title="t('nodePage.historyTitle', { host: displayHost })" width="860px">
+      <template #header>
+        <div class="history-header">
+          <span>{{ t('nodePage.historyTitle', { host: displayHost }) }}</span>
+          <el-button :icon="Refresh" :loading="historyLoading" @click="openHistory">
+            {{ t('common.refresh') }}
+          </el-button>
+        </div>
+      </template>
       <div v-loading="historyLoading">
+        <el-alert
+          v-if="historyError"
+          class="fleet-alert"
+          type="error"
+          :closable="false"
+          show-icon
+          :title="historyError"
+        >
+          <el-button size="small" @click="openHistory">{{ t('common.retry') }}</el-button>
+        </el-alert>
         <h4 class="section-title">{{ t('nodePage.tasks') }}</h4>
         <el-table :data="historyTasks" size="small" stripe :empty-text="t('common.none')">
-          <el-table-column :label="t('nodePage.taskType')" min-width="170">
+          <el-table-column type="expand">
+            <template #default="{ row }">
+              <div class="history-detail">
+                <div v-for="(value, key) in row" :key="key" class="history-detail-row">
+                  <span class="history-detail-key">{{ key }}</span>
+                  <pre>{{ typeof value === 'object' ? JSON.stringify(value, null, 2) : value }}</pre>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.taskType')" min-width="160">
             <template #default="{ row }">{{ row.type }}</template>
           </el-table-column>
-          <el-table-column :label="t('nodePage.state')" width="120">
+          <el-table-column :label="t('nodePage.state')" width="110">
             <template #default="{ row }">{{ row.state }}</template>
           </el-table-column>
-          <el-table-column :label="t('nodePage.time')" min-width="180">
+          <el-table-column :label="t('nodePage.error')" min-width="220">
+            <template #default="{ row }">
+              <span class="mono history-error">{{ row.error || t('common.none') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.time')" min-width="170">
             <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
           </el-table-column>
         </el-table>
 
         <h4 class="section-title history-heading">{{ t('nodePage.audit') }}</h4>
         <el-table :data="historyAudit" size="small" stripe :empty-text="t('common.none')">
-          <el-table-column :label="t('nodePage.action')" min-width="170">
+          <el-table-column type="expand">
+            <template #default="{ row }">
+              <div class="history-detail">
+                <div v-for="(value, key) in row" :key="key" class="history-detail-row">
+                  <span class="history-detail-key">{{ key }}</span>
+                  <pre>{{ typeof value === 'object' ? JSON.stringify(value, null, 2) : value }}</pre>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.action')" min-width="160">
             <template #default="{ row }">{{ row.action }}</template>
           </el-table-column>
-          <el-table-column :label="t('nodePage.backendLabel')" width="110">
+          <el-table-column :label="t('nodePage.backendLabel')" width="100">
             <template #default="{ row }">{{ row.backend }}</template>
           </el-table-column>
-          <el-table-column :label="t('nodePage.result')" width="120">
+          <el-table-column :label="t('nodePage.result')" width="100">
             <template #default="{ row }">{{ row.result }}</template>
           </el-table-column>
-          <el-table-column :label="t('nodePage.time')" min-width="180">
+          <el-table-column :label="t('nodePage.detail')" min-width="240">
+            <template #default="{ row }">
+              <span class="mono history-error">{{ row.detail || t('common.none') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('nodePage.time')" min-width="170">
             <template #default="{ row }">{{ formatDateTime(row.at) }}</template>
           </el-table-column>
         </el-table>
@@ -689,5 +796,46 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
 
 .history-heading {
   margin-top: 20px;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.history-detail {
+  padding: 8px 12px 8px 48px;
+  display: grid;
+  gap: 6px;
+}
+
+.history-detail-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.history-detail-key {
+  color: var(--fleet-ink-soft, var(--el-text-color-secondary));
+  font-size: 12px;
+}
+
+.history-detail-row pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 12px;
+}
+
+.history-error {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 12px;
 }
 </style>

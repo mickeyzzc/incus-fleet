@@ -120,8 +120,6 @@ async function submit(): Promise<void> {
           v-model="form.driver"
           :disabled="isEdit"
           filterable
-          allow-create
-          default-first-option
           style="width: 100%"
         >
           <el-option v-for="driver in drivers" :key="driver" :label="driver" :value="driver" />

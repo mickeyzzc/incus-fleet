@@ -137,6 +137,14 @@ async function submit(): Promise<void> {
     </el-form>
 
     <el-table v-if="items.length > 0" :data="items" size="small" stripe class="batch-result">
+      <el-table-column type="expand">
+        <template #default="{ row }">
+          <div class="batch-output">
+            <span v-if="row.error" class="batch-error">{{ row.error }}</span>
+            <pre v-else class="mono">{{ (row.stdout || '').trim() || t('common.none') }}</pre>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="instance" :label="t('batch.target')" min-width="140" />
       <el-table-column :label="t('batch.result')" min-width="80">
         <template #default="{ row }">
@@ -147,7 +155,7 @@ async function submit(): Promise<void> {
       <el-table-column :label="t('ops.result', { code: '' })" min-width="240">
         <template #default="{ row }">
           <span v-if="row.error" class="batch-error">{{ row.error }}</span>
-          <span v-else class="mono batch-out">{{ (row.stdout || '').trim().slice(0, 80) }}</span>
+          <span v-else class="mono batch-out">{{ (row.stdout || '').trim() }}</span>
         </template>
       </el-table-column>
     </el-table>
@@ -184,6 +192,20 @@ async function submit(): Promise<void> {
 }
 
 .batch-out {
+  font-size: 12px;
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.batch-output {
+  padding: 8px 12px 8px 48px;
+}
+
+.batch-output pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
   font-size: 12px;
 }
 </style>

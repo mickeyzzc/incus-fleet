@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,42 @@ func SPICEPortFor(name string) int {
 	return 5910 + sum%80
 }
 
+// spicePortPattern extracts the managed -spice listener port from raw.qemu.
+var spicePortPattern = regexp.MustCompile(`-spice\s+[^\n]*\bport=(\d+)`)
+
+// spicePortFromConfig returns the managed SPICE port stored in raw.qemu, or 0.
+func spicePortFromConfig(raw string) int {
+	match := spicePortPattern.FindStringSubmatch(raw)
+	if len(match) != 2 {
+		return 0
+	}
+	port, err := strconv.Atoi(match[1])
+	if err != nil || port < spicePortMin || port > spicePortMax {
+		return 0
+	}
+
+	return port
+}
+
+// allocateSPICEPort picks a currently free loopback port for a new VM. The
+// deterministic SPICEPortFor hash only covers 80 ports and collides as soon as
+// the fleet runs more than a handful of VMs; a launch that loses that race
+// otherwise fails with "binding socket ... failed".
+func allocateSPICEPort() (int, error) {
+	listener, err := net.Listen("tcp", net.JoinHostPort(spiceListenAddr, "0"))
+	if err != nil {
+		return 0, err
+	}
+	defer listener.Close() //nolint:errcheck // probing only
+
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		return 0, fmt.Errorf("instances: SPICE listener has unexpected address type %T", listener.Addr())
+	}
+
+	return addr.Port, nil
+}
+
 // SPICEPrepare reports the result of arming a VM's SPICE TCP listener.
 type SPICEPrepare struct {
 	Port            int  `json:"port"`
@@ -53,7 +90,9 @@ type SPICEPrepare struct {
 // only take effect when the VM (re)starts, so a running instance is power
 // cycled when apply is set.
 func (s *Service) PrepareSPICE(ctx context.Context, clusterName, name string, port int, apply bool) (SPICEPrepare, error) {
-	if port < spicePortMin || port > spicePortMax {
+	// Port 0 means "use the port already stored in raw.qemu" (or derive one
+	// for older instances); resolve it after loading the instance.
+	if port != 0 && (port < spicePortMin || port > spicePortMax) {
 		return SPICEPrepare{}, fmt.Errorf("%w: spice port must be between %d and %d", ErrInvalidRequest, spicePortMin, spicePortMax)
 	}
 
@@ -69,6 +108,16 @@ func (s *Service) PrepareSPICE(ctx context.Context, clusterName, name string, po
 		}
 
 		return SPICEPrepare{}, fmt.Errorf("instances: get %s:%s: %w", clusterName, name, err)
+	}
+
+	// The web client requests the default (port 0): use the port the launch
+	// already stored in raw.qemu so a dynamically allocated listener is not
+	// overwritten by the collision-prone deterministic hash.
+	if port == 0 {
+		port = spicePortFromConfig(instance.Config["raw.qemu"])
+		if port == 0 {
+			port = SPICEPortFor(name)
+		}
 	}
 
 	// Incus refuses raw.qemu updates while the VM runs; stop it up front and
@@ -135,10 +184,6 @@ func (s *Service) SPICEDial(_ context.Context, clusterName, name string, port in
 	if port < spicePortMin || port > spicePortMax {
 		return nil, fmt.Errorf("%w: spice port must be between %d and %d", ErrInvalidRequest, spicePortMin, spicePortMax)
 	}
-	if expected := SPICEPortFor(name); port != expected {
-		return nil, fmt.Errorf("%w: spice port %d is not the port for instance %q", ErrInvalidRequest, port, name)
-	}
-
 	client, err := s.client(clusterName)
 	if err != nil {
 		return nil, err
@@ -151,6 +196,16 @@ func (s *Service) SPICEDial(_ context.Context, clusterName, name string, port in
 		}
 
 		return nil, fmt.Errorf("instances: get %s:%s: %w", clusterName, name, err)
+	}
+
+	// Only the port this instance actually stored may be bridged; accepting
+	// an arbitrary port would turn the bridge into a general TCP proxy.
+	expected := spicePortFromConfig(instance.Config["raw.qemu"])
+	if expected == 0 {
+		expected = SPICEPortFor(name)
+	}
+	if port != expected {
+		return nil, fmt.Errorf("%w: spice port %d is not the port for instance %q", ErrInvalidRequest, port, name)
 	}
 
 	host := spiceMemberHost(client, instance.Location)

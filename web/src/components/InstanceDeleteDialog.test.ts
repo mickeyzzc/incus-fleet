@@ -22,7 +22,10 @@ describe('InstanceDeleteDialog', () => {
     const checkbox = wrapper.find('input[type="checkbox"]')
     expect((checkbox.element as HTMLInputElement).checked).toBe(false)
 
-    await wrapper.findAll('button').at(-1)?.trigger('click')
+    const deleteButton = wrapper.findAll('button').at(-1)
+    expect(deleteButton?.attributes('disabled')).toBeDefined()
+    await wrapper.find('input[type="text"]').setValue('web')
+    await deleteButton?.trigger('click')
     expect(wrapper.emitted('confirm')).toEqual([[false]])
   })
 
@@ -31,6 +34,7 @@ describe('InstanceDeleteDialog', () => {
     await flushPromises()
 
     await wrapper.find('input[type="checkbox"]').setValue(true)
+    await wrapper.find('input[type="text"]').setValue('web')
     await wrapper.findAll('button').at(-1)?.trigger('click')
 
     expect(wrapper.emitted('confirm')).toEqual([[true]])

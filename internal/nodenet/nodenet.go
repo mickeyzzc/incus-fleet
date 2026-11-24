@@ -436,7 +436,7 @@ func parseWiFiScan(out string) []WiFiNetwork {
 		case current == nil:
 			continue
 		case strings.HasPrefix(line, "SSID:"):
-			current.SSID = strings.TrimSpace(strings.TrimPrefix(line, "SSID:"))
+			current.SSID = decodeIWEscapedSSID(strings.TrimSpace(strings.TrimPrefix(line, "SSID:")))
 		case strings.HasPrefix(line, "signal:"):
 			dbm := strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(line, "signal:")), " dBm")
 			current.Signal, _ = strconv.Atoi(strings.Split(dbm, ".")[0])
@@ -452,6 +452,31 @@ func parseWiFiScan(out string) []WiFiNetwork {
 	}
 
 	return networks
+}
+
+// decodeIWEscapedSSID converts the \xHH byte escapes iw emits for non-ASCII
+// SSIDs back into UTF-8 text. Without this the node page shows literal escape
+// sequences such as \xe5\x8a\xa7\xe7\xbd\x91 instead of the network name.
+func decodeIWEscapedSSID(ssid string) string {
+	if !strings.Contains(ssid, `\x`) {
+		return ssid
+	}
+
+	var decoded strings.Builder
+	decoded.Grow(len(ssid))
+	for i := 0; i < len(ssid); {
+		if i+4 <= len(ssid) && ssid[i] == '\\' && ssid[i+1] == 'x' {
+			value, err := strconv.ParseUint(ssid[i+2:i+4], 16, 8)
+			if err == nil {
+				decoded.WriteByte(byte(value))
+				i += 4
+				continue
+			}
+		}
+		decoded.WriteByte(ssid[i])
+		i++
+	}
+	return decoded.String()
 }
 
 // SetNICState brings one interface up or down.

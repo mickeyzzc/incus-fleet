@@ -83,6 +83,25 @@ func (a *API) updateInstance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
+// renameInstance changes an instance name. The body carries the new name.
+func (a *API) renameInstance(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	detail, err := a.instances.Rename(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), req.Name)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, detail)
+}
+
 func (a *API) instanceAction(w http.ResponseWriter, r *http.Request) {
 	var req instances.ActionRequest
 	if err := decodeJSON(w, r, &req); err != nil {

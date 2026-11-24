@@ -14,6 +14,7 @@ type OverlayService interface {
 	List(ctx context.Context, cluster string) ([]*overlay.Status, error)
 	Get(ctx context.Context, cluster, name string) (*overlay.Status, error)
 	Enable(ctx context.Context, cluster string, req overlay.Request) (*overlay.Status, error)
+	Update(ctx context.Context, cluster, name string, req overlay.Request) (*overlay.Status, error)
 	Reconcile(ctx context.Context, cluster, name string) (*overlay.Status, error)
 	Disable(ctx context.Context, cluster, name string) error
 }
@@ -85,6 +86,30 @@ func (a *API) enableOverlay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, status)
+}
+
+// updateOverlay edits an existing overlay and re-applies it.
+func (a *API) updateOverlay(w http.ResponseWriter, r *http.Request) {
+	if !a.overlayService(w) {
+		return
+	}
+
+	var req overlay.Request
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Now().Add(overlayApplyTimeout))
+
+	status, err := a.overlay.Update(r.Context(), r.PathValue("cluster"), r.PathValue("overlay"), req)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, status)
 }
 
 // reconcileOverlay re-applies a stored overlay against the current members.

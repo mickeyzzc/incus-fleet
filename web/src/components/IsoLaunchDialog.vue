@@ -26,6 +26,10 @@ const instances = useInstancesStore()
 const answerProfiles = useAnswerProfilesStore()
 const { t } = useI18n()
 
+const TIMEZONES = ['UTC', 'Asia/Shanghai', 'Asia/Tokyo', 'Europe/London', 'Europe/Berlin', 'America/New_York']
+const LOCALES = ['en_US', 'en_GB', 'zh_CN', 'zh_TW', 'de_DE', 'fr_FR', 'es_ES', 'ja_JP', 'ko_KR']
+const KEYBOARDS = ['us', 'gb', 'cn', 'de', 'fr', 'es', 'jp', 'kr', 'ru']
+
 const form = reactive({
   name: '',
   network: '',
@@ -43,6 +47,7 @@ const unattended = reactive({
   disk: '',
   locale: '',
   keyboard: '',
+  packages: '',
   custom: false,
   answer: '',
 })
@@ -65,6 +70,8 @@ const visible = computed({
 // Saved configurations for the selected installer family; the server also
 // resolves per-profile defaults, but showing them here keeps the UI honest.
 const availableProfiles = computed(() => answerProfiles.byProfile(unattended.profile))
+// Debian preseed and kickstart honour a target disk; Subiquity/NoCloud do not.
+const needsDiskField = computed(() => unattended.profile === 'debian-preseed' || unattended.profile === 'kickstart')
 
 function applyProfile(id: string): void {
   unattended.profileId = id
@@ -125,6 +132,7 @@ watch(
       unattended.disk = ''
       unattended.locale = ''
       unattended.keyboard = ''
+      unattended.packages = ''
       unattended.custom = false
       unattended.answer = ''
       preview.value = null
@@ -174,6 +182,7 @@ function buildUnattendedRequest(name: string): UnattendedLaunchRequest {
       disk: unattended.disk,
       locale: unattended.locale,
       keyboard: unattended.keyboard,
+      packages: unattended.packages,
     }
   }
   return request
@@ -346,16 +355,35 @@ async function submit(): Promise<void> {
             <el-input v-model="unattended.password" type="password" show-password />
           </el-form-item>
           <el-form-item :label="t('iso.specTimezone')">
-            <el-input v-model="unattended.timezone" placeholder="UTC" />
+            <el-select
+              v-model="unattended.timezone"
+              filterable
+              allow-create
+              default-first-option
+              style="width: 100%"
+            >
+              <el-option v-for="zone in TIMEZONES" :key="zone" :label="zone" :value="zone" />
+            </el-select>
           </el-form-item>
-          <el-form-item :label="t('iso.specDisk')">
+          <el-form-item v-if="needsDiskField" :label="t('iso.specDisk')">
             <el-input v-model="unattended.disk" placeholder="/dev/vda" />
           </el-form-item>
           <el-form-item :label="t('iso.specLocale')">
-            <el-input v-model="unattended.locale" placeholder="en_US" />
+            <el-select v-model="unattended.locale" filterable allow-create default-first-option style="width: 100%">
+              <el-option v-for="locale in LOCALES" :key="locale" :label="locale" :value="locale" />
+            </el-select>
           </el-form-item>
           <el-form-item :label="t('iso.specKeyboard')">
-            <el-input v-model="unattended.keyboard" placeholder="us" />
+            <el-select v-model="unattended.keyboard" filterable allow-create default-first-option style="width: 100%">
+              <el-option v-for="layout in KEYBOARDS" :key="layout" :label="layout" :value="layout" />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="t('answerProfiles.packages')">
+            <el-input
+              v-model="unattended.packages"
+              :placeholder="t('answerProfiles.packagesPlaceholder')"
+            />
+            <p class="field-hint">{{ t('answerProfiles.packagesHint') }}</p>
           </el-form-item>
         </template>
 

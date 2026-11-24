@@ -92,6 +92,11 @@ func enrichNetworks(networks []instances.Network, members []string, lookup func(
 			out = append(out, network)
 			continue
 		}
+		// Loopback cannot be a macvlan parent; offering it in the physical
+		// NIC dropdown only produces a runtime device-start failure.
+		if network.Name == "lo" {
+			continue
+		}
 
 		located := network.Locations
 		if len(located) == 0 {

@@ -95,6 +95,16 @@ function validate(): string {
   if (!form.subnet.trim()) {
     return t('overlay.validationSubnet')
   }
+  if (!/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(form.subnet.trim())) {
+    return t('overlay.validationSubnetFormat')
+  }
+  const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/
+  if (form.dhcpStart.trim() && !ipv4.test(form.dhcpStart.trim())) {
+    return t('validation.ipv4Format')
+  }
+  if (form.dhcpEnd.trim() && !ipv4.test(form.dhcpEnd.trim())) {
+    return t('validation.ipv4Format')
+  }
   if (form.vni < 1 || form.vni > 16777215) {
     return t('overlay.validationVNI')
   }
@@ -113,7 +123,11 @@ async function submit(): Promise<void> {
   }
 
   try {
-    await instances.enableOverlay(props.cluster, request())
+    if (props.overlay) {
+      await instances.updateOverlay(props.cluster, props.overlay.name, request())
+    } else {
+      await instances.enableOverlay(props.cluster, request())
+    }
     ElMessage.success(t('overlay.saved', { name: form.name.trim() }))
     emit('saved', form.name.trim())
     visible.value = false
@@ -124,7 +138,12 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog v-model="visible" :title="t('overlay.createTitle')" width="560px" destroy-on-close>
+  <el-dialog
+    v-model="visible"
+    :title="overlay ? t('overlay.editTitle') : t('overlay.createTitle')"
+    width="560px"
+    destroy-on-close
+  >
     <el-alert class="overlay-alert" :title="t('overlay.hint')" type="info" :closable="false" show-icon />
 
     <el-form label-position="top" @submit.prevent="submit">
@@ -171,7 +190,7 @@ async function submit(): Promise<void> {
     <template #footer>
       <el-button @click="visible = false">{{ t('common.cancel') }}</el-button>
       <el-button type="primary" :loading="instances.saving" @click="submit">
-        {{ t('overlay.enable') }}
+        {{ overlay ? t('common.save') : t('overlay.enable') }}
       </el-button>
     </template>
   </el-dialog>

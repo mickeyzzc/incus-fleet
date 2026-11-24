@@ -13,6 +13,7 @@ import InstanceDeleteDialog from '@/components/InstanceDeleteDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
+import RenameInstanceDialog from '@/components/RenameInstanceDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type {
   InstanceDetail,
@@ -56,6 +57,9 @@ const detailCluster = ref('')
 const detailName = ref('')
 const migrateOpen = ref(false)
 const migrateInstance = ref<InstanceSummary | null>(null)
+const renameOpen = ref(false)
+const renameCluster = ref('')
+const renameName = ref('')
 const formOpen = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const formCluster = ref('')
@@ -209,6 +213,17 @@ function openDetail(instance: InstanceSummary): void {
 function openMigrate(instance: InstanceSummary): void {
   migrateInstance.value = instance
   migrateOpen.value = true
+}
+
+function openRename(instance: Pick<InstanceSummary, 'cluster' | 'name'>): void {
+  renameCluster.value = instance.cluster
+  renameName.value = instance.name
+  renameOpen.value = true
+}
+
+async function onRenamed(): Promise<void> {
+  detailOpen.value = false
+  await load()
 }
 
 function openCreate(): void {
@@ -391,13 +406,14 @@ async function onSaved(): Promise<void> {
             </template>
           </el-table-column>
           <el-table-column type="selection" width="42" reserve-selection />
-          <el-table-column :label="t('common.actions')" width="420" fixed="right">
+          <el-table-column :label="t('common.actions')" width="240" fixed="right">
             <template #default="{ row }">
               <InstanceActions
                 :instance="row"
                 :busy="isBusy(row)"
                 @action="act(row, $event)"
                 @edit="openEdit(row)"
+                @rename="openRename(row)"
                 @migrate="openMigrate(row)"
                 @delete="confirmDelete(row)"
               />
@@ -427,8 +443,15 @@ async function onSaved(): Promise<void> {
       :cluster="detailCluster"
       :name="detailName"
       @edit="openEditDetail"
+      @rename="openRename"
       @migrate="openMigrate"
       @delete="confirmDelete"
+    />
+    <RenameInstanceDialog
+      v-model="renameOpen"
+      :cluster="renameCluster"
+      :instance="renameName"
+      @renamed="onRenamed"
     />
     <InstanceFormDialog
       v-model="formOpen"

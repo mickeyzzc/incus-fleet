@@ -367,7 +367,12 @@ function memoryShare(cluster: ClusterSummary): string {
           <el-tag v-for="network in cluster.networks.slice(0, 3)" :key="network" size="small" effect="plain">
             {{ network }}
           </el-tag>
-          <el-tag v-if="cluster.networks.length > 3" size="small" effect="plain">
+          <el-tag
+            v-if="cluster.networks.length > 3"
+            size="small"
+            effect="plain"
+            :title="cluster.networks.join(', ')"
+          >
             +{{ cluster.networks.length - 3 }}
           </el-tag>
         </div>

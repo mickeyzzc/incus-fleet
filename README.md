@@ -1,12 +1,12 @@
 # Incus Fleet
 
-**English** | [简体中文](README.zh-CN.md)
+**English** | [简体中文](docs/zh/README.zh-CN.md)
 
 Self-hosted control plane for managing multiple independent [Incus](https://linuxcontainers.org/incus/)
 clusters from one UI and API. Instances can be copied or moved between clusters with one click,
 including live migration for stateful virtual machines.
 
-![Incus Fleet dashboard with two clusters and host resource utilization](docs/images/05-dashboard-resources.png)
+![Incus Fleet dashboard with two clusters and host resource utilization](docs/en/images/05-dashboard-resources.png)
 
 *Dashboard in the Simplified Chinese UI; the interface is bilingual and English is available
 from the language switcher.*
@@ -64,7 +64,7 @@ The two app instances are independent. Each one connects to both Incus clusters 
 network and drives migrations through the Incus API. There is no application-level cluster
 membership, shared database, or mutual backup relationship between `c1` and `c2`.
 
-See [docs/architecture.md](docs/architecture.md) for components, migration flow, and failure
+See [docs/en/architecture.md](docs/en/architecture.md) for components, migration flow, and failure
 semantics.
 
 ## Requirements
@@ -97,34 +97,34 @@ INCUS_FLEET_AUTH_TOKEN="..." ./bin/incus-fleet -config config.local.yaml
 
 Open `http://127.0.0.1:8080` and sign in with the admin token.
 
-The config reference and full deployment steps are in [docs/deployment.md](docs/deployment.md).
-The HTTP API is documented in [docs/api.md](docs/api.md). End-user workflows are covered in the
-[user guide](docs/user-guide.md).
+The config reference and full deployment steps are in [docs/en/deployment.md](docs/en/deployment.md).
+The HTTP API is documented in [docs/en/api.md](docs/en/api.md). End-user workflows are covered in the
+[user guide](docs/en/user-guide.md).
 
 ## Screenshots
 
 Cluster detail shows host capacity, storage pools, and instance state:
 
-![Cluster resource utilization](docs/images/06-cluster-resources.png)
+![Cluster resource utilization](docs/en/images/06-cluster-resources.png)
 
 The instance drawer monitors CPU, memory, disk, and network every 3 seconds:
 
-![Instance monitoring panel](docs/images/07-metrics-panel.png)
+![Instance monitoring panel](docs/en/images/07-metrics-panel.png)
 
 ## Documentation
 
 | Document | English | 简体中文 |
 | --- | --- | --- |
-| User guide | [docs/user-guide.md](docs/user-guide.md) | [docs/zh-CN/user-guide.md](docs/zh-CN/user-guide.md) |
-| Architecture | [docs/architecture.md](docs/architecture.md) | [docs/zh-CN/architecture.md](docs/zh-CN/architecture.md) |
-| Deployment | [docs/deployment.md](docs/deployment.md) | [docs/zh-CN/deployment.md](docs/zh-CN/deployment.md) |
-| HTTP API | [docs/api.md](docs/api.md) | [docs/zh-CN/api.md](docs/zh-CN/api.md) |
-| Roadmap | [docs/roadmap.md](docs/roadmap.md) | [docs/zh-CN/roadmap.md](docs/zh-CN/roadmap.md) |
-| Engineering standards | [docs/standards.md](docs/standards.md) | [docs/zh-CN/standards.md](docs/zh-CN/standards.md) |
-| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) | [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) |
-| Security policy | [SECURITY.md](SECURITY.md) | [SECURITY.zh-CN.md](SECURITY.zh-CN.md) |
-| Code of conduct | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | [CODE_OF_CONDUCT.zh-CN.md](CODE_OF_CONDUCT.zh-CN.md) |
-| Changelog | [CHANGELOG.md](CHANGELOG.md) | [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md) |
+| User guide | [docs/en/user-guide.md](docs/en/user-guide.md) | [docs/zh/user-guide.md](docs/zh/user-guide.md) |
+| Architecture | [docs/en/architecture.md](docs/en/architecture.md) | [docs/zh/architecture.md](docs/zh/architecture.md) |
+| Deployment | [docs/en/deployment.md](docs/en/deployment.md) | [docs/zh/deployment.md](docs/zh/deployment.md) |
+| HTTP API | [docs/en/api.md](docs/en/api.md) | [docs/zh/api.md](docs/zh/api.md) |
+| Roadmap | [docs/en/roadmap.md](docs/en/roadmap.md) | [docs/zh/roadmap.md](docs/zh/roadmap.md) |
+| Engineering standards | [docs/en/standards.md](docs/en/standards.md) | [docs/zh/standards.md](docs/zh/standards.md) |
+| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) | [docs/zh/CONTRIBUTING.zh-CN.md](docs/zh/CONTRIBUTING.zh-CN.md) |
+| Security policy | [SECURITY.md](SECURITY.md) | [docs/zh/SECURITY.zh-CN.md](docs/zh/SECURITY.zh-CN.md) |
+| Code of conduct | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | [docs/zh/CODE_OF_CONDUCT.zh-CN.md](docs/zh/CODE_OF_CONDUCT.zh-CN.md) |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) | [docs/zh/CHANGELOG.zh-CN.md](docs/zh/CHANGELOG.zh-CN.md) |
 
 The English files are canonical. Chinese files mirror them and should be updated in the same
 change whenever behavior or instructions change.
@@ -144,7 +144,7 @@ Frontend development runs Vite with an API proxy to `127.0.0.1:8080`:
 cd web && bun run dev
 ```
 
-Coding conventions and the TDD contract are in [docs/standards.md](docs/standards.md).
+Coding conventions and the TDD contract are in [docs/en/standards.md](docs/en/standards.md).
 
 ## Repository layout
 
@@ -161,7 +161,10 @@ internal/migrations    migration orchestration and rollback
 internal/store         SQLite/PostgreSQL persistence
 internal/testutil      test doubles for the Incus API
 deploy/                systemd, Caddy, and example configs
-docs/                  architecture, API, standards, deployment, user guide
+docs/
+  en/                  English docs + images/ (canonical)
+  zh/                  Simplified Chinese docs + images/ + zh-CN mirrors
+  local/               local-only, gitignored (real IPs, credentials, notes)
 web/                   Vue 3 + TypeScript + Vite + Element Plus UI
 ```
 
@@ -178,7 +181,7 @@ web/                   Vue 3 + TypeScript + Vite + Element Plus UI
 ## Contributing
 
 Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and
-[docs/standards.md](docs/standards.md) before you start. All participants must follow the
+[docs/en/standards.md](docs/en/standards.md) before you start. All participants must follow the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License

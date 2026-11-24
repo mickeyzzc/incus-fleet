@@ -17,9 +17,14 @@
 # --- Local-only instructions and working notes ------------------------------
 # Never commit operator notes, audit trails, or agent instructions. They carry
 # real subnets, hostnames, and credentials by design.
+# docs/local/ is the sanctioned local-only documentation directory: real IPs,
+# hostnames, credentials, and operator notes belong here, never in docs/en or
+# docs/zh. The whole directory is ignored, including any images copied into it.
 /AGENTS.md
 /local-notes/
 /docs/local/
+/docs/**/local/
+/docs/**/_local/
 *.local.md
 *.local.yaml
 *.local.yml

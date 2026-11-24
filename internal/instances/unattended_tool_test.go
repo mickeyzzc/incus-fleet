@@ -234,7 +234,7 @@ func TestBootConfigPathsAndDerivedName(t *testing.T) {
 	if paths := bootConfigPaths(unattended.Profile("unknown")); paths != nil {
 		t.Fatalf("unknown paths = %#v", paths)
 	}
-	if name := derivedISOName("debian", unattended.ProfileDebianPreseed); name != "debian-debian-preseed-auto" {
+	if name := derivedISOName("debian", unattended.ProfileDebianPreseed, "vm1"); name != "debian-debian-preseed-auto-vm1" {
 		t.Fatalf("derived name = %q", name)
 	}
 }

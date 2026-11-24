@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/mickeyzzc/incus-fleet/security/advisories/new
     about: Report vulnerabilities privately. Do not open a public issue.
   - name: Documentation
-    url: https://github.com/mickeyzzc/incus-fleet/blob/main/docs/user-guide.md
+    url: https://github.com/mickeyzzc/incus-fleet/blob/main/docs/en/user-guide.md
     about: Read the user guide, deployment guide, and API reference first.

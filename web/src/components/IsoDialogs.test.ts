@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import ElementPlus, { ElMessage } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,6 +7,14 @@ import { api } from '@/api'
 import CloneInstanceDialog from './CloneInstanceDialog.vue'
 import IsoImportDialog from './IsoImportDialog.vue'
 import IsoLaunchDialog from './IsoLaunchDialog.vue'
+
+/** Emits a value on the ElSelect inside the labelled form item. */
+function selectField(wrapper: VueWrapper, label: string, value: string): void {
+  const item = wrapper.findAll('.el-form-item').find((entry) => entry.text().includes(label))
+  const select = item?.findComponent({ name: 'ElSelect' })
+  select?.vm.$emit('update:modelValue', value)
+  select?.vm.$emit('change', value)
+}
 
 describe('IsoImportDialog', () => {
   beforeEach(() => {
@@ -290,8 +298,9 @@ describe('IsoLaunchDialog unattended', () => {
 
     await wrapper.find('input[placeholder="fleet"]').setValue('ops')
     await wrapper.find('input[placeholder="/dev/vda"]').setValue('/dev/vdb')
-    await wrapper.find('input[placeholder="en_US"]').setValue('zh_CN')
-    await wrapper.find('input[placeholder="us"]').setValue('fr')
+    selectField(wrapper, 'Locale', 'zh_CN')
+    selectField(wrapper, 'Keyboard', 'fr')
+    await flushPromises()
 
     await wrapper.findAll('button').at(-1)?.trigger('click')
     await flushPromises()
@@ -391,7 +400,7 @@ describe('IsoLaunchDialog unattended', () => {
     await flushPromises()
     // hostname + timezone on the template path
     await wrapper.find('input[placeholder="defaults to VM name"]').setValue('extra-host')
-    await wrapper.find('input[placeholder="UTC"]').setValue('Europe/Berlin')
+    selectField(wrapper, 'Timezone', 'Europe/Berlin')
     await flushPromises()
     // cancel button closes the dialog
     const cancel = wrapper.findAll('button').find((b) => b.text().includes('Cancel'))

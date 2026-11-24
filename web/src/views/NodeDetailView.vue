@@ -126,6 +126,7 @@ watch(() => props.cluster, ensureCluster)
 
       <NodeNetworkPanel :cluster="cluster" :member="memberInfo.name" :can-write="auth.canWrite" />
     </template>
+    <el-skeleton v-else-if="clusters.loading" :rows="6" animated />
   </div>
 </template>
 
