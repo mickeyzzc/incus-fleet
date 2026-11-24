@@ -8,7 +8,7 @@ import { useI18n } from 'vue-i18n'
 import AnswerProfilesView from '@/views/AnswerProfilesView.vue'
 import CopyableText from '@/components/CopyableText.vue'
 import type { ClusterImage, ClusterSummary, ISOSummary, Keystone, StoredScript } from '@/api/types'
-import { api } from '@/api'
+import { api, ApiError } from '@/api'
 import { useAssetsStore } from '@/stores/assets'
 import { useUploadsStore } from '@/stores/uploads'
 import { errorMessage } from '@/utils/errors'
@@ -320,7 +320,11 @@ function confirmDeleteISO(iso: ISOSummary): void {
         ElMessage.success(t('assets.isoDeleted'))
         await fetchISOs()
       } catch (err) {
-        ElMessage.error(t('assets.failed', { error: errorMessage(err) }))
+        ElMessage.error(
+          err instanceof ApiError && err.code === 'in_use'
+            ? t('assets.isoInUse')
+            : t('assets.failed', { error: errorMessage(err) }),
+        )
       }
     })
     .catch(() => {})
@@ -392,6 +396,13 @@ function sizeLabel(size: string): string {
 
 <template>
   <div class="page">
+    <div class="page-header">
+      <div>
+        <h2>{{ t('assets.title') }}</h2>
+        <p class="subtitle">{{ t('assets.hint') }}</p>
+      </div>
+    </div>
+
     <el-alert
       v-if="clustersError"
       class="fleet-alert"

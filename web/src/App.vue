@@ -347,16 +347,12 @@ async function logout(): Promise<void> {
               :aria-label="t('nav.toggleSidebar')"
               @click="sidebarOpen = !sidebarOpen"
             />
-            <div>
-              <el-breadcrumb class="breadcrumbs" separator="/">
-                <el-breadcrumb-item v-for="(crumb, index) in breadcrumbs" :key="index">
-                  <router-link v-if="crumb.to" :to="crumb.to">{{ crumb.title }}</router-link>
-                  <span v-else>{{ crumb.title }}</span>
-                </el-breadcrumb-item>
-              </el-breadcrumb>
-              <h1>{{ pageTitle }}</h1>
-              <p>{{ t('app.subtitle') }}</p>
-            </div>
+            <el-breadcrumb class="breadcrumbs" separator="/">
+              <el-breadcrumb-item v-for="(crumb, index) in breadcrumbs" :key="index">
+                <router-link v-if="crumb.to" :to="crumb.to">{{ crumb.title }}</router-link>
+                <span v-else>{{ crumb.title }}</span>
+              </el-breadcrumb-item>
+            </el-breadcrumb>
           </div>
           <div class="topbar-actions">
             <span v-if="auth.username" class="topbar-user">{{ auth.username }}</span>

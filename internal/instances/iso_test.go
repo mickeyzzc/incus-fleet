@@ -178,6 +178,21 @@ func TestLaunchFromISOMissingVolume(t *testing.T) {
 	}
 }
 
+// TestDeleteISOInUse maps Incus's opaque "still in use" rejection to an
+// actionable conflict the API can show without leaking internal detail.
+func TestDeleteISOInUse(t *testing.T) {
+	srv := &incusfake.Server{DeleteVolumeErr: errors.New("The storage volume is still in use")}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	err := svc.DeleteISO("c1", "default", "attached")
+	if !errors.Is(err, ErrInUse) {
+		t.Fatalf("DeleteISO() error = %v, want ErrInUse", err)
+	}
+	if !strings.Contains(err.Error(), "detach") {
+		t.Fatalf("DeleteISO() message is not actionable: %v", err)
+	}
+}
+
 // TestDeleteISOValidationAndMissing covers the guard clauses and the
 // not-found mapping on ISO deletion.
 func TestDeleteISOValidationAndMissing(t *testing.T) {

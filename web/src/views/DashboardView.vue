@@ -342,7 +342,7 @@ function memoryShare(cluster: ClusterSummary): string {
             <span>{{ t('cluster.cpuCores') }}</span>
             <strong>{{ cluster.cpu.total }}</strong>
           </div>
-          <div v-if="cluster.memory && cluster.memory.total > 0" class="metric">
+          <div v-if="cluster.memory && cluster.memory.total > 0" class="metric metric-wide">
             <span>{{ t('cluster.memUsage') }}</span>
             <strong>{{ memoryShare(cluster) }}</strong>
           </div>

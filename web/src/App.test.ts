@@ -94,7 +94,7 @@ describe('App shell', () => {
     expect(wrapper.text()).toContain('Cluster 62')
     expect(wrapper.text()).toContain('Cluster 63')
     expect(wrapper.text()).toContain('1/2 clusters online')
-    expect(wrapper.find('.topbar h1').text()).toBe('Dashboard')
+    expect(wrapper.find('.breadcrumbs').text()).toContain('Dashboard')
     expect(api.listClusters).toHaveBeenCalledTimes(1)
   })
 
@@ -190,8 +190,7 @@ describe('App shell', () => {
     await router.push('/instances')
     await flushPromises()
 
-    expect(wrapper.find('.topbar h1').text()).toBe('Instances')
-    expect(wrapper.text()).toContain('Manage independent Incus clusters from one place.')
+    expect(wrapper.find('.breadcrumbs').text()).toContain('Instances')
   })
 
   it('routes to the login view with a redirect when the session expires mid-page', async () => {

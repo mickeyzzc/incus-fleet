@@ -20,6 +20,9 @@ const source = ref<'local' | 'external'>('local')
 const series = ref<TelemetrySeries[]>([])
 const loading = ref(false)
 const error = ref('')
+const externalDisabled = computed(() => /external metric queries are not enabled/i.test(error.value))
+const telemetryDisabled = computed(() => /telemetry is not enabled/i.test(error.value))
+const metricsDisabled = computed(() => telemetryDisabled.value || externalDisabled.value)
 let timer: ReturnType<typeof setInterval> | null = null
 
 function findSeries(name: string, labels: Record<string, string> = {}): TelemetrySeries | undefined {
@@ -73,6 +76,16 @@ function uptimeLabel(seconds: number | null): string {
   return days > 0 ? `${days}d ${hours}h` : `${hours}h ${minutes}m`
 }
 
+// The source watcher clears the old series and refreshes once, so these
+// handlers only switch the source to avoid duplicate requests.
+function useExternalSource(): void {
+  source.value = 'external'
+}
+
+function useCenterSource(): void {
+  source.value = 'local'
+}
+
 async function refresh(): Promise<void> {
   loading.value = true
   try {
@@ -114,26 +127,64 @@ watch([() => props.cluster, () => props.member, source], () => {
 
 <template>
   <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h3 class="section-title">{{ t('hostMetrics.title') }}</h3>
+        <p class="subtitle">{{ t('hostMetrics.subtitle', { host: member }) }}</p>
+      </div>
+      <div class="page-actions">
+        <label class="source-select">
+          {{ t('hostMetrics.source') }}
+          <select v-model="source">
+            <option value="local">{{ t('hostMetrics.local') }}</option>
+            <option value="external">{{ t('hostMetrics.external') }}</option>
+          </select>
+        </label>
+        <span v-if="lastSample" class="metric-time">{{ formatDateTime(lastSample) }}</span>
+        <el-button :loading="loading" @click="refresh">{{ t('common.refresh') }}</el-button>
+      </div>
+    </div>
     <div class="panel-body">
-      <div class="section-heading page-header">
-        <div>
-          <h3 class="section-title">{{ t('hostMetrics.title') }}</h3>
-          <p class="subtitle">{{ t('hostMetrics.subtitle', { host: member }) }}</p>
+      <el-alert
+        v-if="error && !metricsDisabled"
+        :title="t('hostMetrics.failed', { error })"
+        type="error"
+        :closable="false"
+        show-icon
+      />
+      <div v-else-if="metricsDisabled" class="metrics-disabled">
+        <div class="metrics-disabled-copy">
+          <strong>
+            {{
+              externalDisabled
+                ? t('hostMetrics.externalDisabledTitle')
+                : t('hostMetrics.centerDisabledTitle')
+            }}
+          </strong>
+          <p>
+            {{
+              externalDisabled
+                ? t('hostMetrics.externalDisabledHint')
+                : t('hostMetrics.centerDisabledHint')
+            }}
+          </p>
         </div>
-        <div class="page-actions">
-          <label class="source-select">
-            {{ t('hostMetrics.source') }}
-            <select v-model="source">
-              <option value="local">{{ t('hostMetrics.local') }}</option>
-              <option value="external">{{ t('hostMetrics.external') }}</option>
-            </select>
-          </label>
-          <span class="metric-time">{{ lastSample ? formatDateTime(lastSample) : t('common.none') }}</span>
-          <el-button :loading="loading" @click="refresh">{{ t('common.refresh') }}</el-button>
+        <div class="metrics-disabled-actions">
+          <el-button size="small" @click="refresh">{{ t('common.retry') }}</el-button>
+          <el-button
+            v-if="source === 'local'"
+            size="small"
+            type="primary"
+            plain
+            @click="useExternalSource"
+          >
+            {{ t('hostMetrics.useExternal') }}
+          </el-button>
+          <el-button v-else size="small" type="primary" plain @click="useCenterSource">
+            {{ t('hostMetrics.useCenter') }}
+          </el-button>
         </div>
       </div>
-
-      <el-alert v-if="error" :title="t('hostMetrics.failed', { error })" type="error" :closable="false" show-icon />
       <p v-if="!error && loading && series.length === 0" class="metrics-empty">{{ t('hostMetrics.loading') }}</p>
       <p v-else-if="!error && series.length === 0" class="metrics-empty">{{ t('hostMetrics.empty') }}</p>
 
@@ -223,6 +274,41 @@ watch([() => props.cluster, () => props.member, source], () => {
   color: inherit;
   padding: 3px 6px;
   font: inherit;
+}
+
+.metrics-disabled {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border: 1px solid var(--el-color-warning-light-7);
+  border-radius: 10px;
+  background: var(--el-color-warning-light-9);
+}
+
+.metrics-disabled-copy {
+  min-width: 0;
+}
+
+.metrics-disabled-copy strong {
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.metrics-disabled-copy p {
+  max-width: 72ch;
+  margin-top: 4px;
+  color: var(--fleet-ink-soft, var(--el-text-color-secondary));
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.metrics-disabled-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .metrics-empty {

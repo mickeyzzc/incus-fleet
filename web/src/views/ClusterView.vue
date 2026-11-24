@@ -670,31 +670,33 @@ function openNodeUpgrade(member: ClusterMember): void {
           </div>
 
           <el-table :data="summary.members" size="small" stripe>
-            <el-table-column :label="t('common.name')" min-width="160">
+            <el-table-column :label="t('common.name')" min-width="150">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openNodeDetail(row)">
                   {{ row.name }}
                 </el-button>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.status')" width="110">
+            <el-table-column :label="t('common.status')" width="95">
               <template #default="{ row }">
                 <el-tag :type="row.status === 'Online' ? 'success' : 'info'" size="small" effect="plain">
                   {{ memberStatusLabel(row.status) }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.memberRoles')" min-width="150">
+            <el-table-column :label="t('cluster.memberRoles')" min-width="120">
               <template #default="{ row }">
                 <span class="mono">{{ row.roles?.join(', ') || t('common.none') }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.architectures')" width="120">
+            <el-table-column :label="t('cluster.architectures')" width="95">
               <template #default="{ row }">{{ row.architecture || t('common.none') }}</template>
             </el-table-column>
-            <el-table-column :label="t('cluster.memberAddress')" min-width="190">
+            <el-table-column :label="t('cluster.memberAddress')" min-width="150">
               <template #default="{ row }">
-                <span class="mono">{{ row.url || summary.endpoint }}</span>
+                <span class="mono member-address" :title="row.url || summary.endpoint">
+                  {{ row.url || summary.endpoint }}
+                </span>
               </template>
             </el-table-column>
             <el-table-column :label="t('common.actions')" width="300" fixed="right">
@@ -750,46 +752,43 @@ function openNodeUpgrade(member: ClusterMember): void {
           </div>
 
           <el-table v-loading="instances.loading" :data="pagedInstances" stripe>
-            <el-table-column :label="t('common.name')" min-width="170">
+            <el-table-column :label="t('common.name')" min-width="160">
               <template #default="{ row }">
                 <div class="status-cell">
                   <div>
                     <el-button link type="primary" class="name-link" @click="openDetail(row)">
                       {{ row.name }}
                     </el-button>
-                    <span class="mini-label">{{ row.description || t('common.none') }}</span>
+                    <span class="name-meta">
+                      <span class="mini-label">{{ row.description || t('common.none') }}</span>
+                      <el-tag v-if="row.live_migratable" size="small" type="success" effect="plain">
+                        {{ t('common.live') }}
+                      </el-tag>
+                    </span>
                   </div>
                 </div>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.type')" width="130">
+            <el-table-column :label="t('common.type')" width="80">
               <template #default="{ row }">
                 <el-tag size="small" effect="plain">{{ instanceTypeLabel(row.type) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.status')" width="120">
+            <el-table-column :label="t('common.status')" width="90">
               <template #default="{ row }">
                 <StatusTag :status="row.status" :status-code="row.status_code" />
               </template>
             </el-table-column>
-            <el-table-column prop="location" :label="t('common.node')" width="140" />
-            <el-table-column :label="t('common.address')" min-width="150">
+            <el-table-column prop="location" :label="t('common.node')" width="100" />
+            <el-table-column :label="t('common.address')" min-width="120">
               <template #default="{ row }">
                 <span class="mono">{{ primaryAddress(row.ipv4, row.ipv6) }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.memory')" width="110">
+            <el-table-column :label="t('common.memory')" width="100">
               <template #default="{ row }">{{ formatBytes(row.memory) }}</template>
             </el-table-column>
-            <el-table-column :label="t('common.live')" width="90">
-              <template #default="{ row }">
-                <el-tag v-if="row.live_migratable" size="small" type="success" effect="light">
-                  {{ t('common.yes') }}
-                </el-tag>
-                <span v-else class="muted">{{ t('common.none') }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('common.actions')" width="240" fixed="right">
+            <el-table-column :label="t('common.actions')" width="260" fixed="right">
               <template #default="{ row }">
                 <InstanceActions
                   :instance="row"
@@ -1326,6 +1325,22 @@ function openNodeUpgrade(member: ClusterMember): void {
   padding: 0;
   height: auto;
   font-weight: 600;
+}
+
+.name-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.name-meta .mini-label {
+  display: inline;
+}
+
+.member-address {
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 
 .member-tag {

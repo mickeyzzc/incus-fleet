@@ -376,8 +376,8 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
 </script>
 
 <template>
-  <div class="page">
-    <div class="page-header">
+  <section class="panel node-network">
+    <div class="panel-head node-network-head">
       <div>
         <h3 class="section-title">{{ t('nodePage.title') }}</h3>
         <p class="subtitle">
@@ -397,6 +397,7 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
       </div>
     </div>
 
+    <div class="panel-body">
     <el-alert
       v-if="loadError"
       class="fleet-alert"
@@ -425,12 +426,6 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
 
     <el-tabs v-model="networkTab" class="network-tabs">
       <el-tab-pane :label="t('nodePage.nicsTitle')" name="nics">
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading">
-          <h3 class="section-title">{{ t('nodePage.nicsTitle') }}</h3>
-        </div>
-
         <el-table v-loading="loading" :data="snapshot?.nics ?? []" size="small" stripe>
           <el-table-column :label="t('common.name')" min-width="120">
             <template #default="{ row }">
@@ -480,22 +475,13 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
             </template>
           </el-table-column>
         </el-table>
-      </div>
-    </section>
       </el-tab-pane>
 
       <el-tab-pane :label="t('nodePage.routesTitle')" name="routes">
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('nodePage.routesTitle') }}</h3>
-          </div>
-          <div class="page-actions">
-            <el-button :icon="Plus" type="primary" :disabled="!mayWrite" @click="routeDialogOpen = true">
-              {{ t('nodePage.addRoute') }}
-            </el-button>
-          </div>
+        <div class="tab-toolbar">
+          <el-button :icon="Plus" type="primary" :disabled="!mayWrite" @click="routeDialogOpen = true">
+            {{ t('nodePage.addRoute') }}
+          </el-button>
         </div>
 
         <el-table v-loading="loading" :data="snapshot?.routes ?? []" size="small" stripe>
@@ -518,23 +504,14 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
             </template>
           </el-table-column>
         </el-table>
-      </div>
-    </section>
       </el-tab-pane>
 
       <el-tab-pane :label="t('nodePage.firewallTitle')" name="firewall">
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('nodePage.firewallTitle') }}</h3>
-            <p class="subtitle">{{ t('nodePage.firewallHint') }}</p>
-          </div>
-          <div class="page-actions">
-            <el-button :icon="Plus" type="primary" :disabled="!mayWrite" @click="firewallDialogOpen = true">
-              {{ t('nodePage.addRule') }}
-            </el-button>
-          </div>
+        <div class="tab-toolbar">
+          <p class="subtitle">{{ t('nodePage.firewallHint') }}</p>
+          <el-button :icon="Plus" type="primary" :disabled="!mayWrite" @click="firewallDialogOpen = true">
+            {{ t('nodePage.addRule') }}
+          </el-button>
         </div>
 
         <el-table v-loading="loading" :data="snapshot?.firewall ?? []" size="small" stripe>
@@ -551,18 +528,11 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
             </template>
           </el-table-column>
         </el-table>
-      </div>
-    </section>
       </el-tab-pane>
 
       <el-tab-pane v-if="wifiDevice" :label="t('nodePage.wifiTitle')" name="wifi">
-    <section class="panel">
-      <div class="panel-body">
-        <div class="section-heading page-header">
-          <div>
-            <h3 class="section-title">{{ t('nodePage.wifiTitle') }}</h3>
-            <p class="subtitle">{{ t('nodePage.wifiHint', { device: wifiDevice }) }}</p>
-          </div>
+        <div class="tab-toolbar">
+          <p class="subtitle">{{ t('nodePage.wifiHint', { device: wifiDevice }) }}</p>
           <el-button :icon="Refresh" :loading="wifiScanning" @click="scanWifi">
             {{ t('nodePage.wifiScan') }}
           </el-button>
@@ -597,10 +567,9 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
             </template>
           </el-table-column>
         </el-table>
-      </div>
-    </section>
       </el-tab-pane>
     </el-tabs>
+    </div>
 
     <el-dialog v-model="addressDialogOpen" :title="t('nodePage.configureTitle', { name: addressTarget?.name })" width="520px" destroy-on-close>
       <el-form label-position="top">
@@ -780,12 +749,53 @@ async function connectSavedNetwork(ssid: string): Promise<void> {
         </el-table>
       </div>
     </el-dialog>
-  </div>
+  </section>
 </template>
 
 <style scoped>
+.node-network {
+  width: 100%;
+  min-width: 0;
+}
+
+.node-network-head {
+  align-items: flex-start;
+}
+
+.node-network-head .subtitle {
+  margin-top: 4px;
+}
+
+.node-network-head .el-tag {
+  margin-top: 6px;
+}
+
+.node-network .panel-body {
+  padding-top: 14px;
+}
+
+.tab-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.tab-toolbar .subtitle {
+  margin-right: auto;
+  color: var(--fleet-ink-soft);
+  font-size: 13px;
+}
+
+.network-tabs :deep(.el-tabs__header) {
+  margin-bottom: 14px;
+}
+
 .addr-line {
   font-size: 12px;
+  line-height: 1.45;
 }
 
 .field-hint {

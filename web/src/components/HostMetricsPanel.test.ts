@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+import ElementPlus from 'element-plus'
 import { nextTick } from 'vue'
 
 import HostMetricsPanel from '@/components/HostMetricsPanel.vue'
@@ -75,6 +76,53 @@ describe('HostMetricsPanel', () => {
     await nextTick()
     expect(api.metricQueryRange).toHaveBeenCalled()
     expect(wrapper.text()).toContain('2.00')
+  })
+
+  it('explains disabled center telemetry and can switch to the external source', async () => {
+    vi.mocked(api.hostMetrics).mockRejectedValueOnce(new Error('telemetry is not enabled'))
+    vi.mocked(api.metricQueryRange).mockResolvedValue([])
+    const wrapper = mount(HostMetricsPanel, {
+      props: { cluster: 'c1', member: 'node-a' },
+      global: { plugins: [ElementPlus], stubs: { Sparkline: true, ElProgress: true } },
+    })
+    await nextTick()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('Center telemetry is not enabled')
+    expect(wrapper.text()).toContain('Install and connect incus-fleet-agent')
+
+    const external = wrapper.findAll('button').find((button) => button.text().includes('Prometheus/VM'))
+    await external?.trigger('click')
+    await nextTick()
+    await nextTick()
+
+    expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('external')
+    expect(api.metricQueryRange).toHaveBeenCalled()
+  })
+
+  it('explains disabled external metrics and can switch back to the center', async () => {
+    vi.mocked(api.hostMetrics).mockResolvedValue([])
+    vi.mocked(api.metricQueryRange).mockRejectedValueOnce(
+      new Error('external metric queries are not enabled'),
+    )
+    const wrapper = mount(HostMetricsPanel, {
+      props: { cluster: 'c1', member: 'node-a' },
+      global: { plugins: [ElementPlus], stubs: { Sparkline: true, ElProgress: true } },
+    })
+    await nextTick()
+
+    await wrapper.find('select').setValue('external')
+    await nextTick()
+    await nextTick()
+    expect(wrapper.text()).toContain('External metrics are not configured')
+    expect(wrapper.text()).toContain('Set the Prometheus/VM query endpoint')
+
+    const center = wrapper.findAll('button').find((button) => button.text().includes('Use center'))
+    await center?.trigger('click')
+    await nextTick()
+    await nextTick()
+    expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('local')
+    expect(api.hostMetrics).toHaveBeenCalledTimes(2)
   })
 
   it('shows an empty state without telemetry', async () => {

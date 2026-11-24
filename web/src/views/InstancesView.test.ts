@@ -135,7 +135,8 @@ describe('InstancesView', () => {
     const wrapper = mountInstances()
     await flushPromises()
 
-    const cloneButton = wrapper.findAll('button').find((b) => b.text().includes('Clone'))
+    await wrapper.findAll('button').find((b) => b.text().includes('Actions'))?.trigger('click')
+    const cloneButton = wrapper.findAll('.action-menu-item').find((b) => b.text().includes('Clone'))
     await cloneButton?.trigger('click')
     await flushPromises()
 
@@ -347,7 +348,8 @@ describe('InstancesView dialogs', () => {
     await flushPromises()
 
     const row = wrapper.findAll('.el-table__row')[0]!
-    const clone = row.findAll('button').find((b) => b.text().includes('Clone'))
+    await row.findAll('button').find((b) => b.text().includes('Actions'))!.trigger('click')
+    const clone = row.findAll('.action-menu-item').find((b) => b.text().includes('Clone'))
     await clone!.trigger('click')
     await flushPromises()
 

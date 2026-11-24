@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowDown,
+  CopyDocument,
   Delete,
   Edit,
   EditPen,
@@ -22,12 +23,14 @@ const props = withDefaults(
     busy?: boolean
     showMigrate?: boolean
     showEdit?: boolean
+    showClone?: boolean
   }>(),
   {
     size: 'small',
     busy: false,
     showMigrate: true,
     showEdit: true,
+    showClone: false,
   },
 )
 
@@ -37,6 +40,7 @@ const emit = defineEmits<{
   rename: []
   delete: []
   migrate: []
+  clone: []
 }>()
 
 const { t } = useI18n()
@@ -45,7 +49,7 @@ const running = computed(() => (props.instance.status || '').toLowerCase() === '
 const buttonSize = computed(() => props.size)
 const menuOpen = ref(false)
 
-function choose(event: 'edit' | 'rename' | 'migrate' | 'delete'): void {
+function choose(event: 'edit' | 'rename' | 'migrate' | 'delete' | 'clone'): void {
   menuOpen.value = false
   switch (event) {
     case 'edit':
@@ -56,6 +60,9 @@ function choose(event: 'edit' | 'rename' | 'migrate' | 'delete'): void {
       break
     case 'migrate':
       emit('migrate')
+      break
+    case 'clone':
+      emit('clone')
       break
     case 'delete':
       emit('delete')
@@ -122,6 +129,15 @@ function choose(event: 'edit' | 'rename' | 'migrate' | 'delete'): void {
           @click="choose('rename')"
         >
           <el-icon><EditPen /></el-icon>{{ t('common.rename') }}
+        </button>
+        <button
+          v-if="showClone"
+          type="button"
+          class="action-menu-item"
+          :disabled="busy"
+          @click="choose('clone')"
+        >
+          <el-icon><CopyDocument /></el-icon>{{ t('clone.action') }}
         </button>
         <button
           v-if="showMigrate"

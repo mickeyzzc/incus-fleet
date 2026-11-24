@@ -393,13 +393,14 @@ async function onSaved(): Promise<void> {
               <InstanceActions
                 :instance="row"
                 :busy="isBusy(row)"
+                show-clone
                 @action="act(row, $event)"
                 @edit="openEdit(row)"
                 @rename="openRename(row)"
                 @migrate="openMigrate(row)"
+                @clone="openClone(row)"
                 @delete="confirmDelete(row)"
               />
-              <el-button link type="primary" @click="openClone(row)">{{ t('clone.action') }}</el-button>
             </div>
           </article>
           <el-empty v-if="paged.length === 0" :description="t('instances.empty')" />
@@ -413,60 +414,56 @@ async function onSaved(): Promise<void> {
           class="instance-table"
           @selection-change="handleSelectionChange"
         >
+          <el-table-column type="selection" width="42" reserve-selection />
           <el-table-column :label="t('common.name')" min-width="170">
             <template #default="{ row }">
               <el-button link type="primary" class="name-link" @click="openDetail(row)">
                 {{ row.name }}
               </el-button>
-              <span class="mini-label">{{ row.location || t('common.none') }}</span>
+              <span class="name-meta">
+                <span class="mini-label">{{ row.location || t('common.none') }}</span>
+                <el-tag v-if="row.live_migratable" size="small" type="success" effect="plain">
+                  {{ t('common.live') }}
+                </el-tag>
+              </span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.cluster')" width="130">
+          <el-table-column :label="t('common.cluster')" width="90">
             <template #default="{ row }">
               <el-tag size="small" effect="plain">{{ row.cluster }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.type')" width="120">
+          <el-table-column :label="t('common.type')" width="85">
             <template #default="{ row }">
               {{ row.type === 'virtual-machine' ? t('common.virtualMachine') : t('common.container') }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.status')" width="120">
+          <el-table-column :label="t('common.status')" width="95">
             <template #default="{ row }">
               <StatusTag :status="row.status" :status-code="row.status_code" />
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.address')" min-width="150">
+          <el-table-column :label="t('common.address')" min-width="130">
             <template #default="{ row }">
               <span class="mono">{{ primaryAddress(row.ipv4, row.ipv6) }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.memory')" width="110">
+          <el-table-column :label="t('common.memory')" width="100">
             <template #default="{ row }">{{ formatBytes(row.memory) }}</template>
           </el-table-column>
-          <el-table-column :label="t('common.live')" width="90">
-            <template #default="{ row }">
-              <el-tag v-if="row.live_migratable" size="small" type="success" effect="light">
-                {{ t('common.yes') }}
-              </el-tag>
-              <span v-else class="muted">{{ t('common.none') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column type="selection" width="42" reserve-selection />
-          <el-table-column :label="t('common.actions')" width="240" fixed="right">
+          <el-table-column :label="t('common.actions')" width="250" fixed="right">
             <template #default="{ row }">
               <InstanceActions
                 :instance="row"
                 :busy="isBusy(row)"
+                show-clone
                 @action="act(row, $event)"
                 @edit="openEdit(row)"
                 @rename="openRename(row)"
                 @migrate="openMigrate(row)"
+                @clone="openClone(row)"
                 @delete="confirmDelete(row)"
               />
-              <el-button link type="primary" @click="openClone(row)">
-                {{ t('clone.action') }}
-              </el-button>
             </template>
           </el-table-column>
           <template #empty>
@@ -541,6 +538,17 @@ async function onSaved(): Promise<void> {
   padding: 0;
   height: auto;
   font-weight: 600;
+}
+
+.name-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.name-meta .mini-label {
+  display: inline;
 }
 
 .table-pagination {
