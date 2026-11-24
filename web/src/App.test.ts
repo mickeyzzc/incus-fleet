@@ -239,3 +239,40 @@ describe('App shell', () => {
     expect(active.exists()).toBe(true)
     expect(active.text()).toContain('Users')
   })
+
+it('opens the sidebar as an off-canvas drawer on narrow viewports', async () => {
+  const original = window.matchMedia
+  const mocked = vi.fn().mockImplementation((query: string) => ({
+    matches: query.includes('960px'),
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }))
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: mocked as unknown as typeof window.matchMedia,
+  })
+
+  try {
+    const { wrapper } = await mountApp()
+    expect(wrapper.find('.app-shell').classes()).toContain('sidebar-collapsed')
+
+    await wrapper.find('.mobile-menu-toggle').trigger('click')
+    expect(wrapper.find('.sidebar-backdrop').exists()).toBe(true)
+  } finally {
+    if (original) {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: original,
+      })
+    } else {
+      delete (window as { matchMedia?: typeof window.matchMedia }).matchMedia
+    }
+  }
+})

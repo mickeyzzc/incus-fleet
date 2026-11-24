@@ -33,6 +33,7 @@ const form = reactive({
   description: '',
   config: {} as Record<string, string>,
 })
+const source = reactive({ value: '' })
 
 const visible = computed({
   get: () => props.modelValue,
@@ -53,15 +54,20 @@ watch(
     form.name = props.pool?.name ?? ''
     form.driver = props.pool?.driver ?? ''
     form.description = props.pool?.description ?? ''
-    form.config = { ...(props.pool?.config ?? {}) }
+    const config = { ...(props.pool?.config ?? {}) }
+    source.value = config['source'] ?? ''
+    delete config['source']
+    form.config = config
   },
   { immediate: true },
 )
 
 function request(): { name?: string; driver?: string; description?: string; config?: Record<string, string> } {
+  const config = { ...form.config }
+  if (source.value.trim()) config['source'] = source.value.trim()
   const payload = {
     description: form.description.trim(),
-    config: Object.keys(form.config).length > 0 ? { ...form.config } : undefined,
+    config: Object.keys(config).length > 0 ? config : undefined,
   }
 
   if (isEdit.value) {
@@ -130,6 +136,11 @@ async function submit(): Promise<void> {
         <el-input v-model="form.description" />
       </el-form-item>
 
+      <el-form-item :label="t('admin.poolSource')">
+        <el-input v-model="source.value" placeholder="/var/lib/incus/storage-pools/default" />
+        <p class="field-hint">{{ t('admin.poolSourceHint') }}</p>
+      </el-form-item>
+
       <el-form-item :label="t('admin.config')">
         <KeyValueEditor
           v-model="form.config"
@@ -148,3 +159,11 @@ async function submit(): Promise<void> {
     </template>
   </el-dialog>
 </template>
+
+<style scoped>
+.field-hint {
+  margin: 4px 0 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+</style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -29,7 +29,11 @@ const plugins = usePluginsStore()
 const { t, locale } = useI18n()
 
 const publicPage = computed(() => route.meta.public === true)
-const sidebarOpen = ref(true)
+const mobileQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  ? window.matchMedia('(max-width: 960px)')
+  : null
+const isMobile = ref(mobileQuery?.matches ?? false)
+const sidebarOpen = ref(!isMobile.value)
 const SIDEBAR_COLLAPSED_KEY = 'incus-fleet.sidebar.collapsed'
 const isCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1')
 
@@ -149,6 +153,69 @@ watch(
   { immediate: true },
 )
 
+function onViewportChange(event: MediaQueryListEvent): void {
+  isMobile.value = event.matches
+  sidebarOpen.value = !event.matches
+}
+
+function closeMobileSidebar(): void {
+  if (isMobile.value) {
+    sidebarOpen.value = false
+  }
+}
+
+// el-table renders header/cell text independently, so the narrow-screen card
+// layout needs the column label copied onto each body cell. A single observer
+// keeps every table decorated as rows are polled or replaced.
+let tableObserver: MutationObserver | null = null
+let decorateScheduled = false
+
+function decorateTableCards(): void {
+  document.querySelectorAll('.el-table').forEach((table) => {
+    const headers = Array.from(table.querySelectorAll('.el-table__header-wrapper th'))
+      .map((cell) => cell.textContent?.trim() ?? '')
+    table.querySelectorAll('.el-table__body-wrapper tbody tr').forEach((row) => {
+      Array.from(row.querySelectorAll('td')).forEach((cell, index) => {
+        const label = headers[index]
+        if (label) {
+          cell.setAttribute('data-label', label)
+        }
+      })
+    })
+  })
+}
+
+function scheduleTableDecoration(): void {
+  if (decorateScheduled) {
+    return
+  }
+  decorateScheduled = true
+  const run = (): void => {
+    decorateScheduled = false
+    decorateTableCards()
+  }
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(run)
+  } else {
+    run()
+  }
+}
+
+onMounted(() => {
+  mobileQuery?.addEventListener('change', onViewportChange)
+  if (typeof MutationObserver !== 'undefined') {
+    tableObserver = new MutationObserver(scheduleTableDecoration)
+    tableObserver.observe(document.body, { childList: true, subtree: true })
+    scheduleTableDecoration()
+  }
+})
+
+onBeforeUnmount(() => {
+  mobileQuery?.removeEventListener('change', onViewportChange)
+  tableObserver?.disconnect()
+  tableObserver = null
+})
+
 async function logout(): Promise<void> {
   await auth.logout()
   await router.push({ name: 'login' })
@@ -180,6 +247,7 @@ async function logout(): Promise<void> {
           :collapse-transition="false"
           router
           class="nav-menu"
+          @select="closeMobileSidebar"
         >
           <div v-if="!isCollapsed" class="nav-group-label">{{ t('nav.workbench') }}</div>
 
@@ -259,6 +327,7 @@ async function logout(): Promise<void> {
           </span>
         </div>
       </el-aside>
+      <div v-if="isMobile && sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false" />
 
       <el-container class="main-column">
         <el-header class="topbar">

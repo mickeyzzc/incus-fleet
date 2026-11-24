@@ -332,6 +332,10 @@ export class ApiClient {
     )
   }
 
+  async previewAnswerProfile(request: UnattendedLaunchRequest): Promise<UnattendedAnswerPreview> {
+    return this.request<UnattendedAnswerPreview>('POST', '/api/v1/answer-profiles/preview', request)
+  }
+
   async previewUnattendedAnswer(
     cluster: string,
     pool: string,

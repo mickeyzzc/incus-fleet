@@ -384,7 +384,8 @@ describe('IsoLaunchDialog unattended', () => {
     await flushPromises()
     const request = vi.mocked(api.launchUnattended).mock.calls.at(-1)?.[3]
     expect(request?.answer_file).toBe('#cloud-config\nhostname: inline')
-    expect(request?.spec).toBeUndefined()
+    // Custom user-data still supplies a hostname for the NoCloud meta-data.
+    expect(request?.spec?.hostname).toBe('web-01')
   })
 
   it('touches every editable field and the cancel action', async () => {

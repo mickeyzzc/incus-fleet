@@ -198,4 +198,34 @@ describe('AnswerProfilesView', () => {
     await flushPromises()
     expect(ElMessage.error).toHaveBeenCalled()
   })
+
+  it('requires a matching password confirmation and previews the answer', async () => {
+    vi.mocked(api.previewAnswerProfile).mockResolvedValue({
+      content: '#cloud-config\nhostname: preview\n',
+      file_name: 'user-data',
+      profile: 'debian-preseed',
+    })
+    const wrapper = await mountView()
+    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add profile'))
+    await addButton!.trigger('click')
+    await flushPromises()
+    const dialog = wrapper.find('.el-dialog')
+    await dialog.find('input').setValue('preview-profile')
+
+    const passwords = dialog.findAll('input[type="password"]')
+    await passwords[0]!.setValue('Secret123!')
+    await passwords[1]!.setValue('different')
+    const save = dialog.findAll('button').find((b) => b.text().includes('Save'))
+    await save!.trigger('click')
+    await flushPromises()
+    expect(api.createAnswerProfile).not.toHaveBeenCalled()
+    expect(ElMessage.error).toHaveBeenCalled()
+
+    await passwords[1]!.setValue('Secret123!')
+    const previewButton = dialog.findAll('button').find((b) => b.text().includes('Preview'))
+    await previewButton!.trigger('click')
+    await flushPromises()
+    expect(api.previewAnswerProfile).toHaveBeenCalled()
+    expect(dialog.text()).toContain('user-data')
+  })
 })

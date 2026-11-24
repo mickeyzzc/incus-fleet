@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
-import type { AnswerProfile, UnattendedProfile } from '@/api/types'
+import { api } from '@/api'
+import type {
+  AnswerProfile,
+  UnattendedAnswerPreview,
+  UnattendedLaunchRequest,
+  UnattendedProfile,
+} from '@/api/types'
 import { useAnswerProfilesStore } from '@/stores/answerProfiles'
 import { errorMessage } from '@/utils/errors'
 
@@ -40,6 +47,47 @@ const KEYBOARDS = ['us', 'gb', 'cn', 'de', 'fr', 'es', 'jp', 'kr', 'ru']
 
 const dialogOpen = ref(false)
 const editing = ref<AnswerProfile | null>(null)
+const formRef = ref<FormInstance>()
+const confirmPassword = ref('')
+const initialPassword = ref('')
+const preview = ref<UnattendedAnswerPreview | null>(null)
+const previewing = ref(false)
+
+const rules = computed<FormRules>(() => ({
+  name: [{ required: true, message: t('answerProfiles.nameRequired'), trigger: 'blur' }],
+  hostname: [{
+    trigger: 'blur',
+    validator: (_rule, value: string, callback: (error?: Error) => void) => {
+      if (!value || /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(value)) {
+        callback()
+        return
+      }
+      callback(new Error(t('answerProfiles.hostnameInvalid')))
+    },
+  }],
+}))
+
+const passwordStrength = computed(() => {
+  const value = form.password
+  if (!value) return 0
+  let score = 0
+  if (value.length >= 8) score++
+  if (/[a-z]/.test(value) && /[A-Z]/.test(value)) score++
+  if (/\d/.test(value)) score++
+  if (/[^A-Za-z0-9]/.test(value)) score++
+  return score
+})
+
+const passwordStrengthLabel = computed(() => {
+  const labels = [
+    'answerProfiles.strengthWeak',
+    'answerProfiles.strengthWeak',
+    'answerProfiles.strengthFair',
+    'answerProfiles.strengthGood',
+    'answerProfiles.strengthStrong',
+  ]
+  return t(labels[passwordStrength.value] ?? 'answerProfiles.strengthWeak')
+})
 
 const profiles: { value: UnattendedProfile; labelKey: string }[] = [
   { value: 'debian-preseed', labelKey: 'iso.profileDebian' },
@@ -72,6 +120,9 @@ function openCreate(): void {
     name: '', profile: 'debian-preseed', hostname: '', username: '', password: '',
     timezone: 'UTC', disk: '', locale: '', keyboard: '', packages: '', custom: false, answer: '', is_default: false,
   })
+  confirmPassword.value = ''
+  initialPassword.value = ''
+  preview.value = null
   dialogOpen.value = true
 }
 
@@ -84,6 +135,9 @@ function openEdit(row: AnswerProfile): void {
     packages: row.packages ?? '',
     custom: Boolean(row.answer_file), answer: row.answer_file ?? '', is_default: row.is_default,
   })
+  confirmPassword.value = ''
+  initialPassword.value = row.password ?? ''
+  preview.value = null
   dialogOpen.value = true
 }
 
@@ -94,6 +148,13 @@ async function submit(): Promise<void> {
   }
   if (form.custom && !form.answer.trim()) {
     ElMessage.error(t('answerProfiles.answerRequired'))
+    return
+  }
+  if (!form.custom && form.password && form.password !== initialPassword.value && form.password !== confirmPassword.value) {
+    ElMessage.error(t('answerProfiles.passwordMismatch'))
+    return
+  }
+  if (formRef.value && !(await formRef.value.validate().catch(() => false))) {
     return
   }
   const payload = {
@@ -120,6 +181,40 @@ async function submit(): Promise<void> {
     dialogOpen.value = false
   } catch (err) {
     ElMessage.error(t('answerProfiles.saveFailed', { error: errorMessage(err) }))
+  }
+}
+
+function previewRequest(): UnattendedLaunchRequest {
+  const request: UnattendedLaunchRequest = {
+    name: form.name.trim() || 'preview',
+    profile: form.profile,
+  }
+  if (form.custom) {
+    request.answer_file = form.answer
+    request.spec = { hostname: form.hostname || form.name.trim() || 'preview' }
+    return request
+  }
+  request.spec = {
+    hostname: form.hostname || form.name.trim() || 'preview',
+    username: form.username,
+    password: form.password,
+    timezone: form.timezone,
+    disk: form.disk,
+    locale: form.locale,
+    keyboard: form.keyboard,
+    packages: form.packages,
+  }
+  return request
+}
+
+async function loadPreview(): Promise<void> {
+  previewing.value = true
+  try {
+    preview.value = await api.previewAnswerProfile(previewRequest())
+  } catch (err) {
+    ElMessage.error(t('iso.previewFailed', { error: errorMessage(err) }))
+  } finally {
+    previewing.value = false
   }
 }
 
@@ -164,6 +259,10 @@ onMounted(() => { void store.fetch() })
         </div>
       </div>
       <div class="panel-body">
+        <div v-if="store.error" class="error-banner">
+          <el-alert type="error" :title="store.error" :closable="false" show-icon />
+          <el-button size="small" @click="store.fetch(true)">{{ t('common.retry') }}</el-button>
+        </div>
         <el-table
           v-loading="store.loading"
           :data="store.cache"
@@ -213,8 +312,8 @@ onMounted(() => { void store.fetch() })
       width="640px"
       destroy-on-close
     >
-      <el-form label-position="top" @submit.prevent="submit">
-        <el-form-item :label="t('answerProfiles.name')">
+      <el-form ref="formRef" label-position="top" :model="form" :rules="rules" @submit.prevent="submit">
+        <el-form-item :label="t('answerProfiles.name')" prop="name">
           <el-input v-model="form.name" :placeholder="t('answerProfiles.namePlaceholder')" />
         </el-form-item>
         <el-form-item :label="t('answerProfiles.profile')">
@@ -225,20 +324,27 @@ onMounted(() => { void store.fetch() })
         <el-form-item>
           <el-checkbox v-model="form.custom">{{ t('iso.customAnswer') }}</el-checkbox>
         </el-form-item>
+        <el-form-item :label="t('iso.specHostname')" prop="hostname">
+          <el-input v-model="form.hostname" :placeholder="t('answerProfiles.hostnamePlaceholder')" />
+          <p class="field-hint">{{ t('answerProfiles.hostnameHint') }}</p>
+        </el-form-item>
         <el-form-item v-if="form.custom" :label="t('iso.answerFile')">
           <el-input v-model="form.answer" type="textarea" :rows="10" spellcheck="false" />
         </el-form-item>
         <template v-else>
-          <el-form-item :label="t('iso.specHostname')">
-            <el-input v-model="form.hostname" :placeholder="t('answerProfiles.hostnamePlaceholder')" />
-            <p class="field-hint">{{ t('answerProfiles.hostnameHint') }}</p>
-          </el-form-item>
           <el-form-item :label="t('iso.specUsername')">
             <el-input v-model="form.username" placeholder="fleet" />
           </el-form-item>
           <el-form-item :label="t('iso.specPassword')">
             <el-input v-model="form.password" type="password" show-password />
+            <div v-if="form.password" class="password-meter">
+              <span>{{ t('answerProfiles.passwordStrength') }}: {{ passwordStrengthLabel }}</span>
+              <span class="password-meter-track"><i :style="{ width: `${passwordStrength * 25}%` }" /></span>
+            </div>
             <p class="field-hint">{{ t('answerProfiles.passwordHint') }}</p>
+          </el-form-item>
+          <el-form-item :label="t('answerProfiles.confirmPassword')">
+            <el-input v-model="confirmPassword" type="password" show-password />
           </el-form-item>
           <el-form-item :label="t('iso.specTimezone')">
             <el-select
@@ -283,6 +389,17 @@ onMounted(() => { void store.fetch() })
           </el-form-item>
         </template>
         <el-form-item>
+          <el-button size="small" :loading="previewing" @click="loadPreview">
+            {{ t('iso.preview') }}
+          </el-button>
+        </el-form-item>
+        <el-form-item v-if="preview">
+          <div class="answer-preview">
+            <p class="preview-title">{{ preview.file_name }}</p>
+            <pre>{{ preview.content }}</pre>
+          </div>
+        </el-form-item>
+        <el-form-item>
           <el-checkbox v-model="form.is_default">{{ t('answerProfiles.setDefault') }}</el-checkbox>
           <p class="field-hint">{{ t('answerProfiles.setDefaultHint') }}</p>
         </el-form-item>
@@ -310,5 +427,56 @@ onMounted(() => { void store.fetch() })
   margin: 4px 0 0;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.error-banner .el-alert {
+  flex: 1;
+}
+.password-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.password-meter-track {
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--el-fill-color);
+}
+.password-meter-track i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--el-color-primary);
+  transition: width 0.2s ease;
+}
+.answer-preview {
+  width: 100%;
+}
+.preview-title {
+  margin: 0 0 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.answer-preview pre {
+  max-height: 240px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  background: var(--el-fill-color-lighter);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

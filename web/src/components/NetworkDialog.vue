@@ -34,6 +34,15 @@ const form = reactive({
   config: {} as Record<string, string>,
 })
 
+const structured = reactive({
+  ipv4: '',
+  ipv4nat: '' as '' | 'true' | 'false',
+  ipv6: '',
+  ipv6nat: '' as '' | 'true' | 'false',
+  mtu: '',
+  dnsDomain: '',
+})
+
 const visible = computed({
   get: () => props.modelValue,
   set: (value: boolean) => emit('update:modelValue', value),
@@ -53,15 +62,34 @@ watch(
     form.name = props.network?.name ?? ''
     form.type = props.network?.type ?? ''
     form.description = props.network?.description ?? ''
-    form.config = { ...(props.network?.config ?? {}) }
+    const config = { ...(props.network?.config ?? {}) }
+    structured.ipv4 = config['ipv4.address'] ?? ''
+    structured.ipv6 = config['ipv6.address'] ?? ''
+    structured.mtu = config['bridge.mtu'] ?? ''
+    structured.dnsDomain = config['dns.domain'] ?? ''
+    const ipv4nat = config['ipv4.nat']
+    const ipv6nat = config['ipv6.nat']
+    structured.ipv4nat = ipv4nat === 'true' || ipv4nat === 'false' ? ipv4nat : ''
+    structured.ipv6nat = ipv6nat === 'true' || ipv6nat === 'false' ? ipv6nat : ''
+    for (const key of ['ipv4.address', 'ipv4.nat', 'ipv6.address', 'ipv6.nat', 'bridge.mtu', 'dns.domain']) {
+      delete config[key]
+    }
+    form.config = config
   },
   { immediate: true },
 )
 
 function request(): { name?: string; type?: string; description?: string; config?: Record<string, string> } {
+  const config = { ...form.config }
+  if (structured.ipv4.trim()) config['ipv4.address'] = structured.ipv4.trim()
+  if (structured.ipv4nat) config['ipv4.nat'] = structured.ipv4nat
+  if (structured.ipv6.trim()) config['ipv6.address'] = structured.ipv6.trim()
+  if (structured.ipv6nat) config['ipv6.nat'] = structured.ipv6nat
+  if (structured.mtu.trim()) config['bridge.mtu'] = structured.mtu.trim()
+  if (structured.dnsDomain.trim()) config['dns.domain'] = structured.dnsDomain.trim()
   const payload = {
     description: form.description.trim(),
-    config: Object.keys(form.config).length > 0 ? { ...form.config } : undefined,
+    config: Object.keys(config).length > 0 ? config : undefined,
   }
 
   if (isEdit.value) {
@@ -130,6 +158,40 @@ async function submit(): Promise<void> {
         <el-input v-model="form.description" />
       </el-form-item>
 
+      <el-form-item :label="t('admin.ipv4Address')">
+        <el-input v-model="structured.ipv4" placeholder="10.0.0.1/24" />
+        <p class="field-hint">{{ t('admin.ipv4AddressHint') }}</p>
+      </el-form-item>
+
+      <el-form-item :label="t('admin.ipv4Nat')">
+        <el-radio-group v-model="structured.ipv4nat">
+          <el-radio-button label="">{{ t('admin.defaultOption') }}</el-radio-button>
+          <el-radio-button label="true">{{ t('admin.enabled') }}</el-radio-button>
+          <el-radio-button label="false">{{ t('admin.disabled') }}</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+
+      <el-form-item :label="t('admin.ipv6Address')">
+        <el-input v-model="structured.ipv6" placeholder="fd42::1/64" />
+      </el-form-item>
+
+      <el-form-item :label="t('admin.ipv6Nat')">
+        <el-radio-group v-model="structured.ipv6nat">
+          <el-radio-button label="">{{ t('admin.defaultOption') }}</el-radio-button>
+          <el-radio-button label="true">{{ t('admin.enabled') }}</el-radio-button>
+          <el-radio-button label="false">{{ t('admin.disabled') }}</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+
+      <el-form-item :label="t('admin.mtu')">
+        <el-input v-model="structured.mtu" placeholder="1500" />
+        <p class="field-hint">{{ t('admin.mtuHint') }}</p>
+      </el-form-item>
+
+      <el-form-item :label="t('admin.dnsDomain')">
+        <el-input v-model="structured.dnsDomain" placeholder="fleet.internal" />
+      </el-form-item>
+
       <el-form-item :label="t('admin.config')">
         <KeyValueEditor
           v-model="form.config"
@@ -148,3 +210,11 @@ async function submit(): Promise<void> {
     </template>
   </el-dialog>
 </template>
+
+<style scoped>
+.field-hint {
+  margin: 4px 0 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+</style>

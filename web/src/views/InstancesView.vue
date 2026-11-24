@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { TableInstance } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
@@ -141,6 +142,16 @@ const batchTargets = computed(() =>
 
 function handleSelectionChange(rows: Array<{ cluster: string; name: string }>): void {
   selected.value = rows.map((row) => ({ cluster: row.cluster, name: row.name }))
+}
+
+const tableRef = ref<TableInstance>()
+
+function cardSelected(row: InstanceSummary): boolean {
+  return selected.value.some((entry) => entry.cluster === row.cluster && entry.name === row.name)
+}
+
+function toggleCardSelection(row: InstanceSummary, checked: boolean): void {
+  tableRef.value?.toggleRowSelection(row, checked)
 }
 
 /** Stable identity so reserve-selection survives polling refreshes. */
@@ -359,11 +370,47 @@ async function onSaved(): Promise<void> {
         </div>
         <!-- row-key + reserve-selection keep the user's batch picks through
              the 15s polling refresh instead of clearing them (#12). -->
+        <div v-loading="instances.loading" class="instance-cards">
+          <article v-for="row in paged" :key="instanceRowKey(row)" class="instance-card">
+            <div class="instance-card-head">
+              <el-checkbox
+                :model-value="cardSelected(row)"
+                :aria-label="t('batch.selectRow')"
+                @change="toggleCardSelection(row, Boolean($event))"
+              />
+              <el-button link type="primary" class="name-link" @click="openDetail(row)">
+                {{ row.name }}
+              </el-button>
+              <StatusTag :status="row.status" :status-code="row.status_code" />
+            </div>
+            <div class="instance-card-meta">
+              <span>{{ row.cluster }} · {{ row.location || t('common.none') }}</span>
+              <span class="mono">{{ primaryAddress(row.ipv4, row.ipv6) }}</span>
+              <span>{{ formatBytes(row.memory) }}</span>
+              <span>{{ row.type === 'virtual-machine' ? t('common.virtualMachine') : t('common.container') }}</span>
+            </div>
+            <div class="instance-card-actions">
+              <InstanceActions
+                :instance="row"
+                :busy="isBusy(row)"
+                @action="act(row, $event)"
+                @edit="openEdit(row)"
+                @rename="openRename(row)"
+                @migrate="openMigrate(row)"
+                @delete="confirmDelete(row)"
+              />
+              <el-button link type="primary" @click="openClone(row)">{{ t('clone.action') }}</el-button>
+            </div>
+          </article>
+          <el-empty v-if="paged.length === 0" :description="t('instances.empty')" />
+        </div>
         <el-table
+          ref="tableRef"
           v-loading="instances.loading"
           :data="paged"
           :row-key="instanceRowKey"
           stripe
+          class="instance-table"
           @selection-change="handleSelectionChange"
         >
           <el-table-column :label="t('common.name')" min-width="170">
@@ -513,5 +560,46 @@ async function onSaved(): Promise<void> {
 .batch-count {
   font-size: 13px;
   font-weight: 600;
+}
+
+.instance-cards {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .instance-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .instance-table {
+    display: none;
+  }
+
+  .instance-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 10px;
+  }
+
+  .instance-card-head,
+  .instance-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .instance-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
 }
 </style>

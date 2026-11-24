@@ -173,6 +173,9 @@ function buildUnattendedRequest(name: string): UnattendedLaunchRequest {
   }
   if (unattended.custom) {
     request.answer_file = unattended.answer
+    // meta-data still needs an identity even when the operator supplies the
+    // user-data verbatim; keep the hostname field in custom mode.
+    request.spec = { hostname: unattended.hostname || name }
   } else if (!unattended.profileId) {
     request.spec = {
       hostname: unattended.hostname || name,
@@ -310,6 +313,13 @@ async function submit(): Promise<void> {
           <p class="field-hint">{{ t('iso.profileHint') }}</p>
         </el-form-item>
 
+        <el-steps :active="0" simple class="unattended-steps">
+          <el-step :title="t('iso.stageMedia')" />
+          <el-step :title="t('iso.stageInstall')" />
+          <el-step :title="t('iso.stageFinish')" />
+          <el-step :title="t('iso.stageDetach')" />
+        </el-steps>
+
         <el-form-item :label="t('iso.answerProfile')">
           <el-select
             v-model="unattended.profileId"
@@ -335,6 +345,11 @@ async function submit(): Promise<void> {
           >{{ t('iso.customAnswer') }}</el-checkbox>
         </el-form-item>
 
+        <el-form-item :label="t('iso.specHostname')">
+          <el-input v-model="unattended.hostname" :placeholder="t('answerProfiles.hostnamePlaceholder')" />
+          <p class="field-hint">{{ t('iso.specHostnameHint') }}</p>
+        </el-form-item>
+
         <el-form-item v-if="unattended.custom" :label="t('iso.answerFile')">
           <el-input
             v-model="unattended.answer"
@@ -345,9 +360,6 @@ async function submit(): Promise<void> {
         </el-form-item>
 
         <template v-else>
-          <el-form-item :label="t('iso.specHostname')">
-            <el-input v-model="unattended.hostname" :placeholder="t('answerProfiles.hostnamePlaceholder')" />
-          </el-form-item>
           <el-form-item :label="t('iso.specUsername')">
             <el-input v-model="unattended.username" placeholder="fleet" />
           </el-form-item>
@@ -423,6 +435,10 @@ async function submit(): Promise<void> {
   color: var(--fleet-ink-soft);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.unattended-steps {
+  margin: 2px 0 16px;
 }
 
 .mode-label {

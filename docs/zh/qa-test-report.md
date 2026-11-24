@@ -142,3 +142,15 @@ P2：BUG-001/004/011 已修需发版、BUG-005、UX-02~09、UX-13/14、UX-17/18/
   - `qa-ubuntu-iso-vm2` 使用修复后的 autoinstall user-data（`autoinstall:` 嵌套）进行无人值守安装复测。
 - 视觉重构其余项（UX-29 窄屏卡片、UX-42 全量弹窗规格、UX-43 抽屉式移动侧栏）仍在 `fix-plan.md` 的后续批次。
 - UX-12 已实现「附加软件包」结构化字段（schema v11）；更多安装器字段可按同一模式扩展。
+
+### UX 收尾批次（2026-11-24）
+
+| 项 | 结果 |
+| --- | --- |
+| UX-19/20 表单校验与预览 | 应答配置表单增加名称/主机名即时校验、密码确认与强度条；自定义应答模式保留主机名并写入 NoCloud meta-data；新增 `POST /api/v1/answer-profiles/preview`，配置页可直接预览。浏览器验证：密码不一致被拦截、强度显示、预览返回 `preseed.cfg` 内容。 |
+| UX-22 结构化配置 | ProfileDialog 增加 `limits.cpu` / `limits.memory` / `limits.disk` / `boot.autostart` 与设备类型下拉；NetworkDialog 增加 IPv4/IPv6 地址与 NAT、`bridge.mtu`、`dns.domain`；StoragePoolDialog 增加 `source`。浏览器验证：IPv4 回填 `10.63.0.1/24`、存储池「源」字段与提示正常显示。 |
+| UX-04 长任务进度 | 迁移列表展示后端 stage 标签；ISO 上传卡片显示百分比/速度/ETA；无人值守弹窗增加「准备介质 → 自动安装 → 关机 → 卸载介质」阶段条。 |
+| UX-06 错误可操作 | 应答配置列表增加持久错误横幅 + 重试；迁移列表保留重试入口。 |
+| UX-29/42/43 响应式 | ≤960px 侧栏改为抽屉式 + 遮罩，导航后自动关闭；≤768px 全部表格通过表头 `data-label` 转为卡片布局；弹窗/抽屉宽度上限与单列网格保留。App 测试覆盖窄屏初始折叠与遮罩。 |
+
+验证：前端 62 文件 / 652+ 测试（新增移动抽屉测试后最终计数以 CI 为准）、`vue-tsc`、Go 全包通过；n305/n100 已部署本轮构建。

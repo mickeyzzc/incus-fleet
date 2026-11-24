@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import KeyValueEditor from '@/components/KeyValueEditor.vue'
+import SizeInput from '@/components/SizeInput.vue'
 import type { Profile } from '@/api/types'
 import { useInstancesStore } from '@/stores/instances'
 import { errorMessage } from '@/utils/errors'
@@ -32,8 +33,17 @@ const form = reactive({
   name: '',
   description: '',
   config: {} as Record<string, string>,
-  devices: [] as Array<{ name: string; config: Record<string, string> }>,
+  devices: [] as Array<{ name: string; type: string; config: Record<string, string> }>,
 })
+
+const structured = reactive({
+  cpu: '',
+  memory: '',
+  disk: '',
+  autostart: '' as '' | 'true' | 'false',
+})
+
+const DEVICE_TYPES = ['disk', 'nic', 'proxy', 'gpu', 'usb', 'unix-char', 'unix-block', 'none']
 
 const visible = computed({
   get: () => props.modelValue,
@@ -52,26 +62,47 @@ watch(
 
     form.name = props.profile?.name ?? ''
     form.description = props.profile?.description ?? ''
-    form.config = { ...(props.profile?.config ?? {}) }
-    form.devices = Object.entries(props.profile?.devices ?? {}).map(([name, device]) => ({
-      name,
-      config: { ...device },
-    }))
+    const config = { ...(props.profile?.config ?? {}) }
+    structured.cpu = config['limits.cpu'] ?? ''
+    structured.memory = config['limits.memory'] ?? ''
+    structured.disk = config['limits.disk'] ?? ''
+    const autostart = config['boot.autostart']
+    structured.autostart = autostart === 'true' || autostart === 'false' ? autostart : ''
+    delete config['limits.cpu']
+    delete config['limits.memory']
+    delete config['limits.disk']
+    delete config['boot.autostart']
+    form.config = config
+    form.devices = Object.entries(props.profile?.devices ?? {}).map(([name, device]) => {
+      const deviceConfig = { ...device }
+      const type = deviceConfig.type ?? ''
+      delete deviceConfig.type
+      return { name, type, config: deviceConfig }
+    })
   },
   { immediate: true },
 )
 
 function request(): { name?: string; description?: string; config?: Record<string, string>; devices?: Record<string, Record<string, string>> } {
+  const config = { ...form.config }
+  if (structured.cpu.trim()) config['limits.cpu'] = structured.cpu.trim()
+  if (structured.memory) config['limits.memory'] = structured.memory
+  if (structured.disk) config['limits.disk'] = structured.disk
+  if (structured.autostart) config['boot.autostart'] = structured.autostart
+
   const payload = {
     description: form.description.trim(),
-    config: Object.keys(form.config).length > 0 ? { ...form.config } : undefined,
+    config: Object.keys(config).length > 0 ? config : undefined,
   }
 
   const devices: Record<string, Record<string, string>> = {}
   for (const device of form.devices) {
     const name = device.name.trim()
     if (name) {
-      devices[name] = { ...device.config }
+      devices[name] = {
+        ...device.config,
+        ...(device.type.trim() ? { type: device.type.trim() } : {}),
+      }
     }
   }
 
@@ -101,7 +132,7 @@ function validate(): string {
 }
 
 function addDevice(): void {
-  form.devices.push({ name: '', config: {} })
+  form.devices.push({ name: '', type: '', config: {} })
 }
 
 function removeDevice(index: number): void {
@@ -143,6 +174,29 @@ async function submit(): Promise<void> {
         <el-input v-model="form.description" />
       </el-form-item>
 
+      <el-form-item :label="t('admin.limitsCpu')">
+        <el-input v-model="structured.cpu" placeholder="2" />
+        <p class="field-hint">{{ t('admin.limitsCpuHint') }}</p>
+      </el-form-item>
+
+      <el-form-item :label="t('admin.limitsMemory')">
+        <SizeInput v-model="structured.memory" :units="['MiB', 'GiB']" default-unit="GiB" />
+        <p class="field-hint">{{ t('admin.limitsMemoryHint') }}</p>
+      </el-form-item>
+
+      <el-form-item :label="t('admin.limitsDisk')">
+        <SizeInput v-model="structured.disk" :units="['MiB', 'GiB', 'TiB']" default-unit="GiB" />
+        <p class="field-hint">{{ t('admin.limitsDiskHint') }}</p>
+      </el-form-item>
+
+      <el-form-item :label="t('admin.autostart')">
+        <el-radio-group v-model="structured.autostart">
+          <el-radio-button label="">{{ t('admin.defaultOption') }}</el-radio-button>
+          <el-radio-button label="true">{{ t('admin.enabled') }}</el-radio-button>
+          <el-radio-button label="false">{{ t('admin.disabled') }}</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+
       <el-form-item :label="t('admin.config')">
         <KeyValueEditor
           v-model="form.config"
@@ -161,6 +215,16 @@ async function submit(): Promise<void> {
                 :placeholder="t('admin.deviceName')"
                 class="device-name"
               />
+              <el-select
+                v-model="device.type"
+                class="device-type"
+                filterable
+                allow-create
+                default-first-option
+                :placeholder="t('admin.deviceType')"
+              >
+                <el-option v-for="type in DEVICE_TYPES" :key="type" :label="type" :value="type" />
+              </el-select>
               <el-button
                 :icon="Delete"
                 circle
@@ -214,7 +278,14 @@ async function submit(): Promise<void> {
   gap: 8px;
 }
 
-.device-name {
+.device-name,
+.device-type {
   flex: 1;
+}
+
+.field-hint {
+  margin: 4px 0 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 </style>

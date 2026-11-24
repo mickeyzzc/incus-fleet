@@ -262,6 +262,7 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/scripts/{id}", a.requireWriter(http.HandlerFunc(a.deleteScript)))
 	mux.Handle("GET /api/v1/answer-profiles", a.requireAuth(http.HandlerFunc(a.listAnswerProfiles)))
 	mux.Handle("POST /api/v1/answer-profiles", a.requireWriter(http.HandlerFunc(a.createAnswerProfile)))
+	mux.Handle("POST /api/v1/answer-profiles/preview", a.requireWriter(http.HandlerFunc(a.previewAnswerProfile)))
 	mux.Handle("PATCH /api/v1/answer-profiles/{id}", a.requireWriter(http.HandlerFunc(a.updateAnswerProfile)))
 	mux.Handle("DELETE /api/v1/answer-profiles/{id}", a.requireWriter(http.HandlerFunc(a.deleteAnswerProfile)))
 	mux.Handle("POST /api/v1/batch/keys", a.requireWriter(http.HandlerFunc(a.batchKeys)))
