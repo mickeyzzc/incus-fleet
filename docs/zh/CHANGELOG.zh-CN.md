@@ -6,10 +6,15 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## 未发布
+## 0.2.0 - 2026-11-24
 
 ### 新增
 
+- 打 `v*` 标签后由 GitHub Actions 自动构建并发布：中心程序、特权 helper 与主机 agent 的
+  amd64/arm64 二进制、各组件的 `.deb`/`.rpm` 安装包、按架构打包的 tar.gz 以及 SHA256 校验和。
+- 文档按 `docs/en/` 与 `docs/zh/` 分语言组织，各自带 `images/`；仅本地使用的运维笔记
+  放在被 git 忽略的 `docs/local/`。部署与用户手册已覆盖 0.2.0 UI、agent 一键安装、
+  插件与 scoped token。
 - 创建实例支持 `disks` 额外空数据盘，表单提供设备名、挂载路径与容量的引导和校验。
 - 容量输入统一校验：内存、根磁盘、存储卷、ISO 安装均显示单位提示，支持
   MiB/GiB/TiB，纯数字按 MiB 处理，并在输入框下直接显示错误。

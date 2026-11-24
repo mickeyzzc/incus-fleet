@@ -34,6 +34,12 @@ flowchart LR
 Each app instance is independent: separate binary, config, and certificates. What the database
 driver decides is whether the instances share state.
 
+> **UI map (0.2.0).** The sidebar is grouped into **Fleet**, **Resources**, **Clusters → Nodes**,
+> and **Administration**, with new top-level **Instances** and **Volumes** (Storage) pages.
+> **Images & automation** is a tabbed page for images, ISOs, answer profiles, and scripts.
+> Migration history lives under **Instances** via `view=migrations`, and navigation is scoped to
+> the clusters currently in view.
+
 ## Choosing a database
 
 Three drivers are supported. Pick the one that matches how many instances you run and how much
@@ -77,6 +83,7 @@ On each app host:
 - Network access to every Incus API endpoint on port 8443.
 - A dedicated service account and directory (examples use `/home/incus`).
 - SQLite (default), an rqlite cluster, or a PostgreSQL server.
+- `dnsmasq`, for the private overlay network's DHCP service (see the node network section below).
 
 On each Incus cluster:
 
@@ -84,6 +91,25 @@ On each Incus cluster:
 - Permission to add a trusted client certificate (`incus-admin` group or root).
 
 ## 1. Build a release binary
+
+Every `v*` tag triggers the `Release` GitHub Actions workflow. It verifies the tagged commit
+with the same gates as CI, then publishes assets for both `linux-amd64` and `linux-arm64`:
+
+- `incus-fleet-linux-<arch>`, `incus-fleet-helper-linux-<arch>`, and
+  `incus-fleet-agent-linux-<arch>` (standalone binaries; the center embeds the Vue UI);
+- `incus-fleet_<version>_<arch>.deb` / `.rpm` packages for each component. The center package
+  installs `/usr/bin/incus-fleet`, the systemd unit, and example config/sudoers/Caddy files under
+  `/etc/incus-fleet/`; the agent package installs the agent binary, its unit, and a sudoers example;
+- `incus-fleet-<tag>-linux-<arch>.tar.gz` bundles the three binaries with `SHA256SUMS-<arch>`;
+  the release also publishes an aggregate `SHA256SUMS`.
+  Packages are not auto-configured: create the service account, fill the config, and enable the
+  unit as described below.
+
+The `agent.install` one-command installer downloads the agent and helper binaries from
+`asset_url` (or the UI origin) — host those two binaries alongside the release assets when using
+that feature.
+
+To build locally instead:
 
 ```bash
 make release
@@ -178,6 +204,9 @@ sudo -u incus-fleet bash -c 'umask 077; openssl rand -hex 32 > /home/incus/auth-
 sudo -u incus-fleet install -m 600 /dev/null /home/incus/incus-fleet.env
 sudo -u incus-fleet tee /home/incus/incus-fleet.env >/dev/null <<'EOF'
 INCUS_FLEET_AUTH_TOKEN=replace-with-the-generated-token
+# Create the first local administrator on a fresh deployment:
+# INCUS_FLEET_BOOTSTRAP_ADMIN_USERNAME=admin
+# INCUS_FLEET_BOOTSTRAP_ADMIN_PASSWORD=replace-with-a-strong-password
 # Optional overrides:
 # INCUS_FLEET_LISTEN=0.0.0.0:8080
 # INCUS_FLEET_DATABASE_DRIVER=postgres
@@ -186,6 +215,10 @@ EOF
 sudo chmod 600 /home/incus/incus-fleet.env
 sudo chown incus-fleet:incus-fleet /home/incus/incus-fleet.env
 ```
+
+The bootstrap admin variables create the first local account on startup; they are ignored once any
+account exists, so they can safely stay in the env file. The shared `INCUS_FLEET_AUTH_TOKEN` also
+stops working as soon as a local account exists.
 
 Validate before starting:
 
@@ -240,8 +273,8 @@ sudo install -d -o rqlite -g rqlite -m 0750 /var/lib/rqlite
 ```
 
 Configure each node in `/etc/rqlite/rqlite.env` (copy `deploy/examples/rqlite.env.example`). The
-first node leaves `RQLITE_JOIN_ARGS` empty; the others point it at the first node's **Raft** port,
-not its HTTP port:
+first node leaves `RQLITE_JOIN_ARGS` empty; the others point it at the first node's **HTTP** port
+(`:4001`), matching `deploy/examples/rqlite.env.example` and `deploy/systemd/rqlited.service`:
 
 ```bash
 # node 1
@@ -253,7 +286,7 @@ RQLITE_RAFT_ADDR=192.0.2.20:4002
 RQLITE_NODE_ID=2
 RQLITE_HTTP_ADDR=192.0.2.21:4001
 RQLITE_RAFT_ADDR=192.0.2.21:4002
-RQLITE_JOIN_ARGS=-join 192.0.2.20:4002
+RQLITE_JOIN_ARGS=-join 192.0.2.20:4001
 ```
 
 Install and start the unit, bringing node 1 up first:
@@ -294,8 +327,39 @@ print(urllib.request.urlopen(req).read()[:200])
 PY
 ```
 
+The same seed approach also works for a PostgreSQL deployment: dump the SQLite rows with
+`sqlite3 ... .dump`, drop the `CREATE`/`BEGIN`/`COMMIT`/`schema_migrations` lines, and pipe the
+INSERT statements into `psql` instead of the rqlite HTTP API (`pg_dump`/`psql` for the transfer).
+Table creation is again handled by the app's startup migrations.
+
 Back up the SQLite file before doing this. Every node keeps a full copy, so a single node's
 `/var/lib/rqlite` is enough to restore from if the cluster is rebuilt.
+
+### Plugins and API tokens
+
+Plugins are external services surfaced in the UI through a same-origin proxy. Enable and declare
+them in the configuration (see [the plugin specification](plugins.md) for the full design):
+
+```yaml
+plugins:
+  enabled: true
+  entries:
+    - id: victoria-metrics
+      enabled: true
+      upstream: https://192.0.2.30:8428
+      bearer_token_file: /etc/incus-fleet/vm.token   # token sent to the plugin
+      role: viewer                                    # minimum fleet role to reach it
+      ui:
+        path: /plugin-ui/victoria-metrics/            # must live under /plugin-ui/
+```
+
+Each `ui.path` must be absolute and under `/plugin-ui/`; the plugin manager page `/plugins` is
+reserved. Keep the token in a root-readable file, not in YAML.
+
+Per-user scoped API tokens are managed at `GET`/`POST`/`DELETE /api/v1/tokens` (with the available
+scopes at `GET /api/v1/tokens/scopes`). The response to a `POST` carries the secret exactly once.
+A plugin receives a token bound to its `(id, instance)` with only the approved manifest scopes;
+uninstalling it revokes that token.
 
 ## 4. Install the systemd unit
 
@@ -304,6 +368,14 @@ sudo install -m 644 deploy/systemd/incus-fleet.service /etc/systemd/system/incus
 sudo systemctl daemon-reload
 sudo systemctl enable --now incus-fleet
 sudo systemctl status incus-fleet --no-pager
+```
+
+Follow the logs and verify the API is up:
+
+```bash
+sudo journalctl -u incus-fleet -f
+curl -fsS http://127.0.0.1:8080/api/v1/healthz
+curl -fsS http://127.0.0.1:8080/api/v1/version
 ```
 
 The sample unit runs as `incus-fleet`, reads `/home/incus/incus-fleet.env`, and writes only to
@@ -324,11 +396,12 @@ sudo mkdir -p /etc/network/interfaces.d /etc/wpa_supplicant
 sudo systemctl daemon-reload && sudo systemctl restart incus-fleet
 ```
 
-The whitelist covers `ip`, `nft`, `iw`, `dhcpcd`, `wpa_supplicant`, `hostname`, and `tee` limited
-to `/etc/network/interfaces.d/*` and `/etc/wpa_supplicant/fleet.conf` (interface names are
-validated before use). Binary paths differ by distribution; adjust the file if your host keeps
-them elsewhere (the runner resolves the binary through the same PATH order and passes the absolute
-path to sudo).
+The whitelist covers `ip`, `nft`, `iw`, `dhcpcd`, `wpa_supplicant`, `hostname`, `systemctl`, and
+`rm`, plus `tee` limited to `/etc/network/interfaces.d/*`, `/etc/wpa_supplicant/fleet.conf`,
+`/etc/dnsmasq.d/fleet-overlay-*.conf`, and `/etc/systemd/system/fleet-overlay-dhcp-*.service`
+(interface and overlay names are validated before use). Binary paths differ by distribution;
+adjust the file if your host keeps them elsewhere (the runner resolves the binary through the same
+PATH order and passes the absolute path to sudo).
 
 Remote members authenticate with a dedicated SSH identity. Generate the key on the app host as
 the service account and authorize its public key for the management user on every member:
@@ -367,8 +440,10 @@ On Linux the agent helper uses native netlink for link state, static addresses, 
 cancels it.
 
 The sample unit sets `NoNewPrivileges=false` and `PrivateDevices=false` because sudo is a setuid
-binary and `ip`/`iw`/`nft` need the real device view; `ReadWritePaths` grants the two `/etc`
-directories above. Keep the remaining hardening. Wi-Fi scan/connect additionally needs
+binary and `ip`/`iw`/`nft` need the real device view; `ReadWritePaths` grants the four `/etc`
+paths above plus `/etc/dnsmasq.d` and
+`/etc/systemd/system/fleet-overlay-dhcp-*.service` for the private overlay's dnsmasq config and
+per-overlay systemd unit. Keep the remaining hardening. Wi-Fi scan/connect additionally needs
 `wpasupplicant` installed on each node (`apt-get install -y wpasupplicant`).
 
 The first startup after upgrading creates the host task and audit tables through the schema
@@ -424,6 +499,13 @@ agent:
     asset_url: https://fleet.example
     agent_binary: /home/incus/bin/incus-fleet-agent
     helper_binary: /home/incus/bin/incus-fleet-helper
+    # Optional multi-arch maps instead of the two single paths above:
+    # agent_binaries:
+    #   amd64: /home/incus/bin/incus-fleet-agent-linux-amd64
+    #   arm64: /home/incus/bin/incus-fleet-agent-linux-arm64
+    # helper_binaries:
+    #   amd64: /home/incus/bin/incus-fleet-helper-linux-amd64
+    #   arm64: /home/incus/bin/incus-fleet-helper-linux-arm64
 ```
 
 The center runs the agent as `incus-fleet`, so the CA key and server key must be
@@ -495,9 +577,11 @@ curl -fsSL https://fleet.example/api/v1/agent/install.sh | sudo sh -s -- \
 The installer detects `uname -m`, downloads the matching architecture when `agent_binaries` /
 `helper_binaries` are configured, verifies the SHA-256, installs the CA, sudoers whitelist, systemd
 unit, and service user, enrolls the host, and starts `incus-fleet-agent`. The target needs `curl`,
-`sudo`/`visudo`, and systemd. Set
-`asset_url` when the center is behind a reverse proxy; otherwise the installer derives the asset URL
-from the incoming request. If the center uses a private HTTPS certificate, configure the node's
+`sudo`/`visudo`, `sha256sum`, `runuser`, `useradd`, `groupadd`, and systemd. Fetch the installer from
+the UI origin using `agent.install.asset_url` (or the UI origin when it is unset), **not** from
+`gateway_url` on port 8444 — that port is the agent's mTLS WebSocket gateway, not the asset server.
+Set `asset_url` when the center is behind a reverse proxy; otherwise the installer derives the asset
+URL from the incoming request. If the center uses a private HTTPS certificate, configure the node's
 trust store or add `--insecure` to the outer `curl` (the enrollment itself still verifies the agent
 gateway CA).
 
@@ -844,8 +928,8 @@ What the mesh replicates:
   60-second lease refreshed by agent heartbeats (15s by default), so a crashed center cannot leave a
   permanently stale owner. Any center can then relay a task through `control_address` to the owner. This is what makes
   async and synchronous node operations work when the task lands on a different center.
-- Browser sessions are stored in the shared database (`rqlite` or `postgres`), so a user is not
-  logged out after leader failover. A single-node SQLite file cannot back more than one center.
+- With `rqlite` or PostgreSQL, sessions are in the shared database, so a user is not logged out
+  after leader failover. A single-node SQLite file cannot back more than one center.
 
 Agents keep connecting to the single virtual `agent.install.gateway_url` (Caddy/VIP). They do not
 know which center is leader. The agent CA and server certificate must be shared by all centers.
@@ -917,6 +1001,11 @@ fleet.example.internal {
         health_interval 10s
         health_timeout 2s
     }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
 }
 ```
 
@@ -934,6 +1023,11 @@ fleet.example.internal {
         health_uri /api/v1/healthz
         health_interval 10s
         health_timeout 2s
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
     }
 }
 ```
@@ -972,8 +1066,18 @@ through the Incus API.
 ## 7. Deploy upgrades
 
 1. Build and copy the new binary to `/home/incus/bin/incus-fleet`.
-2. `sudo systemctl restart incus-fleet` on one host; verify health.
-3. Repeat on the other host.
+2. Reinstall the updated unit files so hardening fixes take effect, then reload and restart:
+
+   ```bash
+   sudo install -m 644 deploy/systemd/incus-fleet.service /etc/systemd/system/incus-fleet.service
+   sudo install -m 0440 -o root -g root deploy/nodesudoers /etc/sudoers.d/incus-fleet-nodesudoers
+   sudo visudo -cf /etc/sudoers.d/incus-fleet-nodesudoers
+   sudo systemctl daemon-reload
+   sudo systemctl restart incus-fleet
+   ```
+
+   The first start applies schema v11, which adds the `answer_profiles.packages` column.
+3. Verify health on that host, then repeat the binary/unit install and restart on the other host.
 4. Unfinished migrations are marked failed at startup. Re-submit them after checking that no
    partial copy remains on the target.
 
@@ -987,7 +1091,9 @@ Back up per app host:
 - `/home/incus/config.yaml` (contains no secrets if the token is in the env file);
 - `/home/incus/incus-fleet.env` (contains the admin token — protect it);
 - `/home/incus/certs/` (private keys);
-- `/home/incus/data/fleet.db` (SQLite) or the PostgreSQL database.
+- `/home/incus/data/fleet.db` (SQLite) or the PostgreSQL database;
+- `/home/incus/data/mesh` (`mesh.data_dir`, Raft state) and
+  `/home/incus/data/remote-write` (`metrics.remote_write.spool_dir`, disk-backed replay queue).
 
 The database now holds migration history plus the shared SSH key and script library. A lost
 database does not lose instances, but it does lose those reusable assets, so include it in
@@ -1010,6 +1116,8 @@ PostgreSQL, use `pg_dump` against the fleet database.
 | Login works then fails after refresh | Caddy is not using sticky sessions |
 | Migration stuck/failed after restart | Unfinished tasks are marked failed; inspect target for partial copies |
 | ISO upload or launch fails | ISO volume exists in the pool, the VM name is free, the pool has room |
+| Overlay DHCP fails to start | `dnsmasq` installed; `/etc/dnsmasq.d` writable by the service (`ReadWritePaths`); `tee`/`systemctl`/`rm` allowed in the sudoers whitelist |
+| One-command agent install fails | `asset_url` points at the UI origin (not `gateway_url`); `sha256sum` present; amd64/arm64 binaries configured for the target arch |
 | Remote desktop cannot connect | VM running, Incus agent ready, firewall allows 5910-5989 from the app host |
 | Image upload returns 413 | Image is over 8 GiB; compress the root filesystem or raise the limit in code |
 | Batch action reports partial failure | Inspect per-instance `error`/`stderr` in the 207 response; retry failed targets |
@@ -1029,9 +1137,12 @@ incus info --show-log <instance>
 - [ ] Env file and private keys owned by the service account, mode `0600`
 - [ ] No tokens, keys, or local-only docs in git
 - [ ] Terminal websockets stay sticky (a reconnect must hit the same app instance)
-- [ ] Caddy presents TLS and uses sticky sessions
+- [ ] Caddy presents TLS; stickiness is used only with the `sqlite` driver (shared DB can round-robin)
 - [ ] App API port 8080 is reachable only from the Caddy host (firewall)
 - [ ] Incus API 8443 is reachable only from the app hosts (firewall)
 - [ ] SPICE ports 5910-5989 are reachable only from the app hosts (firewall)
+- [ ] Plugin bearer tokens are root-readable files and plugin API tokens carry only approved scopes
+- [ ] `INCUS_FLEET_MESH_SECRET` is identical on all voters and not committed
+- [ ] SD and remote-write/metrics tokens are stored in files or env vars, not in YAML
 - [ ] Database backups include the shared key and script library
 - [ ] Secret scan run before pushing

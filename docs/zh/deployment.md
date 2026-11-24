@@ -31,6 +31,11 @@ flowchart LR
 
 每个应用实例都是独立的：独立的二进制、配置和证书。实例之间是否共享状态由数据库驱动决定。
 
+> **UI 地图（0.2.0）。** 侧边栏分为 **Fleet**、**Resources**、**Clusters → Nodes** 和
+> **Administration** 四组，新增顶层 **Instances** 和 **Volumes**（存储）页面。**Images & automation**
+> 是包含镜像、ISO、answer profile 和脚本的分页页面。迁移历史位于 **Instances** 下的
+> `view=migrations`，导航项按当前可见的集群范围显示。
+
 ## 选择数据库
 
 支持三种驱动，按实例数量和对单点故障的容忍度选择。
@@ -60,7 +65,8 @@ flowchart LR
 - 带 systemd 的 Linux；如果部署发布版二进制，则**不需要** Go。
 - 能访问每个 Incus API 端点的 8443 端口。
 - 一个专用服务账号和目录（示例使用 `/home/incus`）。
-- SQLite（默认）或 PostgreSQL 服务器。
+- SQLite（默认）、rqlite 集群或 PostgreSQL 服务器。
+- `dnsmasq`，私有 overlay 网络的 DHCP 服务需要它（见下方节点网络一节）。
 
 在每个 Incus 集群上：
 
@@ -68,6 +74,22 @@ flowchart LR
 - 有权添加受信任的客户端证书（`incus-admin` 组或 root）。
 
 ## 1. 构建发布版二进制
+
+每个 `v*` tag 都会触发 `Release` GitHub Actions 工作流：先用与 CI 相同的门禁校验该提交，
+然后发布 `linux-amd64` 与 `linux-arm64` 两个架构的产物：
+
+- 独立二进制 `incus-fleet-linux-<arch>`、`incus-fleet-helper-linux-<arch>`、
+  `incus-fleet-agent-linux-<arch>`（中心程序已内嵌 Vue UI）；
+- 每个组件均有 `.deb` 与 `.rpm` 包。中心包安装 `/usr/bin/incus-fleet`、systemd unit，
+  以及 `/etc/incus-fleet/` 下的配置/sudoers/Caddy 示例；agent 包安装 agent 二进制、unit 与
+  sudoers 示例。安装包**不会自动配置**：仍需按后续步骤创建服务账号、填写配置并启用服务；
+- `incus-fleet-<tag>-linux-<arch>.tar.gz` 打包三个二进制与 `SHA256SUMS-<arch>`；
+  release 还另外提供汇总的 `SHA256SUMS`。
+
+`agent.install` 一键安装器从 `asset_url`（未设置时从 UI 源）下载 agent 与 helper 二进制——
+使用该功能时请把这两个二进制与 release 产物放在一起。
+
+如需本地构建：
 
 ```bash
 make release
@@ -160,6 +182,9 @@ sudo -u incus-fleet bash -c 'umask 077; openssl rand -hex 32 > /home/incus/auth-
 sudo -u incus-fleet install -m 600 /dev/null /home/incus/incus-fleet.env
 sudo -u incus-fleet tee /home/incus/incus-fleet.env >/dev/null <<'EOF'
 INCUS_FLEET_AUTH_TOKEN=replace-with-the-generated-token
+# 全新部署时创建第一个本地管理员：
+# INCUS_FLEET_BOOTSTRAP_ADMIN_USERNAME=admin
+# INCUS_FLEET_BOOTSTRAP_ADMIN_PASSWORD=replace-with-a-strong-password
 # Optional overrides:
 # INCUS_FLEET_LISTEN=0.0.0.0:8080
 # INCUS_FLEET_DATABASE_DRIVER=postgres
@@ -168,6 +193,9 @@ EOF
 sudo chmod 600 /home/incus/incus-fleet.env
 sudo chown incus-fleet:incus-fleet /home/incus/incus-fleet.env
 ```
+
+bootstrap admin 变量会在启动时创建第一个本地账号；一旦存在任何账号就会被忽略，因此可以安全地
+保留在 env 文件中。共享的 `INCUS_FLEET_AUTH_TOKEN` 在第一个本地账号出现后也会失效。
 
 启动前先校验：
 
@@ -216,7 +244,7 @@ sudo useradd --system --home-dir /var/lib/rqlite --shell /usr/sbin/nologin rqlit
 sudo install -d -o rqlite -g rqlite -m 0750 /var/lib/rqlite
 ```
 
-在 `/etc/rqlite/rqlite.env` 中配置每个节点（复制 `deploy/examples/rqlite.env.example`）。第一个节点留空 `RQLITE_JOIN_ARGS`；其余节点指向第一个节点的 **Raft** 端口，而不是 HTTP 端口：
+在 `/etc/rqlite/rqlite.env` 中配置每个节点（复制 `deploy/examples/rqlite.env.example`）。第一个节点留空 `RQLITE_JOIN_ARGS`；其余节点指向第一个节点的 **HTTP** 端口（`:4001`），与 `deploy/examples/rqlite.env.example` 和 `deploy/systemd/rqlited.service` 保持一致：
 
 ```bash
 # 节点 1
@@ -228,7 +256,7 @@ RQLITE_RAFT_ADDR=192.0.2.20:4002
 RQLITE_NODE_ID=2
 RQLITE_HTTP_ADDR=192.0.2.21:4001
 RQLITE_RAFT_ADDR=192.0.2.21:4002
-RQLITE_JOIN_ARGS=-join 192.0.2.20:4002
+RQLITE_JOIN_ARGS=-join 192.0.2.20:4001
 ```
 
 安装并启动 unit，先启动节点 1：
@@ -265,7 +293,36 @@ print(urllib.request.urlopen(req).read()[:200])
 PY
 ```
 
+同样的种子数据导入方式也适用于 PostgreSQL 部署：用 `sqlite3 ... .dump` 导出 SQLite 记录，去掉
+`CREATE`/`BEGIN`/`COMMIT`/`schema_migrations` 行，再把 INSERT 语句通过 `psql` 导入，而不是走
+rqlite 的 HTTP API（迁移用 `pg_dump`/`psql`）。建表同样由应用启动时的 schema 迁移完成。
+
 操作前请备份 SQLite 文件。每个节点都保存完整副本，因此重建集群时任意节点的 `/var/lib/rqlite` 都足以恢复。
+
+### 插件与 API token
+
+插件是外部服务，通过同源代理在 UI 中呈现。在配置中启用并声明它们（完整设计见
+[插件规范](plugins.md)）：
+
+```yaml
+plugins:
+  enabled: true
+  entries:
+    - id: victoria-metrics
+      enabled: true
+      upstream: https://192.0.2.30:8428
+      bearer_token_file: /etc/incus-fleet/vm.token   # 发送给插件的 token
+      role: viewer                                    # 访问它的最低 fleet 角色
+      ui:
+        path: /plugin-ui/victoria-metrics/            # 必须位于 /plugin-ui/ 下
+```
+
+每个 `ui.path` 必须是绝对路径且位于 `/plugin-ui/` 下；插件管理页 `/plugins` 是保留路径。
+token 请放在仅 root 可读的文件中，不要写进 YAML。
+
+按用户划分的 scoped API token 通过 `GET`/`POST`/`DELETE /api/v1/tokens` 管理（可用 scope 见
+`GET /api/v1/tokens/scopes`）。`POST` 响应只在返回时携带一次明文 secret。插件会获得一个绑定到其
+`(id, instance)`、仅含批准过的 manifest scope 的 token；卸载插件会立即吊销该 token。
 
 ## 4. 安装 systemd 单元
 
@@ -304,10 +361,11 @@ sudo mkdir -p /etc/network/interfaces.d /etc/wpa_supplicant
 sudo systemctl daemon-reload && sudo systemctl restart incus-fleet
 ```
 
-白名单覆盖 `ip`、`nft`、`iw`、`dhcpcd`、`wpa_supplicant`、`hostname`，以及仅限
-`/etc/network/interfaces.d/*` 和 `/etc/wpa_supplicant/fleet.conf` 的 `tee`（接口名在使用前
-会校验）。不同发行版的二进制路径可能不同；如果主机把它们放在别处，请调整该文件（runner 按
-相同的 PATH 顺序解析二进制，并把绝对路径传给 sudo）。
+白名单覆盖 `ip`、`nft`、`iw`、`dhcpcd`、`wpa_supplicant`、`hostname`、`systemctl` 和 `rm`，
+以及仅限 `/etc/network/interfaces.d/*`、`/etc/wpa_supplicant/fleet.conf`、
+`/etc/dnsmasq.d/fleet-overlay-*.conf` 和 `/etc/systemd/system/fleet-overlay-dhcp-*.service`
+的 `tee`（接口名与 overlay 名在使用前会校验）。不同发行版的二进制路径可能不同；如果主机把它们
+放在别处，请调整该文件（runner 按相同的 PATH 顺序解析二进制，并把绝对路径传给 sudo）。
 
 远程成员使用专用 SSH 身份。在应用主机上以服务账户生成密钥，并把公钥授权给每个成员上的
 管理用户：
@@ -344,9 +402,10 @@ Linux 上 agent helper 对链路状态、静态地址和 fleet 路由（protocol
 计时器，`confirm` 会取消它。
 
 示例 systemd 单元设置 `NoNewPrivileges=false` 和 `PrivateDevices=false`，因为 sudo 是 setuid
-二进制，且 `ip`/`iw`/`nft` 需要真实的设备视图；`ReadWritePaths` 授予上面两个 `/etc` 目录。
-请保留其余加固项。Wi-Fi 扫描/连接还需要在每个节点安装 `wpasupplicant`
-（`apt-get install -y wpasupplicant`）。
+二进制，且 `ip`/`iw`/`nft` 需要真实的设备视图；`ReadWritePaths` 授予上述 `/etc` 路径，另加
+`/etc/dnsmasq.d` 和 `/etc/systemd/system/fleet-overlay-dhcp-*.service`，供私有 overlay 写入
+dnsmasq 配置和每个 overlay 的 systemd unit。请保留其余加固项。Wi-Fi 扫描/连接还需要在每个节点
+安装 `wpasupplicant`（`apt-get install -y wpasupplicant`）。
 
 升级后的首次启动会通过 schema 迁移创建主机任务和审计表；现有迁移历史会保留。API 提供
 `GET /api/v1/tasks`、`GET /api/v1/tasks/{id}` 和 `GET /api/v1/audit`。审计查询单次最多 200
@@ -398,6 +457,13 @@ agent:
     asset_url: https://fleet.example
     agent_binary: /home/incus/bin/incus-fleet-agent
     helper_binary: /home/incus/bin/incus-fleet-helper
+    # 可选：用下面的多架构映射替代上面两个单一路径：
+    # agent_binaries:
+    #   amd64: /home/incus/bin/incus-fleet-agent-linux-amd64
+    #   arm64: /home/incus/bin/incus-fleet-agent-linux-arm64
+    # helper_binaries:
+    #   amd64: /home/incus/bin/incus-fleet-helper-linux-amd64
+    #   arm64: /home/incus/bin/incus-fleet-helper-linux-arm64
 ```
 
 ```bash
@@ -416,7 +482,10 @@ curl -fsSL https://fleet.example/api/v1/agent/install.sh | sudo sh -s -- \
 
 安装器通过 `uname -m` 检测架构；配置了 `agent_binaries`/`helper_binaries` 时下载对应架构的
 二进制，校验 SHA-256，安装 CA、sudoers 白名单、systemd unit 和服务用户，完成注册并启动
-`incus-fleet-agent`。目标主机需要 `curl`、`sudo`/`visudo` 和 systemd。中心位于反向代理后时应设置 `asset_url`；否则安装器会从请求推导资源地址。
+`incus-fleet-agent`。目标主机需要 `curl`、`sudo`/`visudo`、`sha256sum`、`runuser`、`useradd`、
+`groupadd` 和 systemd。安装命令应从 UI 源站获取，即使用 `agent.install.asset_url`（未设置时使用 UI
+源站），**不要**从 8444 端口的 `gateway_url` 获取 —— 该端口是 agent 的 mTLS WebSocket gateway，
+不是资源服务器。中心位于反向代理后时应设置 `asset_url`；否则安装器会从请求推导资源地址。
 如果中心使用私有 HTTPS 证书，请配置节点信任库，或在外层 `curl` 加 `--insecure`（注册本身仍会
 校验 agent gateway CA）。
 
@@ -649,8 +718,8 @@ tcp_retransmits=...` 行。selftest 还会打印 `socket_cgroups`（sockops 已�
 
 per-cgroup eBPF 指标通过读取每个 cgroup 的内核 file handle（包括嵌套的 systemd cgroup）归因，
 容器 block I/O 会变成 `fleet_instance_block_latency_seconds_*`，以及重传/OOM 计数器。block 延迟
-bucket 使用 2 的幂纳秒。VM 只做宿主侧 cgroup 指标。TCP 重传归因是尽力而为，因为定时器可能在
-通过 sockops 维护的 IPv4/IPv6 flow→cgroup 映射归因，softirq 中的重传定时器仍能保持容器归因。
+bucket 使用 2 的幂纳秒。VM 只做宿主侧 cgroup 指标。TCP 重传通过 sockops 维护的 IPv4/IPv6
+flow→cgroup 映射归因，因此 softirq 中的重传定时器仍能保持容器归因。
 sockops 使用 `BPF_PROG_ATTACH` + `BPF_F_ALLOW_MULTI` 挂载，可与其他 sockops 程序共存；如果内核不
 支持该模式，agent 会跳过 sockops 而不是替换现有程序，并回退当前任务归因。OOM kill 按实例聚合
 嵌套 cgroup。OOM tracepoint 在内核态通过 `bpf_task_from_pid` 和 CO-RE 读取
@@ -740,7 +809,7 @@ mesh 复制以下状态：
   会把更新转发给 leader。owner 带 60 秒 lease，由 agent 心跳（默认 15 秒）续租，因此崩溃的 center
   不会留下永久过期的 owner。其他 center 通过 `control_address` 把任务中继给 owner。这样即使异步任务在另一台 center 上领取，同步节点操作
   也能正确派发。
-- 浏览器会话写入共享数据库（`rqlite` 或 `postgres`），leader 切换后用户不会被登出。单节点 SQLite 文件不能支撑多个 center。
+- 使用 `rqlite` 或 PostgreSQL 时，会话在共享数据库中，leader 切换后用户不会被登出。单节点 SQLite 文件不能支撑多个 center。
 
 agent 始终连接虚拟的 `agent.install.gateway_url`（Caddy/VIP），不知道当前 leader 是谁。所有
 center 必须共享 agent CA 和服务端证书。
@@ -789,14 +858,16 @@ curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 ## 5. 配置 Caddy
 
-由于会话保存在内存中，Caddy 必须把每个浏览器固定到同一个应用实例。示例 `deploy/caddy/Caddyfile` 使用 `lb_policy cookie` 加上被动/主动健康检查：
+负载均衡策略取决于数据库驱动。
+
+使用 `rqlite` 或 `postgres` 时，会话和所有状态都在共享数据库中，任意实例都能处理任意请求。用普通轮询即可；健康检查会摘掉故障实例，浏览器无需重新登录：
 
 ```caddyfile
 fleet.example.internal {
     encode zstd gzip
 
     reverse_proxy 192.0.2.20:8080 192.0.2.21:8080 {
-        lb_policy cookie incus_fleet_lb
+        lb_policy round_robin
         lb_try_duration 5s
         lb_try_interval 250ms
         fail_duration 30s
@@ -805,14 +876,41 @@ fleet.example.internal {
         health_interval 10s
         health_timeout 2s
     }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+}
+```
+
+使用 `sqlite` 时，会话在进程内存中，Caddy 必须把每个浏览器固定到一个实例。用 `lb_policy cookie`，且不要在代理后面运行第二个实例：
+
+```caddyfile
+fleet.example.internal {
+    encode zstd gzip
+
+    reverse_proxy 192.0.2.20:8080 {
+        lb_policy cookie incus_fleet_lb
+        fail_duration 30s
+        max_fails 2
+        health_uri /api/v1/healthz
+        health_interval 10s
+        health_timeout 2s
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
 }
 ```
 
 使用真实 DNS 名称，或对仅内网部署使用 Caddy 的内部 CA。在 Caddy 处终止 TLS；应用实例在内网以纯 HTTP 提供服务。Caddy 会设置 `X-Forwarded-Proto`，因此即便上游连接是 HTTP，应用也会把会话 cookie 标记为 `Secure`。直接以纯 HTTP 访问应用实例也可用于最初的内网测试，但此时 cookie 不会被标记为 `Secure`。
 
-如果采用轮询而没有粘性，浏览器登录会间歇性失败，因为会话 cookie 只在创建它的实例上有效。
+使用 `sqlite` 时，不带粘性的轮询会让登录间歇失败：会话 cookie 只在创建它的实例上有效。这正是迁移到共享数据库的原因。
 
-Caddy 会透明代理 WebSocket：终端、VGA、SPICE 和文件端点（`/api/v1/.../console|exec|vga|spice|files`）与 UI 使用同一个粘性 cookie，因此无需额外配置。SPICE 客户端每个会话会打开多个 websocket 连接，所有这些连接都必须到达同一个应用实例；当浏览器支持时，粘性 cookie 可以满足这一点。
+Caddy 会透明代理 WebSocket：终端、VGA、SPICE 和文件端点（`/api/v1/.../console|exec|vga|spice|files`）无需额外配置。使用 `sqlite` 时，粘性 cookie 会把它们保持在同一实例。共享数据库下任意实例都能处理，但 SPICE 客户端每个会话会打开多个 websocket 连接，重连可能落到不同实例；如果依赖长连接的 SPICE，请保留粘性会话。
 
 ## 6. 防火墙与 SPICE
 
@@ -828,8 +926,18 @@ sudo nft add rule inet filter input tcp dport 5910-5989 \
 ## 7. 部署升级
 
 1. 构建新的二进制并复制到 `/home/incus/bin/incus-fleet`。
-2. 在一台主机上执行 `sudo systemctl restart incus-fleet`；验证健康状态。
-3. 在另一台主机上重复。
+2. 重新安装更新后的 unit 文件，让加固修复生效，然后 reload 并重启：
+
+   ```bash
+   sudo install -m 644 deploy/systemd/incus-fleet.service /etc/systemd/system/incus-fleet.service
+   sudo install -m 0440 -o root -g root deploy/nodesudoers /etc/sudoers.d/incus-fleet-nodesudoers
+   sudo visudo -cf /etc/sudoers.d/incus-fleet-nodesudoers
+   sudo systemctl daemon-reload
+   sudo systemctl restart incus-fleet
+   ```
+
+   首次启动会应用 schema v11，新增 `answer_profiles.packages` 列。
+3. 在该主机上验证健康状态，然后在另一台主机上重复安装二进制/unit 并重启。
 4. 未完成的迁移会在启动时被标记为失败。确认目标端没有残留的部分副本后，重新提交这些迁移。
 
 回滚时恢复之前的二进制并重启。数据库 schema 是增量的；目前不需要降级步骤。
@@ -841,7 +949,9 @@ sudo nft add rule inet filter input tcp dport 5910-5989 \
 - `/home/incus/config.yaml`（若 token 位于环境变量文件中，则不包含机密）；
 - `/home/incus/incus-fleet.env`（包含管理员 token —— 请妥善保护）；
 - `/home/incus/certs/`（私钥）；
-- `/home/incus/data/fleet.db`（SQLite）或 PostgreSQL 数据库。
+- `/home/incus/data/fleet.db`（SQLite）或 PostgreSQL 数据库；
+- `/home/incus/data/mesh`（`mesh.data_dir`，Raft 状态）和
+  `/home/incus/data/remote-write`（`metrics.remote_write.spool_dir`，磁盘持久化的重放队列）。
 
 数据库现在保存迁移历史以及共享的 SSH 密钥与脚本库。数据库丢失不会丢失实例，但会丢失这些可复用资产，因此应把它纳入定期备份。
 
@@ -861,6 +971,8 @@ sudo nft add rule inet filter input tcp dport 5910-5989 \
 | 登录可用，刷新后失败 | Caddy 未使用粘性会话 |
 | 重启后迁移卡住/失败 | 未完成的任务会被标记为失败；检查目标端是否有部分副本 |
 | ISO 上传或启动失败 | ISO 卷存在于存储池中、虚拟机名未被占用、存储池有可用空间 |
+| overlay DHCP 启动失败 | 已安装 `dnsmasq`；服务对 `/etc/dnsmasq.d` 有写权限（`ReadWritePaths`）；sudoers 白名单允许 `tee`/`systemctl`/`rm` |
+| 一键安装 agent 失败 | `asset_url` 指向 UI 源站（不是 `gateway_url`）；已安装 `sha256sum`；已配置目标架构对应的 amd64/arm64 二进制 |
 | 远程桌面无法连接 | 虚拟机运行中、Incus agent 就绪、防火墙允许应用主机访问 5910-5989 |
 | 镜像上传返回 413 | 镜像超过 8 GiB；压缩根文件系统，或修改代码中的限制 |
 | 批量操作报告部分失败 | 检查 207 响应中各实例的 `error`/`stderr`；重试失败的目标 |
@@ -880,9 +992,12 @@ incus info --show-log <instance>
 - [ ] 环境变量文件与私钥属主为服务账号，权限 `0600`
 - [ ] git 中没有 token、密钥或仅本地保留的文档
 - [ ] 终端 websocket 保持粘性（重连必须命中同一个应用实例）
-- [ ] Caddy 提供 TLS 并使用粘性会话
+- [ ] Caddy 提供 TLS；仅在使用 `sqlite` 驱动时需要粘性（共享数据库可轮询）
 - [ ] 应用 API 端口 8080 只能从 Caddy 主机访问（防火墙）
 - [ ] Incus API 8443 只能从应用主机访问（防火墙）
 - [ ] SPICE 端口 5910-5989 只能从应用主机访问（防火墙）
+- [ ] 插件 bearer token 放在仅 root 可读的文件中，插件 API token 仅含批准过的 scope
+- [ ] `INCUS_FLEET_MESH_SECRET` 在所有 voter 上一致且未提交到仓库
+- [ ] SD 与 remote write/metrics token 存放在文件或环境变量中，而非 YAML 中
 - [ ] 数据库备份包含共享密钥与脚本库
 - [ ] 推送前运行了机密扫描

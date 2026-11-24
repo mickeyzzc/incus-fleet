@@ -16,21 +16,29 @@ Prerequisites:
 ## Contents
 
 1. [Sign in and choose a language](#sign-in-and-choose-a-language)
-2. [Tour the dashboard](#tour-the-dashboard)
-3. [Images: import and distribute](#images-import-and-distribute)
-4. [ISO installers and OS installation](#iso-installers-and-os-installation)
-5. [Create an instance](#create-an-instance)
-6. [Day-to-day instance management](#day-to-day-instance-management)
-7. [Online terminals and remote desktop](#online-terminals-and-remote-desktop)
-8. [Maintenance actions: scripts, passwords, keys](#maintenance-actions-scripts-passwords-keys)
-9. [Image upgrades and cloning](#image-upgrades-and-cloning)
-10. [Port forwarding](#port-forwarding)
-11. [Walkthrough: deploy a PostgreSQL container](#walkthrough-deploy-a-postgresql-container)
-12. [Images & automation, batch operations](#images--automation-batch-operations)
-13. [Resource monitoring](#resource-monitoring)
-14. [Storage pools and networks](#storage-pools-and-networks)
-15. [Private interconnect networks](#private-interconnect-networks)
-16. [FAQ](#faq)
+2. [Navigation & page map](#navigation--page-map)
+3. [Users and roles](#users-and-roles)
+4. [Remote desktop](#remote-desktop)
+5. [Installing the incus agent](#installing-the-incus-agent)
+6. [Tour the dashboard](#tour-the-dashboard)
+7. [Images: import and distribute](#images-import-and-distribute)
+8. [ISO installers and OS installation](#iso-installers-and-os-installation)
+9. [Create an instance](#create-an-instance)
+10. [Day-to-day instance management](#day-to-day-instance-management)
+11. [Online terminals and remote desktop](#online-terminals-and-remote-desktop)
+12. [Maintenance actions: scripts, passwords, keys](#maintenance-actions-scripts-passwords-keys)
+13. [Image upgrades and cloning](#image-upgrades-and-cloning)
+14. [Port forwarding](#port-forwarding)
+15. [Walkthrough: deploy a PostgreSQL container](#walkthrough-deploy-a-postgresql-container)
+16. [Cross-cluster migration and guest networking](#cross-cluster-migration-and-guest-networking)
+17. [Images & automation, batch operations](#images--automation-batch-operations)
+18. [Resource monitoring](#resource-monitoring)
+19. [Storage pools and networks](#storage-pools-and-networks)
+20. [Private interconnect networks](#private-interconnect-networks)
+21. [Adding a node](#adding-a-node)
+22. [Node network and operation history](#node-network-and-operation-history)
+23. [Plugins (admin)](#plugins-admin)
+24. [FAQ](#faq)
 
 ## Sign in and choose a language
 
@@ -43,12 +51,33 @@ Prerequisites:
      in `incus-fleet.env` and restart the service; or
    - sign in with the shared admin token and create one under **Users**.
    The shared token stops working as soon as any local account exists.
-3. Use the gear icon in the top-right corner → **Language** to switch between English and
+3. Use the **language selector in the top-right toolbar** to switch between English and
    中文. The choice applies immediately and is stored in the browser.
+
+## Navigation & page map
+
+The sidebar is grouped by scope, and the top bar shows breadcrumbs for the current page so
+you always know which cluster or resource you are inside.
+
+- **Fleet** — **Dashboard** (cluster health and totals) and **Instances** (the cross-cluster
+  instance table).
+- **Resources** — **Images & automation** (images, install media, keys, scripts, answer
+  profiles), **Assets**, and (for administrators) **Plugins**.
+- **Clusters → Nodes** — one expandable group per cluster; its **Overview** page and the
+  **Nodes** submenu list every member, each opening the node detail and **Node network** page.
+- **Administration** — **Users** (visible to administrators only).
+
+In addition to the grouped items, the top-level pages are **Instances**, **Fleet volumes**
+(cross-cluster storage inventory; see [Storage pools and networks](#storage-pools-and-networks)),
+**Assets**, **Plugins**, and **Users**. Breadcrumbs in the top bar show the path to the current
+page (for example *Cluster → Nodes → Node network*); click a crumb to navigate back.
+
+The sidebar can be collapsed to an **icon-only rail** with the toggle in the top-left toolbar;
+group labels and menu text hide while the icons remain, and hovering an icon reveals its label.
 
 ## Users and roles
 
-Only administrators see **Users** in the sidebar.
+Only administrators see **Users** in the sidebar under **Administration**.
 
 - **Roles**: Administrator (everything), Operator (mutate instances and nodes, cannot manage
   users), Viewer (read-only).
@@ -58,6 +87,9 @@ Only administrators see **Users** in the sidebar.
   blank keeps the current one.
 - **Delete**: confirmed before it happens. The last administrator cannot be deleted or
   demoted; the API returns a conflict.
+- **Sessions**: the **Sessions** row action lists the account's active sessions (sign-in time,
+  last activity, origin). **Revoke all sessions** ends every session for that user at once,
+  including the current one, so you will be signed out if you revoke your own.
 - **Authorization is server-side**: a viewer is refused (403) even when it calls the API
   directly and bypasses the UI.
 
@@ -83,11 +115,24 @@ device and do not offer this button.
 
 Systems installed from an arbitrary ISO (for example fnOS) do not carry Incus's in-guest agent,
 which is why the exec terminal, file manager, and instance metrics stay unavailable on such VMs.
-When the drawer detects a virtual machine without the agent, it shows an **Install agent**
-button: enter the guest's SSH credentials and Fleet runs Incus's official `install.sh` inside the
-guest (the agent ships on a read-only `config` share Incus mounts into every VM). The
-credentials are used for that one session and never stored; sudo escalation is supported for
-non-root users.
+The instance drawer shows an **Install agent** button **only for agent-less virtual machines**
+(detected from the missing guest network/guest-info state); containers and agent-backed VMs do
+not show it. Enter the guest's SSH credentials (a guest address is optional — Fleet resolves it
+from DHCP leases if left blank; sudo escalation is supported for non-root users). The
+credentials are used for that one session and never stored.
+
+The dialog reports each step inline with its own result (OK, failed, or a "reboot may be needed"
+warning):
+
+1. **Validate** the inputs;
+2. **Resolve address** from the DHCP leases if none was supplied;
+3. **Connect** over SSH;
+4. **Check guest** for systemd and 9p support;
+5. **Mount config share** (the read-only `config` share Incus mounts into every VM, which
+   carries the official `install.sh`);
+6. **Run install.sh** inside the guest;
+7. **Cleanup** the temporary mount;
+8. **Verify agent** is responding.
 
 Manual fallback inside the guest, if you prefer:
 
@@ -98,15 +143,6 @@ mount -t 9p config /mnt
 
 The installer only supports systemd guests with 9p support in the kernel (Debian, Ubuntu, and
 derivatives qualify). Windows VMs need the virtio-win agent flow and are not covered yet.
-
-## Online terminal
-
-Open the instance drawer and click **Terminal**. Containers start in **Command** mode (Incus
-has no serial console for containers) and virtual machines start in **Console** mode.
-Submitting a command works with Enter or the **Start** button, and the output is written into
-the terminal above.
-
-![Online terminal running a command and returning the kernel and disk usage](images/auth/terminal-redacted.png)
 
 ## Tour the dashboard
 
@@ -128,9 +164,13 @@ profiles, and members.
 
 ## Images: import and distribute
 
-Fleet uploads a local image file to one cluster, then distributes it to other clusters with
-one click: upload once, use everywhere. Deleting an image on a cluster asks for confirmation
-first — it cannot be undone.
+Start at **Resources → Images & automation** in the sidebar: its **Images** tab is the
+cross-cluster image inventory, while **Install media (ISO)** holds uploaded installers (see the
+[ISO workflow](#iso-installers-and-os-installation)). To place an image on a specific cluster,
+open that cluster's **Images & media** tab — this view is **cluster-scoped**: it shows and
+manages only that cluster's images, storage volumes and ISO media. Fleet uploads a local image
+file to one cluster, then distributes it to other clusters with one click: upload once, use
+everywhere. Deleting an image on a cluster asks for confirmation first — it cannot be undone.
 
 ### Step 1: prepare the image files
 
@@ -177,10 +217,14 @@ curl -H "Authorization: Bearer $INCUS_FLEET_AUTH_TOKEN" \
 ## ISO installers and OS installation
 
 Fleet can upload ISO installers (for example the official Debian, Ubuntu, or CentOS images)
-and boot a blank virtual machine from the ISO to install the OS.
+and boot a blank virtual machine from the ISO to install the OS. Start from **Resources →
+Images & automation → Install media (ISO)** for the fleet-wide library; launching a VM is done
+from a cluster's **Images & media** tab, which is cluster-scoped.
 
-1. Open the cluster → **ISO installers** → **Upload ISO**, then choose the `.iso` file and a
-   storage pool.
+1. Upload the ISO under **Images & automation → Install media (ISO)** (or the cluster's
+   **Images & media** tab): click **Upload ISO**, choose the `.iso` file and a storage pool.
+   The upload **continues in the background if you navigate away** and can be **canceled from
+   the upload list**.
 2. The ISO appears in the list. Click **Create VM**:
    - Enter a VM name (required);
    - Optionally choose a network (recommended when the installer needs to download packages;
@@ -211,7 +255,8 @@ installation media, forces the installer's default boot entry, and watches for c
    - **Generic cloud-init (NoCloud seed)** — custom ISOs that honor cloud-init.
 3. Supply the answers in one of three ways:
    - Fill the template fields: hostname (defaults to the VM name), user account, password,
-     timezone, target disk, locale, and keyboard layout;
+     timezone, target disk, locale, keyboard layout, and **additional packages** to install
+     during the unattended install;
    - Pick a saved **Answer profile** from the dropdown — configurations are managed under
      **Images & automation → Answer profiles**, can be marked as the default for their installer,
      and are applied automatically when a launch supplies no answer content;
@@ -225,15 +270,10 @@ installation media, forces the installer's default boot entry, and watches for c
    - Ubuntu/generic profiles keep the installer ISO untouched and attach a generated NoCloud
      seed ISO (`cidata-<vm>`) as a second media.
 5. Watch the progress on the **Remote desktop** — the installer runs from boot to finish with
-   no input. The patched boot menu boots itself after 10 seconds:
-
-   ![GRUB menu of the remastered Debian installer, booting the default entry automatically](images/iso/unattended-grub-menu.png)
-
-   When it completes, the VM powers off, Fleet automatically detaches the installation media
-   and deletes the derived volumes (including the answer-file copies), and you can simply
-   start the VM to boot the installed system.
-
-   ![Debian installer running unattended: installing the base system](images/iso/unattended-installing.png)
+   no input. The patched boot menu boots itself after 10 seconds. When the installation
+   completes, the VM powers off, Fleet automatically detaches the installation media and
+   deletes the derived volumes (including the answer-file copies), and you can simply start
+   the VM to boot the installed system.
 
 Notes and requirements:
 
@@ -260,16 +300,17 @@ installer images (for example the current Debian netinst and Arch Linux ISOs) ap
 
 ![Imported installer ISOs under Images & automation](images/iso/asset-library-isos.png)
 
-The installer boots into a GRUB menu or the distribution's splash screen; the remote desktop
-follows the framebuffer size automatically.
+Before starting, use **Preview answer file** to inspect the exact preseed/cloud-init content
+that will be shipped inside the derived ISO. The preview is available in the unattended-install
+dialog; the browser remote desktop then follows the installer's framebuffer size automatically.
 
-![Debian installer booting from an ISO](images/iso-install-grub.png)
+![Unattended install answer-file preview in the Create VM from ISO dialog](images/iso-install-grub.png)
 
-*ISO installer boot menu in the browser remote desktop (English UI).*
+*Previewing the generated answer file before launching an unattended install (English UI).*
 
-![Installer splash screen](images/iso-install-boot.png)
+![Unattended install configuration with ISO and answer profile selected](images/iso-install-boot.png)
 
-*The same VM after the graphical installer started; resolution adapted automatically.*
+*The unattended-install options in the Create VM from ISO dialog.*
 
 ## Create an instance
 
@@ -282,6 +323,29 @@ Open a cluster → **Instances** → **Create instance**. Key fields:
 | Image | Pick an imported image by alias or fingerprint |
 | Network | See below |
 | CPU / memory / root disk size | Limits; leave blank for defaults |
+
+### Additional disks
+
+The create form has an **Additional disks** section (in the edit form a hint points you to the
+instance's **Devices** tab instead). For each disk supply:
+
+- **Name** — a unique device name inside the instance (for example `data0`);
+- **Mount path** — an absolute path in the guest (for example `/data`; may be empty for a block
+  device);
+- **Size** — see [Entering sizes](#entering-sizes).
+
+Names must be unique, paths must be absolute, and sizes must parse; errors appear inline next to
+the field before you can submit. An empty **source** means Fleet creates a new empty volume in
+the selected storage pool and mounts it at the given path; once created, the volume name is
+back-filled into the device's `source` key. To mount an existing volume, enter its name instead.
+
+### Entering sizes
+
+Memory, root disk and additional disk sizes use a number plus a unit from the **MiB / GiB / TiB**
+dropdown. A bare number is interpreted as **MiB** (for example `512` means `512MiB`), and
+invalid values show an inline error. When a cluster is selected, the form shows its current
+memory and storage capacity as hints (used / total), so you can size a new instance against what
+is actually free.
 
 ### Choosing a network: same-subnet IPs
 
@@ -322,10 +386,20 @@ address appears, check the switch/router DHCP service and the NIC bridge state.
 
 ## Day-to-day instance management
 
+Start from **Fleet → Instances**. The **Instances** page shows a cross-cluster table: every
+instance from every cluster in one place, with a **Cluster** column and a cluster filter so you
+can narrow the view (selecting a cluster in the cluster detail page's **Instances** tab is the
+secondary, cluster-scoped path to the same drawer and actions). Above the table, a view switcher
+offers the list and the **Migration records** tab (`view=migrations`; see
+[Migration records](#migration-records)). Selecting instances reveals a batch toolbar (see
+[Batch operations](#batch-operations-apply-to-many-instances-at-once)).
+
 From the instance list or the detail drawer you can:
 
 - **Start / stop / restart**: stop and restart ask for confirmation and offer a **force**
   option.
+- **Rename**: use **Rename** in the row/action menu. Stop the instance first — a running instance
+  cannot be renamed. The new name must be unique within the cluster.
 - **Snapshots**: create (optionally with running state), restore, delete. Restoring rolls the
   disk back; confirm before proceeding.
 - **Terminal**:
@@ -334,11 +408,14 @@ From the instance list or the detail drawer you can:
     normal shutdown).
 - **File management**: browse the instance filesystem, upload, download, create directories,
   and delete files.
-- **Devices**: attach a disk (storage volume or host path) or a second NIC; edit any attached
-  device (switch networks, change static addresses, resize disks — the merge keeps keys the
-  form does not manage, such as boot priority); expand a row to see the full device
-  configuration; detach devices in the same panel. Clearing a NIC address falls back to DHCP.
-  Switching a NIC to a managed network rewrites legacy `nictype`/`parent` devices.
+- **Devices**: attach a disk (storage volume or host path), a second NIC, or a port forward;
+  edit any attached device. Editable fields depend on the type: a NIC exposes its network and
+  IPv4/IPv6 addresses, a disk exposes pool, source, mount path and size, and a proxy exposes
+  the host-side **listen** and instance-side **connect** addresses. The merge keeps keys the
+  form does not manage (for example boot priority or custom `nictype`), so unrelated
+  configuration survives an edit. Expand a row to see the full device configuration and copy
+  it; detach devices in the same panel. Clearing a NIC address falls back to DHCP. Switching a
+  NIC to a managed network rewrites legacy `nictype`/`parent` devices.
 - **Delete instance**: asks for confirmation and offers a checkbox to delete the instance's
   attached storage volumes in the same step (shared ISO installer assets are kept).
 
@@ -346,23 +423,24 @@ From the instance list or the detail drawer you can:
 
 *Devices tab: root disk, a macvlan NIC and an attached custom volume (English UI).*
 
-## Remote desktop
+### Migration records
 
-The **Remote desktop** button opens a live graphical console for running virtual machines
-directly in the browser. It works without any VNC or SPICE support in the host's QEMU: the
-fleet attaches a second QEMU monitor (`raw.qemu.conf`, QMP control mode) to the VM, polls
-framebuffer screenshots through it, and injects keyboard and pointer events. The first
-preparation restarts a running VM once; after that opening the console is immediate and
-idempotent.
-
-In the console window: click into the picture to give it keyboard focus (arrow keys, Enter,
-Ctrl+Alt+Del all reach the guest), click or drag inside it to move the pointer and press
-buttons, and scroll to send wheel events. The picture refreshes automatically about once a
-second. Containers have no display device and do not offer this button.
+The **Migration records** tab (`Instances → Migration records`, or `/instances?view=migrations`;
+`/migrations` redirects there) lists cross-cluster migrations with route, mode, status, progress,
+duration, and timestamps. The list polls automatically; use the search box and the **Status**
+filter (pending, preflight, stopping, transferring, starting, verifying, done, failed, canceled)
+to narrow it. Click a row to open the **detail drawer** with the full task state, progress
+message and timing. Terminal statuses allow **Retry** (resubmits the migration from the current
+state after confirmation) and **Cancel** (requests cancellation; an in-flight migration stops at
+its next safe point and is recorded as canceled). Only running migrations offer **Cancel**, and
+only failed or canceled ones offer **Retry**. See
+[Cross-cluster migration and guest networking](#cross-cluster-migration-and-guest-networking) for
+what happens to guest networking after a move.
 
 ## Online terminals and remote desktop
 
-Fleet provides three browser sessions, available from the detail drawer or the list actions:
+Fleet provides browser sessions from the detail drawer or the list actions. The graphical
+console is described once in [Remote desktop](#remote-desktop); the two text sessions are:
 
 - **Terminal (Exec)**: works for containers and VMs. Opens an interactive root shell, supports
   window resizing and interrupt signals. In command-line mode the session runs a **persistent
@@ -370,19 +448,17 @@ Fleet provides three browser sessions, available from the detail drawer or the l
   working directory survive across commands. If the command exits and the session closes, the
   next input reopens the session automatically and runs the pending command.
 - **Serial console (Console)**: useful for boot problems and kernel output.
-- **Remote desktop (VMs)**: running VMs can open a graphical console. Fleet appends a second
-  QEMU monitor to the VM through `raw.qemu.conf` (QMP control mode, unix socket under /tmp)
-  and relaxes the instance's AppArmor profile for that socket and the screenshot scratch
-  file. The browser polls PNG framebuffer dumps from that monitor and sends keyboard and
-  absolute-pointer events back. The first configuration restarts a running VM once; later
-  sessions are read-only preparations and connect immediately. Containers have no display
-  device and do not offer remote desktop.
 
-  Security note: the monitor socket lives in the member's /tmp and is reachable only by
-  processes allowed by the instance's AppArmor profile; the fleet drives it over SSH with
-  sudo, so no extra listening TCP port is involved.
+Open the instance drawer and click **Terminal**. Containers start in **Command** mode (Incus has
+no serial console for containers) and virtual machines start in **Console** mode. Submitting a
+command works with Enter or the **Start** button, and the output is written into the terminal
+above.
 
-Sessions close with the page and leave no daemon process on the host.
+![Online terminal running a command and returning the kernel and disk usage](images/auth/terminal-redacted.png)
+
+Both sessions close with the page and leave no daemon process on the host. If a session fails
+to open, the terminal shows the server's close reason (missing agent, stopped instance, or a
+busy console) instead of a bare "disconnected" — see the [FAQ](#faq).
 
 ## Maintenance actions: scripts, passwords, keys
 
@@ -535,7 +611,13 @@ Open **Images & automation** in the left menu and switch tabs:
 - **SSH public keys**: stores keys (name + key material; identical content is de-duplicated).
   Storing a key does not deploy it; you decide when to inject it.
 - **Scripts**: stores maintenance scripts (name + description + body), ready to reuse.
-- **Answer profiles**: unattended-install answer templates, defaultable per installer.
+- **Answer profiles**: unattended-install answer templates (hostname, account, password,
+  timezone, target disk, locale, keyboard, **additional packages**, and an optional custom
+  answer file), defaultable per installer. Passwords require **confirmation** and show a
+  **strength** meter while you type. The **target disk** is relevant to Debian/d-i and
+  kickstart profiles only — **Ubuntu autoinstall and Generic NoCloud hide the target disk
+  field** because those installers pick the disk themselves — but **locale and keyboard are
+  applied by every installer**.
 
 Batch operations still start from the **Instances** page; see below.
 
@@ -565,8 +647,13 @@ policies, and backup export templates. These are planned.
 
 ## Resource monitoring
 
-Fleet includes two layers of resource monitoring with **no agent installed inside instances**.
-Data comes directly from the Incus live state API.
+Fleet's core monitoring needs **no in-guest agent**: host capacity, cluster status, and
+container CPU/memory/disk/network come directly from the Incus live state API. VM metrics and
+guest-level maintenance actions (exec terminal, file manager, scripts, password/SSH-key actions)
+**do need the Incus guest agent** running in the VM; VMs from official cloud images get it
+automatically, agent-less VMs can use [Installing the incus agent](#installing-the-incus-agent).
+Host telemetry (CPU, memory, load, uptime, network counters) is provided by an **optional host
+agent** on each node; without it only the Incus-provided data is available.
 
 ### Cluster level: host resources
 
@@ -626,6 +713,15 @@ Images & media, Network, and Profiles.
 - **Profiles**: create, update, and delete configuration templates; select them when creating
   instances.
 
+### Fleet volumes (cross-cluster inventory)
+
+The top-level **Fleet volumes** page (`/volumes`) shows custom storage volumes from **all
+clusters** in one table — name, owning cluster, pool, content type, size, what uses it, and
+location. Use the **search** box to find a volume by name and the **Cluster** filter to narrow
+to one cluster; the header displays a **total count and summed used size** for the current view.
+Cluster-scoped volume management (creating/deleting pools and volumes) stays on each cluster's
+**Storage** tab; this page is the read-side inventory across clusters.
+
 ## Private interconnect networks
 
 Incus requires every cluster member to share one network definition, so a managed bridge
@@ -646,9 +742,11 @@ Instances attach with a legacy `nictype=bridged, parent=fleetbr0` NIC, so a gues
 and its default gateway exactly as before. Nothing inside the guest changes.
 
 Enable it from the cluster page (**Private interconnect → Enable private network**): choose the
-subnet, a VNI, the gateway member, and optionally the MTU and DHCP range. After adding or removing
-a cluster member, run **Reconcile** to rebuild the tunnel mesh. **Disable** removes the tunnels,
-DHCP, NAT, and bridges from every member.
+subnet, a VNI, the gateway member, and optionally the MTU and DHCP range. **Edit** reopens the
+same form to change any of these fields — subnet, VNI, MTU, DHCP range, and the **gateway member**
+— and re-applies the configuration. After adding or removing a cluster member, run **Reconcile**
+to rebuild the tunnel mesh. **Disable** removes the tunnels, DHCP, NAT, and bridges from every
+member.
 
 Notes:
 
@@ -660,17 +758,74 @@ Notes:
 - OVN remains a future alternative for ACLs, forwards, and multi-tenant isolation. The overlay
   abstraction keeps that switch local to the network backend.
 
+## Adding a node
+
+Open the cluster's **Nodes** page and click **Add node**. Two flows are available:
+
+- **Host agent (recommended)**: click **Create enrollment token** to issue a **single-use token**
+  bound to that cluster and member name (it is shown once; the server keeps only its hash).
+  Run the generated **one-command installer** as root on the target host; it downloads the
+  agent binaries and CA over the agent gateway, enrolls with the token, and starts the service.
+  The dialog then **waits for the agent to connect** (the token expires if you are too slow).
+  Optionally enable **Install Incus through the package manager** — the repository must already
+  be configured on the node, and a version prefix can be pinned. With the agent online, use
+  **Bootstrap via agent**: Fleet builds a **signed install/init/join spec**, the agent's
+  privileged helper verifies the signature before running it, and the node is installed and
+  joined to the cluster without SSH credentials.
+- **SSH fallback**: choose **Use SSH instead** when no agent is installed. Provide the member
+  name, address, SSH user/port and credentials (plus sudo password if needed). Fleet installs
+  Incus (optional), configures a storage source, and performs the cluster join over SSH.
+  Provisioning progress and each step's result are shown in the dialog.
+
+After a node joins, run **Reconcile** on the private interconnect to extend the tunnel mesh
+(see [Private interconnect networks](#private-interconnect-networks)).
+
 ## Node network and operation history
 
-Each cluster member has a **Node network** page (Cluster → Nodes → Manage node). The page shows
-the selected `backend` (`local` or `ssh`; the agent backend is added in a later release) and lets
-you manage NIC state, addresses, routes, the fleet-managed firewall table, and Wi-Fi.
+Each cluster member has a **Node network** page (Cluster → Nodes → Manage node). The header shows
+the member's display name and the **active backend name** (`local`, `ssh`, or `agent`) chosen for
+this session. The page has four tabs:
 
-Every mutating operation is recorded. **History** opens the task and audit timeline for that
-member, including the action, backend, result, state transitions, and timestamps. Wi-Fi passwords,
-SSH/sudo passwords, and join tokens are never shown in history. The server-side `node_access.mode`
-and `ssh_write_fallback` settings control which backend is allowed; see
+- **NICs**: interface state, type, addresses and Wi-Fi association; bring a NIC up/down or open
+  its address dialog.
+- **Routes**: destination, gateway and device; add and delete routes.
+- **Firewall**: the fleet-managed firewall rule table; add and delete rules.
+- **Wi-Fi**: visible networks with signal strength and an **independent rescan** button —
+  rescanning refreshes only the Wi-Fi tab without reloading the rest of the page, then you can
+  connect with credentials.
+
+**History** opens the task and audit timeline for that member, including the action, backend,
+result, state transitions, and timestamps. Every mutating operation is recorded, but Wi-Fi
+passwords, SSH/sudo passwords, and join tokens are never shown. When the signed-in role is
+read-only, mutation controls (bring up/down, add/delete, connect, rescan) are hidden, while all
+tabs and history remain viewable. The server-side `node_access.mode` and `ssh_write_fallback`
+settings control which backend is allowed; see
 [Deployment](deployment.md#node-network-management-optional).
+
+## Plugins (admin)
+
+Administrators see **Plugins** under **Resources** in the sidebar. The page has two top-level
+tabs: **Installed** (a table of registered plugins with status, version, role and wiring summary)
+and **Catalog** (cards for community packages; the listing is still planned). Selecting a plugin
+opens a detail drawer with five tabs in a fixed order: **Overview**, **Configuration**, **Wiring**,
+**Events**, and **Danger zone**. Across the product the same **status vocabulary** is used:
+*installing / healthy / degraded / stopped / failed*, with a consistent color for each state.
+
+Installed plugin UIs are served through the same-origin **`/plugin-ui/<id>/…`** proxy; this is the
+only proxy namespace, and external origins are never loaded directly. Note that plugin **install
+and orchestration are future work** — see [the plugin specification](plugins.md) for the
+manifest format, the planned install wizard and the phased rollout.
+
+### API tokens (scoped)
+
+Fleet issues **per-user API tokens** with explicit scopes, expiry and revocation. Administrators
+can list and manage **all** tokens; other users manage **their own** through the API
+(`GET/POST/DELETE /api/v1/tokens`, scope vocabulary at `/api/v1/tokens/scopes`). A token's
+**secret is shown exactly once** at creation — store it immediately, since it cannot be
+retrieved later. Each token carries a scope list, an optional expiry, and last-used timestamp;
+revoking it takes effect immediately. There is **no dedicated UI page for token operations yet** —
+use the API. See [API tokens](api.md) and the [plugin specification](plugins.md) for the token
+design and how plugin-scoped tokens derive from it.
 
 ## FAQ
 
@@ -681,6 +836,11 @@ and `ssh_write_fallback` settings control which backend is allowed; see
   list for the new image.
 - **Console disconnects with 1006?** The container serial console closes with that code on
   exit, which is normal. Prefer Exec for interactive work.
+- **Terminal shows a connection error instead of opening?** The server now reports the websocket
+  close reason in the terminal: a **missing guest agent** (install it — see
+  [Installing the incus agent](#installing-the-incus-agent)), a **stopped instance** (start it
+  first), or a **busy console** (another session holds it; close that one and retry). Each
+  reason carries a hint about what to do next.
 - **File manager cannot delete a folder?** Recursive directory deletion is not supported yet;
   empty the directory and remove it inside the instance.
 - **A physical NIC is missing?** The NIC must be unmanaged on the host (not part of an Incus
