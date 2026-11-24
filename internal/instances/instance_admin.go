@@ -311,8 +311,15 @@ func (s *Service) AttachDevice(ctx context.Context, clusterName, name string, re
 		return Detail{}, fmt.Errorf("instances: get %s:%s: %w", clusterName, name, err)
 	}
 
-	if isVMDiskWithoutSource(instance, req) {
-		volumeName, err := ensureVMDiskVolume(client, clusterName, name, deviceName, req.Pool, req.Size)
+	if isDiskWithoutSource(req) {
+		// Custom volumes in a clustered pool are member-local unless a target
+		// is given. Create the volume on the instance's member so the device
+		// validation can find it.
+		var volumeStore volumeCreator = client
+		if location := strings.TrimSpace(instance.Location); location != "" {
+			volumeStore = client.UseTarget(location)
+		}
+		volumeName, err := ensureVMDiskVolume(volumeStore, clusterName, name, deviceName, req.Pool, req.Size)
 		if err != nil {
 			return Detail{}, err
 		}
@@ -351,20 +358,27 @@ func (s *Service) AttachDevice(ctx context.Context, clusterName, name string, re
 	return s.Get(clusterName, name)
 }
 
-// isVMDiskWithoutSource reports whether the request needs a backing custom
-// volume: a disk device for a virtual machine that names a pool but neither
-// an existing volume nor a host path.
-func isVMDiskWithoutSource(instance *api.Instance, req DeviceRequest) bool {
-	return instance.Type == "virtual-machine" &&
-		strings.TrimSpace(req.Type) == "disk" &&
+// isDiskWithoutSource reports whether the request needs a backing custom
+// volume: a disk device that names a pool but neither an existing volume nor
+// a host path. Both containers and VMs go through this path; Incus rejects a
+// bare pool-backed disk with "missing the required source or path property".
+func isDiskWithoutSource(req DeviceRequest) bool {
+	return strings.TrimSpace(req.Type) == "disk" &&
 		strings.TrimSpace(req.Source) == "" &&
 		strings.TrimSpace(req.Pool) != ""
 }
 
-// ensureVMDiskVolume creates (or reuses) a custom volume sized for one VM
-// disk device and returns its name.
+// volumeCreator is the storage-volume subset used when provisioning a disk.
+// A member-targeted Incus client satisfies it as well as the fleet client.
+type volumeCreator interface {
+	GetStoragePoolVolumes(pool string) ([]api.StorageVolume, error)
+	CreateStoragePoolVolume(pool string, volume api.StorageVolumesPost) error
+}
+
+// ensureVMDiskVolume creates (or reuses) a custom volume sized for one disk
+// device and returns its name.
 func ensureVMDiskVolume(
-	client clusters.InstanceServer,
+	client volumeCreator,
 	clusterName, instanceName, deviceName, pool, size string,
 ) (string, error) {
 	volumeName := fmt.Sprintf("dev-%s-%s", instanceName, deviceName)

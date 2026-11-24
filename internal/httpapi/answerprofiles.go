@@ -2,8 +2,11 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/mickeyzzc/incus-fleet/internal/answerprofiles"
+	"github.com/mickeyzzc/incus-fleet/internal/instances"
+	"github.com/mickeyzzc/incus-fleet/internal/unattended"
 )
 
 // listAnswerProfiles returns every stored answer configuration.
@@ -15,6 +18,42 @@ func (a *API) listAnswerProfiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"answer_profiles": profiles})
+}
+
+// previewAnswerProfile renders the answer file for an unsaved editor state so
+// the profile page can preview exactly what a launch would ship.
+func (a *API) previewAnswerProfile(w http.ResponseWriter, r *http.Request) {
+	var req instances.UnattendedRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	profile := unattended.Profile(strings.TrimSpace(req.Profile))
+	if err := unattended.Validate(profile); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := a.applyAnswerProfile(r, &req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	content := strings.TrimSpace(req.AnswerFile)
+	if content == "" {
+		rendered, err := unattended.RenderAnswerFile(profile, req.Spec)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		content = rendered
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"content":   content,
+		"file_name": unattended.AnswerFileName(profile),
+		"profile":   string(profile),
+	})
 }
 
 // createAnswerProfile stores a new answer configuration.

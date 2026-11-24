@@ -154,8 +154,8 @@ func (s *Service) LaunchUnattended(ctx context.Context, clusterName, pool, isoNa
 	}
 
 	installerISO := isoName
-	if unattended.NeedsRemaster(profile) {
-		derived, err := s.remasterInstallerISO(ctx, clusterName, mediaMember, pool, isoName, profile, answer, workDir)
+	if unattended.NeedsBootPatch(profile) {
+		derived, err := s.remasterInstallerISO(ctx, clusterName, mediaMember, pool, isoName, req.Name, profile, answer, workDir)
 		if err != nil {
 			return Detail{}, UnattendedLaunch{}, err
 		}
@@ -224,7 +224,7 @@ func (s *Service) renderUnattendedAnswer(profile unattended.Profile, req Unatten
 // configuration, adds the answer file, rebuilds the image and imports it as
 // a new custom volume pinned to the source ISO's member. It returns the
 // derived volume name.
-func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member, pool, isoName string, profile unattended.Profile, answer, workDir string) (string, error) {
+func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member, pool, isoName, vmName string, profile unattended.Profile, answer, workDir string) (string, error) {
 	if err := s.iso.Available(); err != nil {
 		return "", fmt.Errorf("%w: %w", ErrUnattended, err)
 	}
@@ -234,7 +234,7 @@ func (s *Service) remasterInstallerISO(ctx context.Context, clusterName, member,
 		return "", err
 	}
 
-	volumeName := derivedISOName(isoName, profile)
+	volumeName := derivedISOName(isoName, profile, vmName)
 	dir, err := os.MkdirTemp(workDir, "remaster-")
 	if err != nil {
 		return "", fmt.Errorf("%w: create work dir: %w", ErrUnattended, err)
@@ -504,6 +504,17 @@ func (s *Service) launchUnattendedVM(ctx context.Context, clusterName, member, p
 	}
 
 	root := map[string]string{"type": "disk", "path": "/", "pool": pool}
+	// Installer answer files deal in /dev/vda-style names. Incus defaults VM
+	// disks to virtio-scsi (/dev/sda), so pin the unattended root disk to
+	// virtio-blk and keep the ISO as the SCSI CD-ROM. This also lets d-i's
+	// auto-partitioner pick the only disk without a hard-coded device.
+	root["io.bus"] = "virtio-blk"
+	// After the installer writes a bootloader, the VM must reboot from the
+	// installed disk, not the still-attached ISO. While the disk is blank
+	// the firmware skips it and falls back to the ISO (priority 1), so a
+	// higher disk priority is safe during the install and prevents the
+	// post-install "boot the installer again" loop.
+	root["boot.priority"] = "2"
 	if req.RootDisk != "" {
 		root["size"] = req.RootDisk
 	}
@@ -557,10 +568,23 @@ func (s *Service) launchUnattendedVM(ctx context.Context, clusterName, member, p
 	// Incus resets the VM at start and owns the QMP actions, so the flag
 	// breaks startup. The installer profiles power off when finished
 	// instead — that poweroff is the media watcher signal.
+	spicePort, err := allocateSPICEPort()
+	if err != nil {
+		return Detail{}, fmt.Errorf("instances: allocate spice port: %w", err)
+	}
+
 	config := api.ConfigMap{}
 	config["raw.qemu"] = fmt.Sprintf("%s unix=off,port=%d,disable-ticketing=on,addr=%s",
-		spiceArgMarker, SPICEPortFor(req.Name), spiceListenAddr)
+		spiceArgMarker, spicePort, spiceListenAddr)
 	config["security.secureboot"] = "false"
+	// Debian and RHEL remastering patches the BIOS/GRUB configuration. UEFI
+	// boots from an El Torito EFI image whose embedded config is not part of
+	// the ISO filesystem, so the patched timeout never applies there and the
+	// VM sits at the installer menu. Boot these profiles in CSM/BIOS mode so
+	// the remastered auto-boot entry is used.
+	if unattended.NeedsBootPatch(unattended.Profile(req.Profile)) {
+		config["security.csm"] = "true"
+	}
 
 	post := api.InstancesPost{
 		Name: req.Name,

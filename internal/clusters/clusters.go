@@ -45,6 +45,8 @@ type InstanceServer interface {
 	UpdateInstanceState(name string, state api.InstanceStatePut, etag string) (incus.Operation, error)
 	CreateInstance(instance api.InstancesPost) (incus.Operation, error)
 	UpdateInstance(name string, instance api.InstancePut, etag string) (incus.Operation, error)
+	RenameInstance(name string, instance api.InstancePost) (incus.Operation, error)
+	UseTarget(name string) incus.InstanceServer
 	CopyInstance(source incus.InstanceServer, instance api.Instance, args *incus.InstanceCopyArgs) (incus.RemoteOperation, error)
 	DeleteInstance(name string) (incus.Operation, error)
 	ConsoleInstanceDynamic(instanceName string, console api.InstanceConsolePost, args *incus.InstanceConsoleArgs) (incus.Operation, func(io.ReadWriteCloser) error, error)
@@ -96,6 +98,7 @@ type InstanceServer interface {
 	GetClusterMember(name string) (*api.ClusterMember, string, error)
 	CreateClusterMember(member api.ClusterMembersPost) (incus.Operation, error)
 	UpdateClusterMember(name string, member api.ClusterMemberPut, etag string) error
+	DeleteClusterMember(name string, force bool) error
 	IsClustered() bool
 }
 

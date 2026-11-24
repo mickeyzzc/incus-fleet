@@ -64,8 +64,12 @@ type CreateRequest struct {
 	Network      string     `json:"network,omitempty"`
 	IPv4         string     `json:"ipv4,omitempty"`
 	IPv6         string     `json:"ipv6,omitempty"`
-	Start        *bool      `json:"start,omitempty"`
-	Disks        []DiskSpec `json:"disks,omitempty"`
+	// Member pins creation to one cluster member. Physical NICs are member
+	// local; the UI supplies the owner so a macvlan device does not land on a
+	// member where the parent interface is missing.
+	Member string    `json:"member,omitempty"`
+	Start  *bool     `json:"start,omitempty"`
+	Disks  []DiskSpec `json:"disks,omitempty"`
 }
 
 // UpdateRequest changes selected instance settings. Nil pointers are unchanged;
@@ -167,6 +171,7 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 
 	network := strings.TrimSpace(req.Network)
 	var networkManaged bool
+	var targetMember string
 	if network != "" {
 		networks, err := client.GetNetworks()
 		if err != nil {
@@ -185,6 +190,12 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 		}
 
 		networkManaged = target.Managed
+		// Physical NICs are member-local: an instance using one must be
+		// created on the member that owns the interface. Incus reports the
+		// owning member(s) in Locations for unmanaged NICs.
+		if !networkManaged && len(target.Locations) == 1 {
+			targetMember = target.Locations[0]
+		}
 		// Unmanaged parents are attached as macvlan and take addresses from
 		// the physical LAN; device-level static addresses only apply to
 		// managed bridges. Fleet's overlay bridge runs its own dnsmasq without
@@ -277,15 +288,42 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 	ctx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
 
-	op, err := client.CreateInstance(post)
+	if requested := strings.TrimSpace(req.Member); requested != "" {
+		targetMember = requested
+	}
+
+	var creator instanceCreator = client
+	if targetMember != "" {
+		creator = client.UseTarget(targetMember)
+	}
+
+	op, err := creator.CreateInstance(post)
 	if err != nil {
 		return Detail{}, fmt.Errorf("instances: create %s:%s: %w", clusterName, req.Name, err)
 	}
 	if err := waitOperation(ctx, op, "create "+req.Name); err != nil {
+		// Incus creates the instance before starting it. A start failure
+		// (for example a NIC whose parent only exists on another member)
+		// must not be reported as a generic internal error while leaving a
+		// stray stopped instance behind.
+		if detail, getErr := s.Get(clusterName, req.Name); getErr == nil {
+			return detail, fmt.Errorf("%w: instance %s was created on %s but failed to start: %v; edit its network and start it manually",
+				ErrInvalidRequest, req.Name, targetMemberOrUnknown(targetMember, detail), err)
+		}
 		return Detail{}, err
 	}
 
 	return s.Get(clusterName, req.Name)
+}
+
+func targetMemberOrUnknown(member string, detail Detail) string {
+	if member != "" {
+		return member
+	}
+	if detail.Location != "" {
+		return detail.Location
+	}
+	return "the cluster"
 }
 
 // Update changes CPU, memory, root disk, NIC, and description settings.
@@ -396,6 +434,44 @@ func (s *Service) Update(ctx context.Context, clusterName, name string, req Upda
 	}
 
 	return s.Get(clusterName, name)
+}
+
+// Rename changes an instance's name and waits for the operation.
+func (s *Service) Rename(ctx context.Context, clusterName, name, newName string) (Detail, error) {
+	newName = strings.TrimSpace(newName)
+	if err := validateName(newName); err != nil {
+		return Detail{}, fmt.Errorf("%w: new instance name is invalid", ErrInvalidRequest)
+	}
+	if newName == name {
+		return Detail{}, fmt.Errorf("%w: new name must differ from the current name", ErrInvalidRequest)
+	}
+
+	client, err := s.client(clusterName)
+	if err != nil {
+		return Detail{}, err
+	}
+
+	// Incus only renames stopped instances. Check first so the UI can show a
+	// concrete instruction instead of a generic 500 from the API.
+	if state, _, err := client.GetInstanceState(name); err == nil && state != nil && state.StatusCode == api.Running {
+		return Detail{}, fmt.Errorf("%w: stop %s before renaming it", ErrInvalidRequest, name)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, updateTimeout)
+	defer cancel()
+
+	op, err := client.RenameInstance(name, api.InstancePost{Name: newName})
+	if err != nil {
+		if isNotFound(err) {
+			return Detail{}, fmt.Errorf("%w: %s:%s", ErrNotFound, clusterName, name)
+		}
+		return Detail{}, fmt.Errorf("instances: rename %s:%s -> %s: %w", clusterName, name, newName, err)
+	}
+	if err := waitOperation(ctx, op, "rename "+name); err != nil {
+		return Detail{}, err
+	}
+
+	return s.Get(clusterName, newName)
 }
 
 // Action starts, stops, or restarts an instance.

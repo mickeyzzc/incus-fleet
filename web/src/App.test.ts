@@ -94,7 +94,7 @@ describe('App shell', () => {
     expect(wrapper.text()).toContain('Cluster 62')
     expect(wrapper.text()).toContain('Cluster 63')
     expect(wrapper.text()).toContain('1/2 clusters online')
-    expect(wrapper.find('.topbar h1').text()).toBe('Dashboard')
+    expect(wrapper.find('.breadcrumbs').text()).toContain('Dashboard')
     expect(api.listClusters).toHaveBeenCalledTimes(1)
   })
 
@@ -190,8 +190,7 @@ describe('App shell', () => {
     await router.push('/instances')
     await flushPromises()
 
-    expect(wrapper.find('.topbar h1').text()).toBe('Instances')
-    expect(wrapper.text()).toContain('Manage independent Incus clusters from one place.')
+    expect(wrapper.find('.breadcrumbs').text()).toContain('Instances')
   })
 
   it('routes to the login view with a redirect when the session expires mid-page', async () => {
@@ -239,3 +238,73 @@ describe('App shell', () => {
     expect(active.exists()).toBe(true)
     expect(active.text()).toContain('Users')
   })
+
+it('opens the sidebar as an off-canvas drawer on narrow viewports', async () => {
+  const original = window.matchMedia
+  let viewportListener: ((event: MediaQueryListEvent) => void) | null = null
+  const mocked = vi.fn().mockImplementation((query: string) => ({
+    matches: query.includes('960px'),
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn((_event: string, listener: (event: MediaQueryListEvent) => void) => {
+      viewportListener = listener
+    }),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }))
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: mocked as unknown as typeof window.matchMedia,
+  })
+
+  try {
+    const { wrapper } = await mountApp()
+    expect(wrapper.find('.app-shell').classes()).toContain('sidebar-collapsed')
+
+    await wrapper.find('.mobile-menu-toggle').trigger('click')
+    expect(wrapper.find('.sidebar-backdrop').exists()).toBe(true)
+
+    wrapper.findComponent({ name: 'ElMenu' }).vm.$emit('select')
+    await flushPromises()
+    expect(wrapper.find('.sidebar-backdrop').exists()).toBe(false)
+
+    viewportListener!({ matches: false } as MediaQueryListEvent)
+    await flushPromises()
+    expect(wrapper.find('.app-shell').classes()).not.toContain('sidebar-collapsed')
+    wrapper.unmount()
+  } finally {
+    if (original) {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: original,
+      })
+    } else {
+      delete (window as { matchMedia?: typeof window.matchMedia }).matchMedia
+    }
+  }
+})
+
+it('labels table body cells from their headers for narrow-screen cards', async () => {
+  const table = document.createElement('div')
+  table.className = 'el-table'
+  table.innerHTML = `
+    <div class="el-table__header-wrapper"><table><thead><tr><th>Name</th><th>Status</th></tr></thead></table></div>
+    <div class="el-table__body-wrapper"><table><tbody><tr><td>web</td><td>Running</td></tr></tbody></table></div>`
+  document.body.appendChild(table)
+
+  try {
+    const { wrapper } = await mountApp()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+
+    const cells = table.querySelectorAll('.el-table__body-wrapper td')
+    expect(cells[0]?.getAttribute('data-label')).toBe('Name')
+    expect(cells[1]?.getAttribute('data-label')).toBe('Status')
+    wrapper.unmount()
+  } finally {
+    table.remove()
+  }
+})

@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus, { ElMessage, ElMessageBox } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { api } from '@/api'
+import { api, ApiError } from '@/api'
 import type { Keystone, StoredScript } from '@/api/types'
 import { useAssetsStore } from '@/stores/assets'
 import AssetsView from './AssetsView.vue'
@@ -265,6 +265,21 @@ describe('AssetsView fleet-wide images and ISOs', () => {
     await flushPromises()
 
     expect(api.deleteISO).toHaveBeenCalledWith('c1', 'default', 'debian.iso')
+  })
+
+  it('explains how to delete an ISO that is still attached to an instance', async () => {
+    vi.mocked(api.deleteISO).mockRejectedValueOnce(
+      new ApiError(409, 'in_use', 'iso "debian.iso": still attached'),
+    )
+    const wrapper = await mountView()
+
+    const isoRow = wrapper.findAll('.el-table__row').find((row) => row.text().includes('debian.iso'))
+    await isoRow?.findAll('button').find((b) => b.text() === 'Delete')!.trigger('click')
+    await flushPromises()
+
+    expect(ElMessage.error).toHaveBeenCalledWith(
+      'This ISO is still attached to an instance. Detach it from the instance (Devices → ISO) and try again.',
+    )
   })
 
   it('opens the tab requested in the URL and updates it when switching', async () => {

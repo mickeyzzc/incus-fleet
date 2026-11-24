@@ -410,6 +410,27 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
+  /** Updates an existing overlay and re-applies it. */
+  async function updateOverlay(
+    cluster: string,
+    name: string,
+    request: OverlayRequest,
+  ): Promise<OverlayStatus> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      const status = await api.updateOverlay(cluster, name, request)
+      delete overlayCache.value[cluster]
+      return status
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
   /** Re-applies an overlay against the current member list. */
   async function reconcileOverlay(cluster: string, name: string): Promise<OverlayStatus> {
     saving.value = true
@@ -1079,6 +1100,7 @@ export const useInstancesStore = defineStore('instances', () => {
     deleteNetwork,
     fetchOverlays,
     enableOverlay,
+    updateOverlay,
     reconcileOverlay,
     disableOverlay,
     createProfile,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -29,7 +29,17 @@ const plugins = usePluginsStore()
 const { t, locale } = useI18n()
 
 const publicPage = computed(() => route.meta.public === true)
-const sidebarOpen = ref(true)
+const mobileQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  ? window.matchMedia('(max-width: 960px)')
+  : null
+const isMobile = ref(mobileQuery?.matches ?? false)
+const sidebarOpen = ref(!isMobile.value)
+const SIDEBAR_COLLAPSED_KEY = 'incus-fleet.sidebar.collapsed'
+const isCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1')
+
+watch(isCollapsed, (value) => {
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, value ? '1' : '0')
+})
 
 interface MenuHandle {
   open: (index: string) => void
@@ -143,6 +153,69 @@ watch(
   { immediate: true },
 )
 
+function onViewportChange(event: MediaQueryListEvent): void {
+  isMobile.value = event.matches
+  sidebarOpen.value = !event.matches
+}
+
+function closeMobileSidebar(): void {
+  if (isMobile.value) {
+    sidebarOpen.value = false
+  }
+}
+
+// el-table renders header/cell text independently, so the narrow-screen card
+// layout needs the column label copied onto each body cell. A single observer
+// keeps every table decorated as rows are polled or replaced.
+let tableObserver: MutationObserver | null = null
+let decorateScheduled = false
+
+function decorateTableCards(): void {
+  document.querySelectorAll('.el-table').forEach((table) => {
+    const headers = Array.from(table.querySelectorAll('.el-table__header-wrapper th'))
+      .map((cell) => cell.textContent?.trim() ?? '')
+    table.querySelectorAll('.el-table__body-wrapper tbody tr').forEach((row) => {
+      Array.from(row.querySelectorAll('td')).forEach((cell, index) => {
+        const label = headers[index]
+        if (label) {
+          cell.setAttribute('data-label', label)
+        }
+      })
+    })
+  })
+}
+
+function scheduleTableDecoration(): void {
+  if (decorateScheduled) {
+    return
+  }
+  decorateScheduled = true
+  const run = (): void => {
+    decorateScheduled = false
+    decorateTableCards()
+  }
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(run)
+  } else {
+    run()
+  }
+}
+
+onMounted(() => {
+  mobileQuery?.addEventListener('change', onViewportChange)
+  if (typeof MutationObserver !== 'undefined') {
+    tableObserver = new MutationObserver(scheduleTableDecoration)
+    tableObserver.observe(document.body, { childList: true, subtree: true })
+    scheduleTableDecoration()
+  }
+})
+
+onBeforeUnmount(() => {
+  mobileQuery?.removeEventListener('change', onViewportChange)
+  tableObserver?.disconnect()
+  tableObserver = null
+})
+
 async function logout(): Promise<void> {
   await auth.logout()
   await router.push({ name: 'login' })
@@ -153,8 +226,12 @@ async function logout(): Promise<void> {
   <el-config-provider :locale="elementLocale">
     <router-view v-if="publicPage" />
 
-    <el-container v-else class="app-shell" :class="{ 'sidebar-collapsed': !sidebarOpen }">
-      <el-aside width="236px" class="sidebar">
+    <el-container
+      v-else
+      class="app-shell"
+      :class="{ 'sidebar-collapsed': !sidebarOpen, 'sidebar-icon-only': isCollapsed }"
+    >
+      <el-aside :width="isCollapsed ? '64px' : '236px'" class="sidebar">
         <router-link to="/" class="brand">
           <span class="brand-mark">IF</span>
           <span class="brand-text">
@@ -163,8 +240,16 @@ async function logout(): Promise<void> {
           </span>
         </router-link>
 
-        <el-menu ref="menuRef" :default-active="activeMenu" router class="nav-menu">
-          <div class="nav-group-label">{{ t('nav.workbench') }}</div>
+        <el-menu
+          ref="menuRef"
+          :default-active="activeMenu"
+          :collapse="isCollapsed"
+          :collapse-transition="false"
+          router
+          class="nav-menu"
+          @select="closeMobileSidebar"
+        >
+          <div v-if="!isCollapsed" class="nav-group-label">{{ t('nav.workbench') }}</div>
 
           <el-menu-item index="/">
             <el-icon><Odometer /></el-icon>
@@ -181,7 +266,7 @@ async function logout(): Promise<void> {
             <span>{{ t('nav.fleetVolumes') }}</span>
           </el-menu-item>
 
-          <div class="nav-group-label">{{ t('nav.resources') }}</div>
+          <div v-if="!isCollapsed" class="nav-group-label">{{ t('nav.resources') }}</div>
 
           <el-menu-item index="/assets">
             <el-icon><Collection /></el-icon>
@@ -191,10 +276,10 @@ async function logout(): Promise<void> {
           <el-menu-item v-if="auth.canAdmin" index="/plugins">
             <el-icon><Grid /></el-icon>
             <span>{{ t('nav.plugins') }}</span>
-            <span v-if="plugins.count > 0" class="nav-count">{{ plugins.count }}</span>
+            <span v-if="!isCollapsed && plugins.count > 0" class="nav-count">{{ plugins.count }}</span>
           </el-menu-item>
 
-          <div class="nav-group-label">{{ t('nav.clusters') }}</div>
+          <div v-if="!isCollapsed" class="nav-group-label">{{ t('nav.clusters') }}</div>
 
           <el-sub-menu
             v-for="cluster in clusters.items"
@@ -202,6 +287,7 @@ async function logout(): Promise<void> {
             :index="`/clusters/${cluster.name}/group`"
           >
             <template #title>
+              <el-icon><Grid /></el-icon>
               <span class="health-dot" :class="{ online: cluster.online }" />
               <span>{{ cluster.display_name }}</span>
             </template>
@@ -241,27 +327,32 @@ async function logout(): Promise<void> {
           </span>
         </div>
       </el-aside>
+      <div v-if="isMobile && sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false" />
 
       <el-container class="main-column">
         <el-header class="topbar">
           <div class="topbar-heading">
             <el-button
+              class="sidebar-toggle"
+              text
+              :icon="isCollapsed ? Expand : Fold"
+              :aria-label="isCollapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')"
+              :title="isCollapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')"
+              @click="isCollapsed = !isCollapsed"
+            />
+            <el-button
               class="mobile-menu-toggle"
               text
               :icon="sidebarOpen ? Fold : Expand"
-              :aria-label="t('nav.clusters')"
+              :aria-label="t('nav.toggleSidebar')"
               @click="sidebarOpen = !sidebarOpen"
             />
-            <div>
-              <el-breadcrumb class="breadcrumbs" separator="/">
-                <el-breadcrumb-item v-for="(crumb, index) in breadcrumbs" :key="index">
-                  <router-link v-if="crumb.to" :to="crumb.to">{{ crumb.title }}</router-link>
-                  <span v-else>{{ crumb.title }}</span>
-                </el-breadcrumb-item>
-              </el-breadcrumb>
-              <h1>{{ pageTitle }}</h1>
-              <p>{{ t('app.subtitle') }}</p>
-            </div>
+            <el-breadcrumb class="breadcrumbs" separator="/">
+              <el-breadcrumb-item v-for="(crumb, index) in breadcrumbs" :key="index">
+                <router-link v-if="crumb.to" :to="crumb.to">{{ crumb.title }}</router-link>
+                <span v-else>{{ crumb.title }}</span>
+              </el-breadcrumb-item>
+            </el-breadcrumb>
           </div>
           <div class="topbar-actions">
             <span v-if="auth.username" class="topbar-user">{{ auth.username }}</span>

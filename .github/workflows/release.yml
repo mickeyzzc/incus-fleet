@@ -1,0 +1,217 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Mirrors the CI gates: no artifact is published unless the tree is clean of
+  # secrets and every suite passes at the tagged commit.
+  verify:
+    name: Verify tagged commit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret and infrastructure scan
+        run: ./scripts/secret-scan.sh --all && ./scripts/secret-scan.sh --history
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Go build, test, coverage gate
+        run: |
+          go build ./cmd/... ./internal/... ./web
+          go test ./cmd/... ./internal/... ./web
+          packages=$(go list ./internal/... | grep -v -E '/internal/(testutil|agentpb|prompb)' | paste -sd, -)
+          go test -coverpkg="$packages" -coverprofile=coverage.out ./cmd/... ./internal/... ./web
+          total=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+')
+          echo "Go coverage: ${total}%"
+          awk -v c="$total" 'BEGIN { if (c + 0 < 90) exit 1 }'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: Frontend lint, typecheck, test, build
+        working-directory: web
+        run: bun install --frozen-lockfile && bun run lint && bun run typecheck && bun run test && bun run build
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Rust agent check
+        run: cargo fmt --manifest-path agent/Cargo.toml -- --check && cargo clippy --manifest-path agent/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path agent/Cargo.toml
+
+  build:
+    name: Build linux-${{ matrix.arch }} artifacts
+    needs: verify
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            goarch: amd64
+            nfpm_arch: amd64
+            nfpm_deb_arch: amd64
+            nfpm_rpm_arch: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            goarch: arm64
+            nfpm_arch: arm64
+            nfpm_deb_arch: arm64
+            nfpm_rpm_arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler curl
+
+      - name: Build frontend
+        working-directory: web
+        run: bun install --frozen-lockfile && bun run build
+
+      - name: Build Go binaries
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p dist
+          version="${GITHUB_REF_NAME#v}"
+          ldflags="-s -w -X github.com/mickeyzzc/incus-fleet/internal/version.Version=$version -X github.com/mickeyzzc/incus-fleet/internal/version.Commit=${GITHUB_SHA::7} -X github.com/mickeyzzc/incus-fleet/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -trimpath -ldflags "$ldflags" -o dist/incus-fleet-linux-${{ matrix.arch }} ./cmd/incus-fleet
+          go build -trimpath -ldflags "$ldflags" -o dist/incus-fleet-helper-linux-${{ matrix.arch }} ./cmd/incus-fleet-helper
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Rust agent
+        run: cargo build --release --manifest-path agent/Cargo.toml && cp agent/target/release/incus-fleet-agent "dist/incus-fleet-agent-linux-${{ matrix.arch }}"
+
+      - name: Download nfpm
+        run: |
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v2.49.0/nfpm_2.49.0_Linux_${{ matrix.arch == 'amd64' && 'x86_64' || 'arm64' }}.tar.gz" | tar xzf - -C /usr/local/bin nfpm
+
+      - name: Build deb and rpm packages
+        env:
+          VERSION: ${{ github.ref_name }}
+          VERSION_NUM: ${{ github.ref_name }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          pkgver="${version%%-*}"
+          build_nfpm() {
+            local name="$1" binary="$2" dst="$3" summary="$4" extras="$5"
+            cat > "/tmp/nfpm-${name}.yaml" <<EOF
+          name: ${name}
+          arch: ${{ matrix.nfpm_arch }}
+          version: ${pkgver}
+          release: 1
+          vendor: Incus Fleet
+          homepage: https://github.com/mickeyzzc/incus-fleet
+          maintainer: Incus Fleet Maintainers <maintainers@incus-fleet.example>
+          description: ${summary}
+          license: AGPL-3.0-only
+          contents:
+            - src: dist/${binary}
+              dst: ${dst}
+              file_info:
+                mode: 0755
+          ${extras}
+          EOF
+          }
+          center_extras=$(cat <<'EOF'
+            - src: deploy/systemd/incus-fleet.service
+              dst: /lib/systemd/system/incus-fleet.service
+              file_info:
+                mode: 0644
+            - src: deploy/examples/config.sqlite.yaml
+              dst: /etc/incus-fleet/config.yaml.example
+              type: config|noreplace
+              file_info:
+                mode: 0600
+            - src: deploy/examples/incus-fleet.env.example
+              dst: /etc/incus-fleet/incus-fleet.env.example
+              type: config|noreplace
+              file_info:
+                mode: 0600
+            - src: deploy/caddy/Caddyfile
+              dst: /etc/incus-fleet/Caddyfile.example
+              type: config|noreplace
+              file_info:
+                mode: 0644
+            - src: deploy/nodesudoers
+              dst: /etc/incus-fleet/nodesudoers.example
+              type: config|noreplace
+              file_info:
+                mode: 0644
+          EOF
+          )
+          agent_extras=$(cat <<'EOF'
+            - src: deploy/systemd/incus-fleet-agent.service
+              dst: /lib/systemd/system/incus-fleet-agent.service
+              file_info:
+                mode: 0644
+            - src: deploy/agent-sudoers
+              dst: /etc/incus-fleet/agent-sudoers.example
+              type: config|noreplace
+              file_info:
+                mode: 0644
+          EOF
+          )
+          build_nfpm incus-fleet "incus-fleet-linux-${{ matrix.arch }}" /usr/bin/incus-fleet "Incus Fleet multi-cluster control plane" "$center_extras"
+          build_nfpm incus-fleet-helper "incus-fleet-helper-linux-${{ matrix.arch }}" /usr/libexec/incus-fleet-helper "Incus Fleet privileged network helper" ""
+          build_nfpm incus-fleet-agent "incus-fleet-agent-linux-${{ matrix.arch }}" /usr/bin/incus-fleet-agent "Incus Fleet host agent" "$agent_extras"
+          for name in incus-fleet incus-fleet-helper incus-fleet-agent; do
+            nfpm package -f "/tmp/nfpm-${name}.yaml" -p deb -t "dist/${name}_${version}_${{ matrix.nfpm_deb_arch }}.deb"
+            nfpm package -f "/tmp/nfpm-${name}.yaml" -p rpm -t "dist/${name}-${version}.${{ matrix.nfpm_rpm_arch }}.rpm"
+          done
+
+      - name: Checksums and archive
+        run: |
+          cd dist
+          sha256sum incus-fleet-linux-${{ matrix.arch }} incus-fleet-helper-linux-${{ matrix.arch }} incus-fleet-agent-linux-${{ matrix.arch }} *.deb *.rpm > SHA256SUMS-${{ matrix.arch }}
+          tar czf incus-fleet-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}.tar.gz incus-fleet-linux-${{ matrix.arch }} incus-fleet-helper-linux-${{ matrix.arch }} incus-fleet-agent-linux-${{ matrix.arch }} SHA256SUMS-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Aggregate checksums
+        run: cat dist/SHA256SUMS-amd64 dist/SHA256SUMS-arm64 > dist/SHA256SUMS
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*

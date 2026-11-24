@@ -414,6 +414,75 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, name string) (*Sta
 	return status, nil
 }
 
+// Update changes an existing overlay and re-applies it. Fields omitted from
+// the request keep their stored values. The old fabric is torn down first
+// because a changed subnet/VNI/bridge cannot be renamed in place; on failure
+// the previous definition is re-applied best-effort.
+func (s *Service) Update(ctx context.Context, clusterName, name string, req Request) (*Status, error) {
+	if s.store == nil {
+		return nil, fmt.Errorf("%w: overlay storage is not configured", ErrInvalidRequest)
+	}
+	stored, err := s.store.GetOverlay(ctx, clusterName, name)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	req.Name = name
+	overlay, network, err := normalize(req, stored)
+	if err != nil {
+		return nil, err
+	}
+	overlay.Cluster = clusterName
+
+	underlay := map[string]string{}
+	for _, member := range stored.Members {
+		underlay[member.Member] = member.UnderlayIP
+	}
+	for member, ip := range req.UnderlayIPs {
+		underlay[member] = ip
+	}
+
+	members, err := s.memberAddresses(ctx, clusterName, overlay.GatewayMember, underlay, req.UnderlayNIC)
+	if err != nil {
+		return nil, err
+	}
+	if len(members) < 2 {
+		return nil, fmt.Errorf("%w: a private overlay needs at least two members", ErrInvalidRequest)
+	}
+	if len(members) > 254 {
+		return nil, fmt.Errorf("%w: too many members for one /24 overlay", ErrInvalidRequest)
+	}
+	assignBridgeIPs(overlay, network, members)
+
+	oldMembers := memberNamesFromStore(stored.Members)
+	if err := s.teardown(ctx, clusterName, stored, oldMembers); err != nil {
+		return nil, err
+	}
+
+	status, err := s.apply(ctx, clusterName, overlay, members, req.UnderlayNIC)
+	if err != nil {
+		// Best effort: put the previous fabric back so a failed edit does
+		// not leave the cluster without connectivity.
+		_, _ = s.apply(ctx, clusterName, stored, stored.Members, "")
+		return nil, err
+	}
+
+	overlay.Enabled = true
+	if err := s.store.SaveOverlay(ctx, overlay); err != nil {
+		return nil, err
+	}
+
+	return status, nil
+}
+
+func memberNamesFromStore(members []store.OverlayMember) []string {
+	names := make([]string, 0, len(members))
+	for _, member := range members {
+		names = append(names, member.Member)
+	}
+	return names
+}
+
 // Disable removes the overlay from every member and deletes its definition.
 func (s *Service) Disable(ctx context.Context, clusterName, name string) error {
 	if s.store == nil {

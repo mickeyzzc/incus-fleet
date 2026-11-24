@@ -104,6 +104,27 @@ describe('StoragePoolDialog', () => {
     expect(wrapper.emitted('saved')).toEqual([['default']])
   })
 
+  it('persists a structured source path and cancels cleanly', async () => {
+    const wrapper = mountDialog({ pool: pool({ config: {} }) })
+    await flushPromises()
+
+    await wrapper
+      .find('input[placeholder="/var/lib/incus/storage-pools/default"]')
+      .setValue('/srv/fleet-pool')
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.updateStoragePool).toHaveBeenCalledWith('c1', 'default', {
+      description: 'local disk',
+      config: { source: '/srv/fleet-pool' },
+    })
+
+    const cancel = wrapper.findAll('button').find((b) => b.text().includes('Cancel'))
+    await cancel!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toContainEqual([false])
+  })
+
   it('reports save failures', async () => {
     vi.mocked(api.createStoragePool).mockRejectedValue(new Error('driver not supported'))
     const wrapper = mountDialog()

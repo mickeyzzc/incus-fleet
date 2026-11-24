@@ -73,8 +73,9 @@ describe('InstanceFormDialog', () => {
     await wrapper.find('input[placeholder="Optional note for operators"]').setValue('new note')
     selectAt(wrapper, 1, ['default', 'prod'])
     await wrapper.find('input[placeholder="e.g. 2 or 0-3"]').setValue('2')
-    await wrapper.find('input[placeholder="e.g. 512MiB or 2GiB"]').setValue('1GiB')
-    await wrapper.find('input[placeholder="e.g. 10GiB"]').setValue('10GiB')
+    await wrapper.find('input[placeholder="e.g. 512MiB or 2GiB"]').setValue('1')
+    await wrapper.find('.size-input select').setValue('GiB')
+    await wrapper.find('input[placeholder="e.g. 10GiB"]').setValue('10')
     selectAt(wrapper, 3, 'incusbr0')
     await wrapper.find('input[placeholder="e.g. 10.0.0.50"]').setValue('10.0.0.50')
     await wrapper.find('input[placeholder="e.g. fd42::50"]').setValue('fd42::50')
@@ -165,7 +166,7 @@ describe('InstanceFormDialog', () => {
     expect((wrapper.find('input[placeholder="e.g. 2 or 0-3"]').element as HTMLInputElement).value).toBe('2')
 
     await wrapper.find('input[placeholder="e.g. 512MiB or 2GiB"]').setValue('')
-    await wrapper.find('input[placeholder="e.g. 10GiB"]').setValue('20GiB')
+    await wrapper.find('input[placeholder="e.g. 10GiB"]').setValue('20')
     await wrapper.find('input[placeholder="e.g. 10.0.0.50"]').setValue('10.0.0.60')
 
     await buttonByText(wrapper, 'Save changes').trigger('click')
@@ -304,7 +305,7 @@ describe('InstanceFormDialog', () => {
 
     expect((wrapper.find('input[placeholder="e.g. data0"]').element as HTMLInputElement).value).toBe('data0')
     expect((wrapper.find('input[placeholder="e.g. /data"]').element as HTMLInputElement).value).toBe('/data')
-    await wrapper.find('input[placeholder="e.g. 50GiB"]').setValue('50GiB')
+    await wrapper.find('input[placeholder="e.g. 50GiB"]').setValue('50')
 
     await buttonByText(wrapper, 'Create instance').trigger('click')
     await flushPromises()
@@ -339,7 +340,9 @@ describe('InstanceFormDialog', () => {
     const wrapper = mountDialog()
     await flushPromises()
 
-    await wrapper.find('input[placeholder="e.g. 512MiB or 2GiB"]').setValue('abc')
+    // The size control only accepts numbers, so drive the invalid value
+    // through the component model to exercise the defensive validation.
+    wrapper.findAllComponents({ name: 'SizeInput' })[0]?.vm.$emit('update:modelValue', 'abc')
     await flushPromises()
 
     expect(wrapper.text()).toContain('Enter a valid size, for example 512MiB, 2GiB or 10GB.')

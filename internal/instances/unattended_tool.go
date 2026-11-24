@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -139,14 +141,27 @@ func bootConfigPaths(profile unattended.Profile) []string {
 		return []string{"/boot/grub/grub.cfg"}
 	case unattended.ProfileKickstart:
 		return []string{"/EFI/BOOT/grub.cfg", "/boot/grub2/grub.cfg", "/boot/grub/grub.cfg"}
+	case unattended.ProfileUbuntuAutoinstall:
+		return []string{"/boot/grub/grub.cfg", "/boot/grub/loopback.cfg"}
 	default:
 		return nil
 	}
 }
 
-// derivedISOName builds the derived installer volume name for one VM.
-func derivedISOName(isoName string, profile unattended.Profile) string {
-	return fmt.Sprintf("%s-%s-auto", isoName, profile)
+// derivedISOName builds a per-VM derived installer volume name. The VM name
+// is part of the volume so two installs from the same ISO never collide.
+// Long names are bounded to Incus's 63-character volume limit with a hash
+// suffix that keeps them unique.
+func derivedISOName(isoName string, profile unattended.Profile, vmName string) string {
+	base := fmt.Sprintf("%s-%s-auto-%s", isoName, profile, vmName)
+	if len(base) <= 63 {
+		return base
+	}
+
+	sum := sha256.Sum256([]byte(base))
+	suffix := hex.EncodeToString(sum[:4])
+	trimmed := base[:54]
+	return fmt.Sprintf("%s-%s", strings.TrimRight(trimmed, "-._"), suffix)
 }
 
 // volumeNameRE constrains the names of derived installation media volumes.

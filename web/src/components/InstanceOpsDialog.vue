@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import type { OpsResult } from '@/api/types'
+import { useAssetsStore } from '@/stores/assets'
 import { useInstancesStore } from '@/stores/instances'
 import { errorMessage } from '@/utils/errors'
 
@@ -19,7 +20,25 @@ const emit = defineEmits<{
 }>()
 
 const instances = useInstancesStore()
+const assets = useAssetsStore()
 const { t } = useI18n()
+
+const selectedScript = ref('')
+const selectedKey = ref('')
+
+function applyScript(): void {
+  const script = assets.scriptCache.find((item) => item.id === selectedScript.value)
+  if (script) {
+    scriptForm.script = script.body
+  }
+}
+
+function applyKey(): void {
+  const key = assets.keyCache.find((item) => item.id === selectedKey.value)
+  if (key) {
+    keyForm.key = key.public_key
+  }
+}
 
 const activeTab = ref<'script' | 'password' | 'key'>('script')
 
@@ -50,6 +69,10 @@ watch(
       passwordForm.password = ''
       keyForm.user = 'root'
       keyForm.key = ''
+      selectedScript.value = ''
+      selectedKey.value = ''
+      void assets.fetchScripts()
+      void assets.fetchKeys()
     }
   },
   { immediate: true },
@@ -95,6 +118,21 @@ async function submit(action: 'run-script' | 'set-password' | 'inject-key'): Pro
     <el-tabs v-model="activeTab">
       <el-tab-pane :label="t('ops.tabScript')" name="script">
         <el-form label-position="top" @submit.prevent="submit('run-script')">
+          <el-form-item :label="t('batch.selectScript')">
+            <el-select
+              v-model="selectedScript"
+              clearable
+              style="width: 100%"
+              @change="applyScript"
+            >
+              <el-option
+                v-for="item in assets.scriptCache"
+                :key="item.id"
+                :label="item.name"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item :label="t('ops.script')">
             <el-input
               v-model="scriptForm.script"
@@ -129,6 +167,16 @@ async function submit(action: 'run-script' | 'set-password' | 'inject-key'): Pro
         <el-form label-position="top" @submit.prevent="submit('inject-key')">
           <el-form-item :label="t('ops.user')">
             <el-input v-model="keyForm.user" :placeholder="t('ops.userPlaceholder')" />
+          </el-form-item>
+          <el-form-item :label="t('batch.selectKeys')">
+            <el-select v-model="selectedKey" clearable style="width: 100%" @change="applyKey">
+              <el-option
+                v-for="item in assets.keyCache"
+                :key="item.id"
+                :label="item.name"
+                :value="item.id"
+              />
+            </el-select>
           </el-form-item>
           <el-form-item :label="t('ops.key')">
             <el-input

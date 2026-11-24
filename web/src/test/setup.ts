@@ -114,6 +114,7 @@ vi.mock('@/api', async (importOriginal) => {
       deleteISO: vi.fn(),
       launchFromISO: vi.fn(),
       previewUnattendedAnswer: vi.fn(),
+      previewAnswerProfile: vi.fn(),
       launchUnattended: vi.fn(),
       runOps: vi.fn(),
       rebuildInstance: vi.fn(),
@@ -166,6 +167,7 @@ vi.mock('@/api', async (importOriginal) => {
       updateProfile: vi.fn(),
       deleteProfile: vi.fn(),
       updateMember: vi.fn(),
+      deleteClusterMember: vi.fn(),
       listMigrations: vi.fn(),
       getMigration: vi.fn(),
       submitMigration: vi.fn(),
@@ -209,6 +211,7 @@ vi.mock('element-plus', async (importOriginal) => {
     },
     ElMessageBox: {
       confirm: vi.fn().mockResolvedValue('confirm'),
+      prompt: vi.fn().mockResolvedValue({ value: '', action: 'confirm' }),
     },
   }
 })

@@ -51,6 +51,14 @@ func (f *fakeOverlay) Enable(_ context.Context, _ string, req overlay.Request) (
 	return status, nil
 }
 
+func (f *fakeOverlay) Update(_ context.Context, _, name string, req overlay.Request) (*overlay.Status, error) {
+	f.calls = append(f.calls, "update:"+name)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &overlay.Status{Name: name, Enabled: true, MTU: req.MTU, DHCPStart: req.DHCPStart, DHCPEnd: req.DHCPEnd}, nil
+}
+
 func (f *fakeOverlay) Reconcile(context.Context, string, string) (*overlay.Status, error) {
 	f.calls = append(f.calls, "reconcile")
 	if f.err != nil {

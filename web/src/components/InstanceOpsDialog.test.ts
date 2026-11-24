@@ -110,6 +110,56 @@ describe('InstanceOpsDialog', () => {
     expect(wrapper.text()).toContain('boom')
   })
 
+  it('fills the script and key forms from the stored asset selectors', async () => {
+    vi.mocked(api.listScripts).mockResolvedValue([{
+      id: 's1', name: 'deploy', body: 'echo from-stored-script', created_at: '', updated_at: '',
+    }])
+    vi.mocked(api.listKeys).mockResolvedValue([{
+      id: 'k1', name: 'laptop', public_key: 'ssh-ed25519 AAAA stored-key', created_at: '',
+    }])
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const scriptSelect = wrapper.findComponent({ name: 'ElSelect' })
+    scriptSelect.vm.$emit('update:modelValue', 's1')
+    scriptSelect.vm.$emit('change')
+    await flushPromises()
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe(
+      'echo from-stored-script',
+    )
+
+    await wrapper.findAll('.el-tabs__item')[2]?.trigger('click')
+    await flushPromises()
+    const keySelect = wrapper.findAllComponents({ name: 'ElSelect' }).at(-1)!
+    keySelect.vm.$emit('update:modelValue', 'k1')
+    keySelect.vm.$emit('change')
+    await flushPromises()
+    expect((wrapper.findAll('textarea').at(-1)!.element as HTMLTextAreaElement).value).toBe(
+      'ssh-ed25519 AAAA stored-key',
+    )
+  })
+
+  it('closes after a successful credential change and keeps script output open', async () => {
+    vi.mocked(api.runOps).mockResolvedValue({ exit_code: 0, stdout: 'done\n', stderr: '' })
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('echo done')
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+
+    await wrapper.findAll('.el-tabs__item')[1]?.trigger('click')
+    await flushPromises()
+    const passwordInput = wrapper.find('input[type="password"]')
+    await passwordInput.setValue('s3cret')
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('done')).toHaveLength(1)
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([false])
+  })
+
   it('resets its forms when reopened', async () => {
     const wrapper = mountDialog()
     await flushPromises()

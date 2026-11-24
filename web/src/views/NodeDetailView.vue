@@ -46,24 +46,32 @@ watch(() => props.cluster, ensureCluster)
 </script>
 
 <template>
-  <div class="page">
-    <div class="page-header">
-      <div class="title-row">
-        <el-button :icon="Back" text @click="backToCluster">{{ t('cluster.backToCluster') }}</el-button>
-        <div>
-          <h2>{{ memberInfo?.name || member }}</h2>
-          <p class="subtitle">{{ t('nodeDetail.subtitle', { cluster: summary?.display_name || cluster }) }}</p>
-        </div>
-      </div>
-      <div class="page-actions">
-        <el-tag v-if="memberInfo" :type="memberInfo.status === 'Online' ? 'success' : 'info'" effect="plain">
-          {{ memberStatusLabel(memberInfo.status) }}
-        </el-tag>
-        <el-button :loading="clusters.loading" @click="clusters.fetchAll()">
-          {{ t('common.refresh') }}
+  <div class="page node-detail">
+    <header class="node-header">
+      <div class="node-heading">
+        <el-button class="back-link" :icon="Back" text @click="backToCluster">
+          {{ t('cluster.backToCluster') }}
         </el-button>
+        <div class="node-title-row">
+          <h2>{{ memberInfo?.name || member }}</h2>
+          <el-tag
+            v-if="memberInfo"
+            :type="memberInfo.status === 'Online' ? 'success' : 'info'"
+            effect="plain"
+            round
+          >
+            {{ memberStatusLabel(memberInfo.status) }}
+          </el-tag>
+        </div>
+        <p class="subtitle">
+          {{ t('nodeDetail.subtitle', { cluster: summary?.display_name || cluster }) }}
+        </p>
+        <p class="node-hint">{{ t('nodeDetail.hint') }}</p>
       </div>
-    </div>
+      <el-button :loading="clusters.loading" @click="clusters.fetchAll()">
+        {{ t('common.refresh') }}
+      </el-button>
+    </header>
 
     <el-alert
       v-if="clusters.error"
@@ -72,14 +80,6 @@ watch(() => props.cluster, ensureCluster)
       :closable="false"
       show-icon
       :title="clusters.error"
-    />
-
-    <el-alert
-      class="fleet-alert"
-      type="info"
-      :closable="false"
-      show-icon
-      :title="t('nodeDetail.instructions', { cluster: summary?.display_name || cluster })"
     />
 
     <el-alert
@@ -101,24 +101,22 @@ watch(() => props.cluster, ensureCluster)
     />
 
     <template v-if="memberInfo">
-      <section class="panel">
-        <div class="panel-body member-grid">
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.memberRoles') }}</div>
-            <div class="value">{{ memberInfo.roles?.join(', ') || t('common.none') }}</div>
-          </div>
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.architectures') }}</div>
-            <div class="value">{{ memberInfo.architecture || t('common.none') }}</div>
-          </div>
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.memberAddress') }}</div>
-            <div class="value mono">{{ memberInfo.url || t('common.none') }}</div>
-          </div>
-          <div class="detail-item">
-            <div class="label">{{ t('cluster.memberMessages') }}</div>
-            <div class="value">{{ memberInfo.message || t('common.none') }}</div>
-          </div>
+      <section class="panel node-facts">
+        <div class="node-fact">
+          <span class="label">{{ t('cluster.memberRoles') }}</span>
+          <span class="value">{{ memberInfo.roles?.join(', ') || t('common.none') }}</span>
+        </div>
+        <div class="node-fact">
+          <span class="label">{{ t('cluster.architectures') }}</span>
+          <span class="value">{{ memberInfo.architecture || t('common.none') }}</span>
+        </div>
+        <div class="node-fact">
+          <span class="label">{{ t('cluster.memberAddress') }}</span>
+          <span class="value mono">{{ memberInfo.url || t('common.none') }}</span>
+        </div>
+        <div class="node-fact">
+          <span class="label">{{ t('cluster.memberMessages') }}</span>
+          <span class="value">{{ memberInfo.message || t('common.none') }}</span>
         </div>
       </section>
 
@@ -126,30 +124,104 @@ watch(() => props.cluster, ensureCluster)
 
       <NodeNetworkPanel :cluster="cluster" :member="memberInfo.name" :can-write="auth.canWrite" />
     </template>
+    <el-skeleton v-else-if="clusters.loading" :rows="6" animated />
   </div>
 </template>
 
 <style scoped>
-.title-row {
+.node-header {
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.node-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.back-link {
+  align-self: flex-start;
+  height: auto;
+  padding: 0;
+  color: var(--fleet-ink-soft);
+}
+
+.node-title-row {
+  display: flex;
+  align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
-.member-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 14px;
+.node-title-row h2 {
+  font-size: 24px;
+  line-height: 1.25;
+  letter-spacing: -0.4px;
 }
 
-.detail-item .label {
-  color: var(--fleet-ink-soft, var(--el-text-color-secondary));
-  font-size: 12px;
-  margin-bottom: 2px;
-}
-
-.detail-item .value {
+.subtitle {
+  color: var(--fleet-ink-soft);
   font-size: 13px;
-  word-break: break-all;
+}
+
+.node-hint {
+  color: var(--fleet-ink-soft);
+  font-size: 12.5px;
+}
+
+.node-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  overflow: hidden;
+}
+
+.node-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 20px;
+}
+
+.node-fact + .node-fact {
+  border-left: 1px solid var(--fleet-line);
+}
+
+.node-fact .label {
+  color: var(--fleet-ink-soft);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.node-fact .value {
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.node-fact .mono {
+  font-weight: 500;
+}
+
+@media (max-width: 720px) {
+  .node-title-row h2 {
+    font-size: 21px;
+  }
+
+  .node-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .node-fact + .node-fact {
+    border-top: 1px solid var(--fleet-line);
+    border-left: 0;
+  }
 }
 </style>

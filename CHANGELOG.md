@@ -1,15 +1,21 @@
 # Changelog
 
-**English** | [简体中文](CHANGELOG.zh-CN.md)
+**English** | [简体中文](docs/zh/CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.2.0 - 2026-11-24
 
 ### Added
 
+- Tagged releases (`v*`) are built and published automatically by GitHub Actions:
+  amd64/arm64 binaries for the center, privileged helper, and host agent, `.deb`/`.rpm`
+  packages for each component, per-architecture tarballs, and SHA256 checksums.
+- Documentation is split into `docs/en/` and `docs/zh/`, each with its own `images/`;
+  local-only operator notes live in the gitignored `docs/local/`. Deployment and user
+  guides now cover the 0.2.0 UI, agent installer, plugins, and scoped tokens.
 - Instance creation accepts `disks` for extra empty data volumes, and the form
   offers a guided disk editor with name, mount path and size validation.
 - Size inputs (memory, root disk, volumes, ISO installs) share one validator:
@@ -49,7 +55,7 @@ All notable changes to this project are documented here. The format follows
   credential assignments, bearer tokens, operator subnets and hostnames) before
   a commit, and a CI job runs the same scan over every tracked file and every
   commit. Certificates moved out of the repository to
-  `~/.config/incus-fleet/certs`; see docs/security.md.
+  `~/.config/incus-fleet/certs`; see docs/en/security.md.
 - Cluster private interconnect networks: fleet creates a host bridge on every
   member, joins them with point-to-point VXLAN tunnels, and runs DHCP/NAT from
   one gateway member so instances on all nodes share a private network without

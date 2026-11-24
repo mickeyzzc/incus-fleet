@@ -13,6 +13,7 @@ import type {
   NetworkResource,
   UpdateInstanceRequest,
 } from '@/api/types'
+import SizeInput from '@/components/SizeInput.vue'
 import { useInstancesStore } from '@/stores/instances'
 import { errorMessage } from '@/utils/errors'
 import { formatBytes } from '@/utils/format'
@@ -52,6 +53,7 @@ const form = reactive({
   rootDiskSize: '',
   storagePool: '',
   network: '',
+  networkMember: '',
   ipv4: '',
   ipv6: '',
   start: true,
@@ -100,6 +102,27 @@ const title = computed(() => (isEdit.value ? t('form.editTitle') : t('form.creat
 const clusterLocked = computed(() => Boolean(props.cluster))
 const onlineClusters = computed(() => props.clusters.filter((cluster) => cluster.online))
 
+// Live cluster capacity so memory/disk inputs show how much headroom exists.
+const clusterCapacity = computed(() =>
+  props.clusters.find((cluster) => cluster.name === form.cluster),
+)
+const memoryCapacityHint = computed(() => {
+  const memory = clusterCapacity.value?.memory
+  if (!memory) return ''
+  return t('form.memoryCapacityHint', {
+    used: formatBytes(memory.used),
+    total: formatBytes(memory.total),
+  })
+})
+const storageCapacityHint = computed(() => {
+  const storage = clusterCapacity.value?.storage
+  if (!storage) return ''
+  return t('form.storageCapacityHint', {
+    used: formatBytes(storage.used),
+    total: formatBytes(storage.total),
+  })
+})
+
 const images = computed(() => instances.images(form.cluster))
 const filteredImages = computed(() =>
   images.value.filter((image) => !image.type || image.type === form.type),
@@ -118,6 +141,15 @@ const overlayNetworks = computed<NetworkResource[]>(() =>
     locations: [],
   })),
 )
+// Physical NICs live on one member; selecting one pins the instance there.
+const selectedNetworkMember = computed(() => {
+  const selected = networks.value.find((network) => network.name === form.network)
+  if (!selected || selected.managed) {
+    return ''
+  }
+  return selected.locations.length === 1 ? selected.locations[0] : ''
+})
+
 const isPhysicalNetwork = computed(() => {
   if (nicDevice.value?.device.nictype === 'macvlan') {
     return true
@@ -331,6 +363,9 @@ function createRequest(): CreateInstanceRequest {
   if (form.network) {
     request.network = form.network
   }
+  if (selectedNetworkMember.value) {
+    request.member = selectedNetworkMember.value
+  }
   if (form.ipv4.trim()) {
     request.ipv4 = form.ipv4.trim()
   }
@@ -521,16 +556,27 @@ async function submit(): Promise<void> {
         </el-form-item>
 
         <el-form-item :label="t('form.memory')">
-          <el-input v-model="form.memory" :placeholder="t('form.memoryPlaceholder')" />
+          <SizeInput
+            v-model="form.memory"
+            :units="['MiB', 'GiB', '%']"
+            :placeholder="t('form.memoryPlaceholder')"
+          />
           <p class="field-hint">{{ t('validation.memoryHint') }}</p>
+          <p v-if="memoryCapacityHint" class="field-hint">{{ memoryCapacityHint }}</p>
           <p v-if="form.memory.trim() && !memorySize.valid" class="field-error">
             {{ t('validation.sizeFormat') }}
           </p>
         </el-form-item>
 
         <el-form-item :label="t('form.rootDisk')">
-          <el-input v-model="form.rootDiskSize" :placeholder="t('form.rootDiskPlaceholder')" />
+          <SizeInput
+            v-model="form.rootDiskSize"
+            :units="['GiB', 'TiB']"
+            default-unit="GiB"
+            :placeholder="t('form.rootDiskPlaceholder')"
+          />
           <p class="field-hint">{{ t('validation.diskHint') }}</p>
+          <p v-if="storageCapacityHint" class="field-hint">{{ storageCapacityHint }}</p>
           <p v-if="form.rootDiskSize.trim() && !rootDiskSize.valid" class="field-error">
             {{ t('validation.sizeFormat') }}
           </p>
@@ -552,7 +598,12 @@ async function submit(): Promise<void> {
             <div v-for="(disk, index) in form.disks" :key="index" class="disk-row">
               <el-input v-model="disk.name" :placeholder="t('form.diskNamePlaceholder')" />
               <el-input v-model="disk.path" :placeholder="t('form.diskPathPlaceholder')" />
-              <el-input v-model="disk.size" :placeholder="t('form.diskSizePlaceholder')" />
+              <SizeInput
+                v-model="disk.size"
+                :units="['GiB', 'TiB']"
+                default-unit="GiB"
+                :placeholder="t('form.diskSizePlaceholder')"
+              />
               <el-button link type="danger" :icon="Delete" @click="removeDisk(index)">
                 {{ t('form.removeDisk') }}
               </el-button>
@@ -588,6 +639,10 @@ async function submit(): Promise<void> {
           <p v-if="isPhysicalNetwork" class="field-hint">
             {{ t('form.networkPhysicalHint') }}
           </p>
+          <p v-else-if="form.network" class="field-hint">
+            {{ t('form.networkManagedHint', { name: form.network }) }}
+          </p>
+          <p v-else class="field-hint">{{ t('form.networkNoneHint') }}</p>
         </el-form-item>
 
         <template v-if="!isPhysicalNetwork">

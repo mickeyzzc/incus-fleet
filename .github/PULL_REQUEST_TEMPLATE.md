@@ -18,7 +18,7 @@
 
 - [ ] English docs updated
 - [ ] Chinese mirror updated
-- [ ] API routes/fields updated in `docs/api.md` and `docs/zh-CN/api.md`
+- [ ] API routes/fields updated in `docs/en/api.md` and `docs/zh/api.md`
 
 ## Operational impact
 
@@ -29,4 +29,4 @@
 - [ ] Tests were written first and pass.
 - [ ] No secrets, real infrastructure details, or production screenshots are included.
 - [ ] No generated build artifacts or local-only files are staged.
-- [ ] The change follows `docs/standards.md`.
+- [ ] The change follows `docs/en/standards.md`.

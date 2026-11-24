@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { TableInstance } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
@@ -13,6 +14,7 @@ import InstanceDeleteDialog from '@/components/InstanceDeleteDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
+import RenameInstanceDialog from '@/components/RenameInstanceDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type {
   InstanceDetail,
@@ -56,6 +58,9 @@ const detailCluster = ref('')
 const detailName = ref('')
 const migrateOpen = ref(false)
 const migrateInstance = ref<InstanceSummary | null>(null)
+const renameOpen = ref(false)
+const renameCluster = ref('')
+const renameName = ref('')
 const formOpen = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const formCluster = ref('')
@@ -139,6 +144,16 @@ function handleSelectionChange(rows: Array<{ cluster: string; name: string }>): 
   selected.value = rows.map((row) => ({ cluster: row.cluster, name: row.name }))
 }
 
+const tableRef = ref<TableInstance>()
+
+function cardSelected(row: InstanceSummary): boolean {
+  return selected.value.some((entry) => entry.cluster === row.cluster && entry.name === row.name)
+}
+
+function toggleCardSelection(row: InstanceSummary, checked: boolean): void {
+  tableRef.value?.toggleRowSelection(row, checked)
+}
+
 /** Stable identity so reserve-selection survives polling refreshes. */
 function instanceRowKey(row: { cluster: string; name: string }): string {
   return `${row.cluster}/${row.name}`
@@ -209,6 +224,17 @@ function openDetail(instance: InstanceSummary): void {
 function openMigrate(instance: InstanceSummary): void {
   migrateInstance.value = instance
   migrateOpen.value = true
+}
+
+function openRename(instance: Pick<InstanceSummary, 'cluster' | 'name'>): void {
+  renameCluster.value = instance.cluster
+  renameName.value = instance.name
+  renameOpen.value = true
+}
+
+async function onRenamed(): Promise<void> {
+  detailOpen.value = false
+  await load()
 }
 
 function openCreate(): void {
@@ -344,66 +370,100 @@ async function onSaved(): Promise<void> {
         </div>
         <!-- row-key + reserve-selection keep the user's batch picks through
              the 15s polling refresh instead of clearing them (#12). -->
+        <div v-loading="instances.loading" class="instance-cards">
+          <article v-for="row in paged" :key="instanceRowKey(row)" class="instance-card">
+            <div class="instance-card-head">
+              <el-checkbox
+                :model-value="cardSelected(row)"
+                :aria-label="t('batch.selectRow')"
+                @change="toggleCardSelection(row, Boolean($event))"
+              />
+              <el-button link type="primary" class="name-link" @click="openDetail(row)">
+                {{ row.name }}
+              </el-button>
+              <StatusTag :status="row.status" :status-code="row.status_code" />
+            </div>
+            <div class="instance-card-meta">
+              <span>{{ row.cluster }} · {{ row.location || t('common.none') }}</span>
+              <span class="mono">{{ primaryAddress(row.ipv4, row.ipv6) }}</span>
+              <span>{{ formatBytes(row.memory) }}</span>
+              <span>{{ row.type === 'virtual-machine' ? t('common.virtualMachine') : t('common.container') }}</span>
+            </div>
+            <div class="instance-card-actions">
+              <InstanceActions
+                :instance="row"
+                :busy="isBusy(row)"
+                show-clone
+                @action="act(row, $event)"
+                @edit="openEdit(row)"
+                @rename="openRename(row)"
+                @migrate="openMigrate(row)"
+                @clone="openClone(row)"
+                @delete="confirmDelete(row)"
+              />
+            </div>
+          </article>
+          <el-empty v-if="paged.length === 0" :description="t('instances.empty')" />
+        </div>
         <el-table
+          ref="tableRef"
           v-loading="instances.loading"
           :data="paged"
           :row-key="instanceRowKey"
           stripe
+          class="instance-table"
           @selection-change="handleSelectionChange"
         >
+          <el-table-column type="selection" width="42" reserve-selection />
           <el-table-column :label="t('common.name')" min-width="170">
             <template #default="{ row }">
               <el-button link type="primary" class="name-link" @click="openDetail(row)">
                 {{ row.name }}
               </el-button>
-              <span class="mini-label">{{ row.location || t('common.none') }}</span>
+              <span class="name-meta">
+                <span class="mini-label">{{ row.location || t('common.none') }}</span>
+                <el-tag v-if="row.live_migratable" size="small" type="success" effect="plain">
+                  {{ t('common.live') }}
+                </el-tag>
+              </span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.cluster')" width="130">
+          <el-table-column :label="t('common.cluster')" width="90">
             <template #default="{ row }">
               <el-tag size="small" effect="plain">{{ row.cluster }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.type')" width="120">
+          <el-table-column :label="t('common.type')" width="85">
             <template #default="{ row }">
               {{ row.type === 'virtual-machine' ? t('common.virtualMachine') : t('common.container') }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.status')" width="120">
+          <el-table-column :label="t('common.status')" width="95">
             <template #default="{ row }">
               <StatusTag :status="row.status" :status-code="row.status_code" />
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.address')" min-width="150">
+          <el-table-column :label="t('common.address')" min-width="130">
             <template #default="{ row }">
               <span class="mono">{{ primaryAddress(row.ipv4, row.ipv6) }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.memory')" width="110">
+          <el-table-column :label="t('common.memory')" width="100">
             <template #default="{ row }">{{ formatBytes(row.memory) }}</template>
           </el-table-column>
-          <el-table-column :label="t('common.live')" width="90">
-            <template #default="{ row }">
-              <el-tag v-if="row.live_migratable" size="small" type="success" effect="light">
-                {{ t('common.yes') }}
-              </el-tag>
-              <span v-else class="muted">{{ t('common.none') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column type="selection" width="42" reserve-selection />
-          <el-table-column :label="t('common.actions')" width="420" fixed="right">
+          <el-table-column :label="t('common.actions')" width="250" fixed="right">
             <template #default="{ row }">
               <InstanceActions
                 :instance="row"
                 :busy="isBusy(row)"
+                show-clone
                 @action="act(row, $event)"
                 @edit="openEdit(row)"
+                @rename="openRename(row)"
                 @migrate="openMigrate(row)"
+                @clone="openClone(row)"
                 @delete="confirmDelete(row)"
               />
-              <el-button link type="primary" @click="openClone(row)">
-                {{ t('clone.action') }}
-              </el-button>
             </template>
           </el-table-column>
           <template #empty>
@@ -427,8 +487,15 @@ async function onSaved(): Promise<void> {
       :cluster="detailCluster"
       :name="detailName"
       @edit="openEditDetail"
+      @rename="openRename"
       @migrate="openMigrate"
       @delete="confirmDelete"
+    />
+    <RenameInstanceDialog
+      v-model="renameOpen"
+      :cluster="renameCluster"
+      :instance="renameName"
+      @renamed="onRenamed"
     />
     <InstanceFormDialog
       v-model="formOpen"
@@ -473,6 +540,17 @@ async function onSaved(): Promise<void> {
   font-weight: 600;
 }
 
+.name-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.name-meta .mini-label {
+  display: inline;
+}
+
 .table-pagination {
   margin-top: 14px;
   justify-content: flex-end;
@@ -490,5 +568,46 @@ async function onSaved(): Promise<void> {
 .batch-count {
   font-size: 13px;
   font-weight: 600;
+}
+
+.instance-cards {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .instance-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .instance-table {
+    display: none;
+  }
+
+  .instance-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 10px;
+  }
+
+  .instance-card-head,
+  .instance-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .instance-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
 }
 </style>

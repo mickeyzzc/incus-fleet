@@ -23,6 +23,7 @@ type AnswerProfile struct {
 	Disk       string    `json:"disk,omitempty"`
 	Locale     string    `json:"locale,omitempty"`
 	Keyboard   string    `json:"keyboard,omitempty"`
+	Packages   string    `json:"packages,omitempty"`
 	AnswerFile string    `json:"answer_file,omitempty"`
 	IsDefault  bool      `json:"is_default"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -52,11 +53,11 @@ func (s *SQLStore) CreateAnswerProfile(ctx context.Context, p *AnswerProfile) er
 	}
 
 	const query = `INSERT INTO answer_profiles
-		(id, name, profile, hostname, username, password, timezone, disk, locale, keyboard, answer_file, is_default, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		(id, name, profile, hostname, username, password, timezone, disk, locale, keyboard, packages, answer_file, is_default, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	_, err := s.db.ExecContext(ctx, s.rebind(query),
 		p.ID, p.Name, p.Profile, p.Hostname, p.Username, p.Password, p.Timezone,
-		p.Disk, p.Locale, p.Keyboard, p.AnswerFile, boolToInt(p.IsDefault),
+		p.Disk, p.Locale, p.Keyboard, p.Packages, p.AnswerFile, boolToInt(p.IsDefault),
 		p.CreatedAt.UnixNano(), p.UpdatedAt.UnixNano())
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -71,7 +72,7 @@ func (s *SQLStore) CreateAnswerProfile(ctx context.Context, p *AnswerProfile) er
 // ListAnswerProfiles returns every answer configuration, newest first.
 func (s *SQLStore) ListAnswerProfiles(ctx context.Context) ([]*AnswerProfile, error) {
 	const query = `SELECT id, name, profile, hostname, username, password, timezone, disk,
-		locale, keyboard, answer_file, is_default, created_at, updated_at
+		locale, keyboard, packages, answer_file, is_default, created_at, updated_at
 		FROM answer_profiles ORDER BY updated_at DESC`
 
 	rows, err := s.db.QueryContext(ctx, query)
@@ -86,7 +87,7 @@ func (s *SQLStore) ListAnswerProfiles(ctx context.Context) ([]*AnswerProfile, er
 		var isDefault int
 		var created, updated int64
 		if err := rows.Scan(&p.ID, &p.Name, &p.Profile, &p.Hostname, &p.Username,
-			&p.Password, &p.Timezone, &p.Disk, &p.Locale, &p.Keyboard, &p.AnswerFile,
+			&p.Password, &p.Timezone, &p.Disk, &p.Locale, &p.Keyboard, &p.Packages, &p.AnswerFile,
 			&isDefault, &created, &updated); err != nil {
 			return nil, err
 		}
@@ -102,7 +103,7 @@ func (s *SQLStore) ListAnswerProfiles(ctx context.Context) ([]*AnswerProfile, er
 // GetAnswerProfile loads one answer configuration by id.
 func (s *SQLStore) GetAnswerProfile(ctx context.Context, id string) (*AnswerProfile, error) {
 	const query = `SELECT id, name, profile, hostname, username, password, timezone, disk,
-		locale, keyboard, answer_file, is_default, created_at, updated_at
+		locale, keyboard, packages, answer_file, is_default, created_at, updated_at
 		FROM answer_profiles WHERE id = ?`
 
 	var p AnswerProfile
@@ -110,7 +111,7 @@ func (s *SQLStore) GetAnswerProfile(ctx context.Context, id string) (*AnswerProf
 	var created, updated int64
 	err := s.db.QueryRowContext(ctx, s.rebind(query), id). //nolint:gosec // constant query
 								Scan(&p.ID, &p.Name, &p.Profile, &p.Hostname, &p.Username, &p.Password,
-			&p.Timezone, &p.Disk, &p.Locale, &p.Keyboard, &p.AnswerFile, &isDefault,
+			&p.Timezone, &p.Disk, &p.Locale, &p.Keyboard, &p.Packages, &p.AnswerFile, &isDefault,
 			&created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -129,7 +130,7 @@ func (s *SQLStore) GetAnswerProfile(ctx context.Context, id string) (*AnswerProf
 // profile, or ErrNotFound when none is marked default.
 func (s *SQLStore) GetDefaultAnswerProfile(ctx context.Context, profile string) (*AnswerProfile, error) {
 	const query = `SELECT id, name, profile, hostname, username, password, timezone, disk,
-		locale, keyboard, answer_file, is_default, created_at, updated_at
+		locale, keyboard, packages, answer_file, is_default, created_at, updated_at
 		FROM answer_profiles WHERE profile = ? AND is_default = 1`
 
 	var p AnswerProfile
@@ -137,7 +138,7 @@ func (s *SQLStore) GetDefaultAnswerProfile(ctx context.Context, profile string) 
 	var created, updated int64
 	err := s.db.QueryRowContext(ctx, s.rebind(query), profile). //nolint:gosec // constant query
 									Scan(&p.ID, &p.Name, &p.Profile, &p.Hostname, &p.Username, &p.Password,
-			&p.Timezone, &p.Disk, &p.Locale, &p.Keyboard, &p.AnswerFile, &isDefault,
+			&p.Timezone, &p.Disk, &p.Locale, &p.Keyboard, &p.Packages, &p.AnswerFile, &isDefault,
 			&created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -171,11 +172,11 @@ func (s *SQLStore) UpdateAnswerProfile(ctx context.Context, p *AnswerProfile) er
 		updated = p.CreatedAt.Add(time.Nanosecond)
 	}
 	const query = `UPDATE answer_profiles SET name = ?, profile = ?, hostname = ?, username = ?,
-		password = ?, timezone = ?, disk = ?, locale = ?, keyboard = ?, answer_file = ?,
+		password = ?, timezone = ?, disk = ?, locale = ?, keyboard = ?, packages = ?, answer_file = ?,
 		is_default = ?, updated_at = ? WHERE id = ?`
 	res, err := s.db.ExecContext(ctx, s.rebind(query),
 		p.Name, p.Profile, p.Hostname, p.Username, p.Password, p.Timezone, p.Disk,
-		p.Locale, p.Keyboard, p.AnswerFile, boolToInt(p.IsDefault),
+		p.Locale, p.Keyboard, p.Packages, p.AnswerFile, boolToInt(p.IsDefault),
 		updated.UnixNano(), p.ID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -213,6 +214,7 @@ CREATE TABLE IF NOT EXISTS answer_profiles (
 	disk TEXT NOT NULL DEFAULT '',
 	locale TEXT NOT NULL DEFAULT '',
 	keyboard TEXT NOT NULL DEFAULT '',
+	packages TEXT NOT NULL DEFAULT '',
 	answer_file TEXT NOT NULL DEFAULT '',
 	is_default INTEGER NOT NULL DEFAULT 0,
 	created_at BIGINT NOT NULL,

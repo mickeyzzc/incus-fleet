@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,21 @@ import (
 
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
 )
+
+func TestDeleteISOInUseReturnsActionableConflict(t *testing.T) {
+	source := &incusfake.Server{DeleteVolumeErr: errors.New("The storage volume is still in use")}
+	f := newAPIFixture(t, source, &incusfake.Server{})
+	cookie := f.login(t)
+
+	rec := f.request(t, http.MethodDelete, "/api/v1/clusters/c1/iso/default/attached", nil, cookie, "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("delete attached iso status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"in_use"`) ||
+		!strings.Contains(rec.Body.String(), "detach") {
+		t.Fatalf("delete attached iso body = %s", rec.Body.String())
+	}
+}
 
 func TestISOEndpoints(t *testing.T) {
 	source := &incusfake.Server{

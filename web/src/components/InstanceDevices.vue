@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
+import CopyableText from '@/components/CopyableText.vue'
 import type { DeviceRequest, InstanceDetail } from '@/api/types'
 import { useInstancesStore } from '@/stores/instances'
 import { errorMessage } from '@/utils/errors'
@@ -36,6 +37,19 @@ const form = reactive({
   listen: '',
   connect: '',
 })
+
+const poolVolumes = computed(() =>
+  form.pool ? instances.volumes(props.cluster, form.pool) : [],
+)
+
+watch(
+  [() => attachOpen.value, () => form.pool],
+  ([open, pool]) => {
+    if (open && pool) {
+      void instances.fetchVolumes(props.cluster, pool)
+    }
+  },
+)
 
 // Edit dialog state. editingDevice keeps the pre-edit map so legacy NICs
 // (nictype+parent) can keep those keys when the network is not switched.
@@ -331,9 +345,11 @@ async function detach(name: string): Promise<void> {
       </el-table-column>
       <el-table-column :label="t('admin.config')" min-width="220">
         <template #default="{ row }">
-          <span class="mono device-config">
-            {{ Object.entries(row.device).filter(([key]) => key !== 'type').map(([key, value]) => `${key}=${value}`).join(' · ') }}
-          </span>
+          <CopyableText
+            class="device-config"
+            :value="Object.entries(row.device).filter(([key]) => key !== 'type').map(([key, value]) => `${key}=${value}`).join(' · ')"
+            :label="t('admin.config')"
+          />
         </template>
       </el-table-column>
       <el-table-column :label="t('common.actions')" width="130" fixed="right">
@@ -378,7 +394,22 @@ async function detach(name: string): Promise<void> {
             </el-select>
           </el-form-item>
           <el-form-item :label="t('devices.source')">
-            <el-input v-model="form.source" :placeholder="t('devices.sourcePlaceholder')" />
+            <el-select
+              v-model="form.source"
+              filterable
+              allow-create
+              clearable
+              default-first-option
+              :placeholder="t('devices.sourcePlaceholder')"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="volume in poolVolumes"
+                :key="volume.name"
+                :label="volume.name"
+                :value="volume.name"
+              />
+            </el-select>
             <p class="field-hint">{{ t('devices.sourceHint') }}</p>
           </el-form-item>
           <el-form-item :label="t('devices.path')">

@@ -8,6 +8,7 @@ import CloneInstanceDialog from '@/components/CloneInstanceDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
+import RenameInstanceDialog from '@/components/RenameInstanceDialog.vue'
 import {
   clusterResources,
   clusterSummary,
@@ -134,7 +135,8 @@ describe('InstancesView', () => {
     const wrapper = mountInstances()
     await flushPromises()
 
-    const cloneButton = wrapper.findAll('button').find((b) => b.text().includes('Clone'))
+    await wrapper.findAll('button').find((b) => b.text().includes('Actions'))?.trigger('click')
+    const cloneButton = wrapper.findAll('.action-menu-item').find((b) => b.text().includes('Clone'))
     await cloneButton?.trigger('click')
     await flushPromises()
 
@@ -171,6 +173,7 @@ describe('InstancesView', () => {
     // button performs the deletion.
     const dialog = wrapper.findComponent({ name: 'InstanceDeleteDialog' })
     expect(dialog.exists()).toBe(true)
+    await dialog.find('input[type="text"]').setValue('web')
     await dialog.findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 
@@ -184,8 +187,9 @@ describe('InstancesView', () => {
 
     await buttonByText(wrapper, 'Refresh').trigger('click')
     await flushPromises()
-    expect(api.listClusters).toHaveBeenCalledTimes(2)
-    expect(api.listInstances).toHaveBeenCalledTimes(2)
+    // Background polling from earlier tests may add calls in a full run.
+    expect(vi.mocked(api.listClusters).mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(vi.mocked(api.listInstances).mock.calls.length).toBeGreaterThanOrEqual(2)
 
     vi.mocked(api.listInstances).mockRejectedValue(new Error('cluster unreachable'))
     await buttonByText(wrapper, 'Refresh').trigger('click')
@@ -272,6 +276,41 @@ describe('InstancesView', () => {
     // The toolbar is hidden while nothing is selected.
     expect(wrapper.find('.batch-bar').exists()).toBe(false)
   })
+
+  it('renames from the row action menu and reloads after dialog events', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Actions').trigger('click')
+    const rename = wrapper
+      .findAll('.action-menu-item')
+      .find((item) => item.text().includes('Rename'))
+    await rename!.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(RenameInstanceDialog)
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('instance')).toBe('web')
+
+    dialog.vm.$emit('renamed', 'web-2')
+    await flushPromises()
+    expect(api.listInstances).toHaveBeenCalled()
+
+    wrapper.findComponent(InstanceFormDialog).vm.$emit('saved')
+    await flushPromises()
+    expect(vi.mocked(api.listInstances).mock.calls.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('synchronises the mobile card checkbox with the table selection', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const checkbox = wrapper.find('.instance-card .el-checkbox input')
+    expect(checkbox.exists()).toBe(true)
+    await checkbox.setValue(true)
+    await flushPromises()
+    expect((wrapper.find('.instance-card .el-checkbox input').element as HTMLInputElement).checked).toBe(true)
+  })
 })
 
 describe('InstancesView dialogs', () => {
@@ -309,7 +348,8 @@ describe('InstancesView dialogs', () => {
     await flushPromises()
 
     const row = wrapper.findAll('.el-table__row')[0]!
-    const clone = row.findAll('button').find((b) => b.text().includes('Clone'))
+    await row.findAll('button').find((b) => b.text().includes('Actions'))!.trigger('click')
+    const clone = row.findAll('.action-menu-item').find((b) => b.text().includes('Clone'))
     await clone!.trigger('click')
     await flushPromises()
 

@@ -14,6 +14,7 @@ func TestEnrichNetworks(t *testing.T) {
 		{Name: "eth1", Managed: false, Locations: []string{"m1"}}, // free NIC, located
 		{Name: "eth2", Managed: false},                            // unlocated: slave on m2, backfilled then dropped
 		{Name: "wan0", Managed: false},                            // unlocated: exists on m1 only, backfilled
+		{Name: "lo", Managed: false},                              // loopback: never a macvlan parent
 	}
 	inventories := map[string]map[string]string{
 		"m1": {"eth0": "bond0", "eth1": "", "wan0": ""},
@@ -31,6 +32,9 @@ func TestEnrichNetworks(t *testing.T) {
 	}
 	if _, ok := seen["eth0"]; ok {
 		t.Fatalf("bond slave leaked through: %#v", out)
+	}
+	if _, ok := seen["lo"]; ok {
+		t.Fatalf("loopback leaked through: %#v", out)
 	}
 	if _, ok := seen["eth2"]; ok {
 		t.Fatalf("unlocated bond slave leaked through: %#v", out)

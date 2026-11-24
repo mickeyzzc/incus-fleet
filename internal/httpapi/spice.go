@@ -6,8 +6,6 @@ import (
 	"strconv"
 
 	"github.com/gorilla/websocket"
-
-	"github.com/mickeyzzc/incus-fleet/internal/instances"
 )
 
 // prepareSPICE arms the VM's qemu SPICE TCP listener so the browser client
@@ -20,10 +18,6 @@ func (a *API) prepareSPICE(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
-	}
-
-	if req.Port == 0 {
-		req.Port = instances.SPICEPortFor(r.PathValue("instance"))
 	}
 
 	result, err := a.instances.PrepareSPICE(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), req.Port, req.Apply)

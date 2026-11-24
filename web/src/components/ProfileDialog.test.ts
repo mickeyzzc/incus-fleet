@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/api'
 import { useInstancesStore } from '@/stores/instances'
 import ProfileDialog from './ProfileDialog.vue'
+import SizeInput from './SizeInput.vue'
 
 import type { Profile } from '@/api/types'
 
@@ -128,6 +129,67 @@ describe('ProfileDialog', () => {
       devices: { root: { type: 'disk', pool: 'default', path: '/' } },
     })
     expect(wrapper.emitted('saved')).toEqual([['production']])
+  })
+
+  it('round-trips structured limits, autostart and device types', async () => {
+    const wrapper = mountDialog({
+      profile: profile({
+        config: {
+          'limits.cpu': '2',
+          'limits.memory': '4GiB',
+          'limits.disk': '20GiB',
+          'boot.autostart': 'true',
+        },
+        devices: { eth0: { type: 'nic', network: 'incusbr0' } },
+      }),
+    })
+    await flushPromises()
+
+    await wrapper.find('input[placeholder="2"]').setValue('4')
+    const sizes = wrapper.findAllComponents(SizeInput)
+    sizes[0]!.vm.$emit('update:modelValue', '8GiB')
+    sizes[1]!.vm.$emit('update:modelValue', '40GiB')
+    wrapper.findComponent({ name: 'ElRadioGroup' }).vm.$emit('update:modelValue', 'false')
+    await flushPromises()
+
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.updateProfile).toHaveBeenCalledWith('c1', 'production', {
+      description: 'prod defaults',
+      config: {
+        'limits.cpu': '4',
+        'limits.memory': '8GiB',
+        'limits.disk': '40GiB',
+        'boot.autostart': 'false',
+      },
+      devices: { eth0: { type: 'nic', network: 'incusbr0' } },
+    })
+  })
+
+  it('adds and removes devices and cancels without saving', async () => {
+    const wrapper = mountDialog({ profile: profile() })
+    await flushPromises()
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('Add device'))
+      ?.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.device-block')).toHaveLength(2)
+
+    wrapper.findComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', 'nic')
+    await flushPromises()
+    const deleteButton = wrapper.find('.device-block button.el-button--danger')
+    await deleteButton.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.device-block')).toHaveLength(1)
+
+    const cancel = wrapper.findAll('button').find((b) => b.text().includes('Cancel'))
+    await cancel!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toContainEqual([false])
+    expect(api.updateProfile).not.toHaveBeenCalled()
   })
 
   it('reports save failures', async () => {

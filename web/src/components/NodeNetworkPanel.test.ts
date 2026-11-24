@@ -663,7 +663,8 @@ describe('NodeView template interactions', () => {
     const routeDialog = wrapper.findAll('.el-dialog').find((d) => d.text().includes('Add route'))
     await routeDialog!.find('input[placeholder="10.0.1.0/24"]').setValue('203.0.113.0/24')
     await routeDialog!.find('input[placeholder="10.0.0.1"]').setValue('10.0.0.1')
-    await routeDialog!.find('input[placeholder="eth0"]').setValue('eth0')
+    routeDialog!.findComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', 'eth0')
+    await flush()
 
     const inputs = wrapper.findAll('input')
     const create = routeDialog!.findAll('button').filter((b) => b.text().includes('Create'))

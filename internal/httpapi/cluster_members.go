@@ -40,3 +40,19 @@ func (a *API) addClusterMember(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, result)
 }
+
+// removeClusterMember removes one member from a cluster.
+func (a *API) removeClusterMember(w http.ResponseWriter, r *http.Request) {
+	force, err := parseForce(r.URL.Query().Get("force"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.RemoveMember(r.PathValue("cluster"), r.PathValue("member"), force); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

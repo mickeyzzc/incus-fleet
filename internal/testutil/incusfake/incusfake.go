@@ -105,6 +105,8 @@ type Server struct {
 	JoinToken         *api.ClusterMemberJoinToken
 	JoinTokenMetadata map[string]any
 	UpdateMemberErr   error
+	DeleteMemberErr   error
+	RenameInstanceErr error
 	PoolNames         []string
 	PoolNamesErr      error
 	NetworkNames      []string
@@ -140,6 +142,9 @@ type Server struct {
 	deleteProfiles  []string
 	updateMembers   []UpdateMemberArgs
 	createMembers   []api.ClusterMembersPost
+	deletedMembers  []DeleteMemberArgs
+	renameArgs      []RenameInstanceArgs
+	targets         []string
 	createSnapshots []SnapshotArgs
 	deleteSnapshots []SnapshotArgs
 	deleteImages    []string
@@ -354,6 +359,18 @@ type UpdateInstanceArgs struct {
 	Name     string
 	Instance api.InstancePut
 	ETag     string
+}
+
+// DeleteMemberArgs records one DeleteClusterMember call.
+type DeleteMemberArgs struct {
+	Name  string
+	Force bool
+}
+
+// RenameInstanceArgs records one RenameInstance call.
+type RenameInstanceArgs struct {
+	Name string
+	Post api.InstancePost
 }
 
 // Calls returns a copy of the recorded call log.
@@ -659,6 +676,23 @@ func (s *Server) UpdateInstance(name string, instance api.InstancePut, etag stri
 
 	if s.UpdateErr != nil {
 		return nil, s.UpdateErr
+	}
+	if s.Operation != nil {
+		return s.Operation, nil
+	}
+
+	return &Operation{}, nil
+}
+
+// RenameInstance implements clusters.InstanceServer.
+func (s *Server) RenameInstance(name string, instance api.InstancePost) (incus.Operation, error) {
+	s.record("RenameInstance:" + name + ":" + instance.Name)
+	s.mu.Lock()
+	s.renameArgs = append(s.renameArgs, RenameInstanceArgs{Name: name, Post: instance})
+	s.mu.Unlock()
+
+	if s.RenameInstanceErr != nil {
+		return nil, s.RenameInstanceErr
 	}
 	if s.Operation != nil {
 		return s.Operation, nil
@@ -1069,6 +1103,9 @@ func (s *Server) GetStoragePoolVolumes(pool string) ([]api.StorageVolume, error)
 // the same server. The real client returns a client scoped to one member.
 func (s *Server) UseTarget(name string) incus.InstanceServer {
 	s.record("UseTarget:" + name)
+	s.mu.Lock()
+	s.targets = append(s.targets, name)
+	s.mu.Unlock()
 
 	return s
 }
@@ -1485,6 +1522,40 @@ func (s *Server) UpdateClusterMember(name string, member api.ClusterMemberPut, e
 	s.mu.Unlock()
 
 	return s.UpdateMemberErr
+}
+
+// DeleteClusterMember implements clusters.InstanceServer.
+func (s *Server) DeleteClusterMember(name string, force bool) error {
+	s.record("DeleteClusterMember:" + name)
+	s.mu.Lock()
+	s.deletedMembers = append(s.deletedMembers, DeleteMemberArgs{Name: name, Force: force})
+	s.mu.Unlock()
+
+	return s.DeleteMemberErr
+}
+
+// DeletedMembers returns the members removed through DeleteClusterMember.
+func (s *Server) DeletedMembers() []DeleteMemberArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]DeleteMemberArgs(nil), s.deletedMembers...)
+}
+
+// RenameArgs returns the rename requests recorded by RenameInstance.
+func (s *Server) RenameArgs() []RenameInstanceArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]RenameInstanceArgs(nil), s.renameArgs...)
+}
+
+// Targets returns the member names selected with UseTarget.
+func (s *Server) Targets() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.targets...)
 }
 
 // IsClustered implements clusters.InstanceServer.

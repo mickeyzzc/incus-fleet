@@ -2,6 +2,7 @@ package instances
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -13,6 +14,10 @@ import (
 )
 
 const isoVolumeType = "custom"
+
+// ErrInUse is returned when an ISO volume is still attached to an instance.
+// The message is user-facing: it tells the operator how to unblock deletion.
+var ErrInUse = errors.New("ISO is still attached to an instance; detach it from the instance's devices before deleting")
 
 // ISOSummary describes one installer ISO stored as a custom volume.
 type ISOSummary struct {
@@ -126,6 +131,11 @@ func (s *Service) DeleteISO(clusterName, pool, name string) error {
 		if isNotFound(err) {
 			return fmt.Errorf("%w: %s:%s/%s", ErrNotFound, clusterName, pool, name)
 		}
+		if strings.Contains(strings.ToLower(err.Error()), "still in use") {
+			// Incus rejects the delete while the ISO is attached as a device.
+			// Surface an actionable 409 instead of a generic 500.
+			return fmt.Errorf("iso %q: %w", name, ErrInUse)
+		}
 
 		return fmt.Errorf("instances: delete iso %s:%s/%s: %w", clusterName, pool, name, err)
 	}
@@ -213,9 +223,14 @@ func (s *Service) LaunchFromISO(ctx context.Context, clusterName string, req Lau
 	// available from the very first boot without another restart, and
 	// relax secure boot: most distribution installers ship boot loaders the
 	// default VM firmware rejects.
+	spicePort, err := allocateSPICEPort()
+	if err != nil {
+		return Detail{}, fmt.Errorf("instances: allocate spice port: %w", err)
+	}
+
 	config := api.ConfigMap{}
 	config["raw.qemu"] = fmt.Sprintf("%s unix=off,port=%d,disable-ticketing=on,addr=%s", // loopback only; bridged over the Incus API
-		spiceArgMarker, SPICEPortFor(req.Name), spiceListenAddr)
+		spiceArgMarker, spicePort, spiceListenAddr)
 	config["security.secureboot"] = "false"
 
 	// A cluster-wide custom ISO volume only exists on the member that holds it,

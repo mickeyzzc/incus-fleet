@@ -388,6 +388,37 @@ func (s *Service) UpdateMember(clusterName, name string, req MemberUpdateRequest
 	return nil
 }
 
+// RemoveMember removes one member from the cluster. Incus requires the member
+// to be evacuated or empty first; force only bypasses the health check.
+func (s *Service) RemoveMember(clusterName, name string, force bool) error {
+	name = strings.TrimSpace(name)
+	if err := validateResourceName("cluster member", name); err != nil {
+		return err
+	}
+
+	client, err := s.client(clusterName)
+	if err != nil {
+		return err
+	}
+
+	if _, _, err := client.GetClusterMember(name); err != nil {
+		return fmt.Errorf("instances: get cluster member %s:%s: %w", clusterName, name, err)
+	}
+
+	if err := client.DeleteClusterMember(name, force); err != nil {
+		// Incus refuses to remove a member that still owns instances. Surface
+		// that as a caller error so the UI can explain the required next step
+		// instead of a generic 500.
+		if strings.Contains(err.Error(), "still has the following instances") {
+			return fmt.Errorf("%w: member %s still hosts instances; migrate or delete them before removing the node: %v",
+				ErrInvalidRequest, name, err)
+		}
+		return fmt.Errorf("instances: delete cluster member %s:%s: %w", clusterName, name, err)
+	}
+
+	return nil
+}
+
 func validateResourceName(kind, name string) error {
 	if name == "" {
 		return fmt.Errorf("%w: %s name is required", ErrInvalidRequest, kind)

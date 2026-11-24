@@ -31,6 +31,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
   edit: [detail: InstanceDetail]
+  rename: [detail: InstanceDetail]
   migrate: [detail: InstanceDetail]
   delete: [detail: InstanceDetail]
 }>()
@@ -119,6 +120,7 @@ function onDevicesChanged(updated: InstanceDetail): void {
             :show-migrate="canMigrate"
             @action="handleAction"
             @edit="emit('edit', detail)"
+            @rename="emit('rename', detail)"
             @migrate="emit('migrate', detail)"
             @delete="emit('delete', detail)"
           />

@@ -293,6 +293,8 @@ export interface CreateInstanceRequest {
   network?: string
   ipv4?: string
   ipv6?: string
+  /** Pin creation to the member that owns a physical NIC. */
+  member?: string
   start?: boolean
   /** Additional empty disk volumes created with the instance. */
   disks?: CreateInstanceDisk[]
@@ -355,6 +357,8 @@ export interface UnattendedAnswerSpec {
   disk?: string
   locale?: string
   keyboard?: string
+  /** Extra packages the installer should add to the base system. */
+  packages?: string
 }
 
 export interface UnattendedLaunchRequest {
@@ -382,6 +386,7 @@ export interface AnswerProfile {
   disk?: string
   locale?: string
   keyboard?: string
+  packages?: string
   answer_file?: string
   is_default: boolean
   created_at: string

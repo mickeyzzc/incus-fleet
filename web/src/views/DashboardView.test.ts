@@ -178,14 +178,16 @@ describe('DashboardView traffic polling and registered clusters', () => {
       total_tx_packets: 620,
       instances: [],
     }
-    vi.mocked(api.clusterTraffic).mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+    // Keep returning the second sample after the first tick so a slow
+    // coverage run that skips the 3s boundary still settles on it.
+    vi.mocked(api.clusterTraffic).mockResolvedValueOnce(first).mockResolvedValue(second)
 
     const wrapper = mountDashboard()
     await flushPromises()
     expect(api.clusterTraffic).toHaveBeenCalledWith('c1')
 
     // second poll derives per-second rates from the delta
-    await vi.advanceTimersByTimeAsync(3100)
+    await vi.advanceTimersByTimeAsync(6500)
     await flushPromises()
 
     expect(wrapper.text()).toContain('↓')
