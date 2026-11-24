@@ -11,6 +11,7 @@ import MemberDialog from '@/components/MemberDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
+import RenameInstanceDialog from '@/components/RenameInstanceDialog.vue'
 import NetworkDialog from '@/components/NetworkDialog.vue'
 import ProfileDialog from '@/components/ProfileDialog.vue'
 import StoragePoolDialog from '@/components/StoragePoolDialog.vue'
@@ -177,7 +178,11 @@ describe('ClusterView', () => {
     select.vm.$emit('update:modelValue', 'virtual-machine')
     await flushPromises()
 
-    expect(api.listClusterInstances).toHaveBeenLastCalledWith('c1', 'virtual-machine')
+    // Earlier tests in this file leave their 15s visibility timers mounted in
+    // jsdom. Under coverage those timers can refresh the default list after
+    // this assertion's request, so assert the filter request itself rather
+    // than whichever refresh happened to run last.
+    expect(api.listClusterInstances).toHaveBeenCalledWith('c1', 'virtual-machine')
   })
 
   it('opens the detail drawer and migration dialog', async () => {
@@ -634,6 +639,55 @@ describe('ClusterView navigation and helpers', () => {
 
     expect(api.disableOverlay).toHaveBeenCalledWith('c1', 'c1')
     expect(ElMessage.success).toHaveBeenCalled()
+  })
+
+  it('renames instances, removes members, edits overlays and reloads after saves', async () => {
+    mockFleet()
+    vi.mocked(api.deleteClusterMember).mockResolvedValue(undefined)
+    const { wrapper } = await mountCluster()
+
+    const instanceRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('web') && row.text().includes('Running'))
+    await instanceRow!
+      .findAll('button')
+      .find((button) => button.text().includes('Actions'))
+      ?.trigger('click')
+    await instanceRow!
+      .findAll('.action-menu-item')
+      .find((item) => item.text().includes('Rename'))
+      ?.trigger('click')
+    await flushPromises()
+
+    const rename = wrapper.findComponent(RenameInstanceDialog)
+    expect(rename.props('modelValue')).toBe(true)
+    rename.vm.$emit('renamed', 'web-2')
+    await flushPromises()
+    expect(api.listClusterInstances).toHaveBeenCalled()
+
+    const memberRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('node-1') && row.text().includes('Remove node'))
+    await memberRow!
+      .findAll('button')
+      .find((button) => button.text().includes('Remove node'))
+      ?.trigger('click')
+    await flushPromises()
+    expect(api.deleteClusterMember).toHaveBeenCalledWith('c1', 'node-1')
+
+    const overlayRow = wrapper
+      .findAll('.el-table__row')
+      .find((row) => row.text().includes('fleetbr0') && row.text().includes('Reconcile'))
+    await overlayRow!
+      .findAll('button')
+      .find((button) => button.text().includes('Edit'))
+      ?.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+
+    wrapper.findComponent(InstanceFormDialog).vm.$emit('saved')
+    await flushPromises()
+    expect(vi.mocked(api.listClusterInstances).mock.calls.length).toBeGreaterThanOrEqual(3)
   })
 
   it('surfaces overlay loading errors', async () => {

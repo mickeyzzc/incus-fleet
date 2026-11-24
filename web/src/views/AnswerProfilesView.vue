@@ -57,13 +57,10 @@ const rules = computed<FormRules>(() => ({
   name: [{ required: true, message: t('answerProfiles.nameRequired'), trigger: 'blur' }],
   hostname: [{
     trigger: 'blur',
-    validator: (_rule, value: string, callback: (error?: Error) => void) => {
-      if (!value || /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(value)) {
-        callback()
-        return
-      }
-      callback(new Error(t('answerProfiles.hostnameInvalid')))
-    },
+    // Empty is allowed (the launch flow falls back to the instance name);
+    // async-validator skips pattern checks for empty optional values.
+    pattern: /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/,
+    message: t('answerProfiles.hostnameInvalid'),
   }],
 }))
 

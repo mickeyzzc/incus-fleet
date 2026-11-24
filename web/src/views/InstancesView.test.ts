@@ -8,6 +8,7 @@ import CloneInstanceDialog from '@/components/CloneInstanceDialog.vue'
 import InstanceDetailDrawer from '@/components/InstanceDetailDrawer.vue'
 import InstanceFormDialog from '@/components/InstanceFormDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
+import RenameInstanceDialog from '@/components/RenameInstanceDialog.vue'
 import {
   clusterResources,
   clusterSummary,
@@ -273,6 +274,41 @@ describe('InstancesView', () => {
 
     // The toolbar is hidden while nothing is selected.
     expect(wrapper.find('.batch-bar').exists()).toBe(false)
+  })
+
+  it('renames from the row action menu and reloads after dialog events', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Actions').trigger('click')
+    const rename = wrapper
+      .findAll('.action-menu-item')
+      .find((item) => item.text().includes('Rename'))
+    await rename!.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(RenameInstanceDialog)
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('instance')).toBe('web')
+
+    dialog.vm.$emit('renamed', 'web-2')
+    await flushPromises()
+    expect(api.listInstances).toHaveBeenCalled()
+
+    wrapper.findComponent(InstanceFormDialog).vm.$emit('saved')
+    await flushPromises()
+    expect(vi.mocked(api.listInstances).mock.calls.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('synchronises the mobile card checkbox with the table selection', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const checkbox = wrapper.find('.instance-card .el-checkbox input')
+    expect(checkbox.exists()).toBe(true)
+    await checkbox.setValue(true)
+    await flushPromises()
+    expect((wrapper.find('.instance-card .el-checkbox input').element as HTMLInputElement).checked).toBe(true)
   })
 })
 

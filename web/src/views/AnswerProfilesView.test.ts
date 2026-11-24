@@ -199,6 +199,77 @@ describe('AnswerProfilesView', () => {
     expect(ElMessage.error).toHaveBeenCalled()
   })
 
+  it('binds every template field', async () => {
+    const wrapper = await mountView()
+    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add profile'))
+    await addButton!.trigger('click')
+    await flushPromises()
+    const dialog = wrapper.find('.el-dialog')
+    await dialog.find('input').setValue('field-profile')
+    await dialog.find('input[placeholder="defaults to VM name"]').setValue('good-host')
+
+    const save = dialog.findAll('button').find((b) => b.text().includes('Save'))
+    const selects = dialog.findAllComponents({ name: 'ElSelect' })
+    const values = ['kickstart', 'Asia/Tokyo', 'fr_FR', 'de']
+    for (const [index, value] of values.entries()) {
+      selects[index]!.vm.$emit('update:modelValue', value)
+    }
+    await flushPromises()
+    await dialog.find('input[placeholder="e.g. curl vim htop"]').setValue('curl vim')
+    const checkboxes = dialog.findAll('.el-checkbox input[type="checkbox"]')
+    await checkboxes.at(-1)!.setValue(true)
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(api.createAnswerProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'field-profile',
+        hostname: 'good-host',
+        profile: 'kickstart',
+        timezone: 'Asia/Tokyo',
+        locale: 'fr_FR',
+        keyboard: 'de',
+        packages: 'curl vim',
+        is_default: true,
+      }),
+    )
+  })
+
+  it('rejects custom answers without content and reports preview failures', async () => {
+    vi.mocked(api.previewAnswerProfile).mockRejectedValue(new Error('preview down'))
+    const wrapper = await mountView()
+    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add profile'))
+    await addButton!.trigger('click')
+    await flushPromises()
+    const dialog = wrapper.find('.el-dialog')
+    await dialog.find('input').setValue('custom-profile')
+
+    await dialog.find('.el-checkbox input[type="checkbox"]').setValue(true)
+    await flushPromises()
+    const save = dialog.findAll('button').find((b) => b.text().includes('Save'))
+    await save!.trigger('click')
+    await flushPromises()
+    expect(api.createAnswerProfile).not.toHaveBeenCalled()
+
+    const previewButton = dialog.findAll('button').find((b) => b.text().includes('Preview'))
+    await previewButton!.trigger('click')
+    await flushPromises()
+    expect(api.previewAnswerProfile).toHaveBeenCalled()
+    expect(ElMessage.error).toHaveBeenCalled()
+
+    await dialog.find('textarea').setValue('#cloud-config\nhostname: custom\n')
+    await save!.trigger('click')
+    await flushPromises()
+    expect(api.createAnswerProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'custom-profile',
+        answer_file: '#cloud-config\nhostname: custom\n',
+        username: '',
+        password: '',
+      }),
+    )
+  })
+
   it('requires a matching password confirmation and previews the answer', async () => {
     vi.mocked(api.previewAnswerProfile).mockResolvedValue({
       content: '#cloud-config\nhostname: preview\n',

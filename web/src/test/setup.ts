@@ -167,6 +167,7 @@ vi.mock('@/api', async (importOriginal) => {
       updateProfile: vi.fn(),
       deleteProfile: vi.fn(),
       updateMember: vi.fn(),
+      deleteClusterMember: vi.fn(),
       listMigrations: vi.fn(),
       getMigration: vi.fn(),
       submitMigration: vi.fn(),

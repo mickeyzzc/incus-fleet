@@ -106,6 +106,63 @@ func TestPreviewUsesStoredAnswerProfile(t *testing.T) {
 	}
 }
 
+// TestPreviewAnswerProfileEndpoint covers the profile-editor preview, which
+// renders an unsaved form without a cluster or ISO in the path.
+func TestPreviewAnswerProfileEndpoint(t *testing.T) {
+	web := &incusfake.Server{Instance: &api.Instance{Name: "vm", Type: "virtual-machine", StatusCode: api.Stopped}}
+	f := newAPIFixture(t, web, &incusfake.Server{})
+	cookie := f.login(t)
+	path := "/api/v1/answer-profiles/preview"
+
+	rec := f.request(t, http.MethodPost, path, map[string]any{
+		"profile": "ubuntu-autoinstall",
+		"spec": map[string]any{
+			"Hostname": "preview-node", "Username": "ops", "Password": "Test@12345",
+		},
+	}, cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preview status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Content  string `json:"content"`
+		FileName string `json:"file_name"`
+		Profile  string `json:"profile"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if body.Profile != "ubuntu-autoinstall" || body.FileName != "user-data" {
+		t.Fatalf("preview metadata = %#v", body)
+	}
+	if !strings.Contains(body.Content, "preview-node") {
+		t.Fatalf("preview content = %q", body.Content)
+	}
+
+	// Inline answers are echoed unchanged.
+	rec = f.request(t, http.MethodPost, path, map[string]any{
+		"profile": "debian-preseed", "answer_file": "# custom preseed\n",
+	}, cookie, "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "# custom preseed") {
+		t.Fatalf("inline preview status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	for _, tc := range []struct {
+		name string
+		body any
+	}{
+		{"unknown profile", map[string]any{"profile": "not-a-profile"}},
+		{"invalid spec", map[string]any{"profile": "debian-preseed", "spec": map[string]any{"Username": "Bad User"}}},
+		{"malformed body", "not-an-object"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := f.request(t, http.MethodPost, path, tc.body, cookie, "")
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestAnswerProfileEndpointsRequireWriter(t *testing.T) {
 	web := &incusfake.Server{Instance: &api.Instance{Name: "vm", Type: "virtual-machine", StatusCode: api.Stopped}}
 	f := newAPIFixture(t, web, &incusfake.Server{})

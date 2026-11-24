@@ -242,11 +242,14 @@ describe('App shell', () => {
 
 it('opens the sidebar as an off-canvas drawer on narrow viewports', async () => {
   const original = window.matchMedia
+  let viewportListener: ((event: MediaQueryListEvent) => void) | null = null
   const mocked = vi.fn().mockImplementation((query: string) => ({
     matches: query.includes('960px'),
     media: query,
     onchange: null,
-    addEventListener: vi.fn(),
+    addEventListener: vi.fn((_event: string, listener: (event: MediaQueryListEvent) => void) => {
+      viewportListener = listener
+    }),
     removeEventListener: vi.fn(),
     addListener: vi.fn(),
     removeListener: vi.fn(),
@@ -264,6 +267,15 @@ it('opens the sidebar as an off-canvas drawer on narrow viewports', async () => 
 
     await wrapper.find('.mobile-menu-toggle').trigger('click')
     expect(wrapper.find('.sidebar-backdrop').exists()).toBe(true)
+
+    wrapper.findComponent({ name: 'ElMenu' }).vm.$emit('select')
+    await flushPromises()
+    expect(wrapper.find('.sidebar-backdrop').exists()).toBe(false)
+
+    viewportListener!({ matches: false } as MediaQueryListEvent)
+    await flushPromises()
+    expect(wrapper.find('.app-shell').classes()).not.toContain('sidebar-collapsed')
+    wrapper.unmount()
   } finally {
     if (original) {
       Object.defineProperty(window, 'matchMedia', {
@@ -274,5 +286,26 @@ it('opens the sidebar as an off-canvas drawer on narrow viewports', async () => 
     } else {
       delete (window as { matchMedia?: typeof window.matchMedia }).matchMedia
     }
+  }
+})
+
+it('labels table body cells from their headers for narrow-screen cards', async () => {
+  const table = document.createElement('div')
+  table.className = 'el-table'
+  table.innerHTML = `
+    <div class="el-table__header-wrapper"><table><thead><tr><th>Name</th><th>Status</th></tr></thead></table></div>
+    <div class="el-table__body-wrapper"><table><tbody><tr><td>web</td><td>Running</td></tr></tbody></table></div>`
+  document.body.appendChild(table)
+
+  try {
+    const { wrapper } = await mountApp()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+
+    const cells = table.querySelectorAll('.el-table__body-wrapper td')
+    expect(cells[0]?.getAttribute('data-label')).toBe('Name')
+    expect(cells[1]?.getAttribute('data-label')).toBe('Status')
+    wrapper.unmount()
+  } finally {
+    table.remove()
   }
 })

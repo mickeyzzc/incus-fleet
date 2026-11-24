@@ -93,6 +93,54 @@ describe('NetworkDialog', () => {
     })
   })
 
+  it('persists structured IPv4, IPv6, NAT, MTU and DNS fields', async () => {
+    const wrapper = mountDialog({ network: network() })
+    await flushPromises()
+
+    await wrapper.find('input[placeholder="10.0.0.1/24"]').setValue('10.63.0.1/24')
+    await wrapper.find('input[placeholder="fd42::1/64"]').setValue('fd42::1/64')
+    await wrapper.find('input[placeholder="1500"]').setValue('1400')
+    await wrapper.find('input[placeholder="fleet.internal"]').setValue('lab.internal')
+    const radios = wrapper.findAllComponents({ name: 'ElRadioGroup' })
+    radios[0]!.vm.$emit('update:modelValue', 'false')
+    radios[1]!.vm.$emit('update:modelValue', 'true')
+    await flushPromises()
+
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.updateNetwork).toHaveBeenCalledWith('c1', 'incusbr0', {
+      description: 'main bridge',
+      config: {
+        'ipv4.address': '10.63.0.1/24',
+        'ipv4.nat': 'false',
+        'ipv6.address': 'fd42::1/64',
+        'ipv6.nat': 'true',
+        'bridge.mtu': '1400',
+        'dns.domain': 'lab.internal',
+      },
+    })
+  })
+
+  it('clears structured fields and cancels without saving', async () => {
+    const wrapper = mountDialog({ network: network({ config: {
+      'ipv4.address': '', 'ipv4.nat': 'true', 'ipv6.address': '', 'ipv6.nat': 'false',
+      'bridge.mtu': '', 'dns.domain': '',
+    } }) })
+    await flushPromises()
+
+    const radios = wrapper.findAllComponents({ name: 'ElRadioGroup' })
+    radios[0]!.vm.$emit('update:modelValue', '')
+    radios[1]!.vm.$emit('update:modelValue', '')
+    await flushPromises()
+
+    const cancel = wrapper.findAll('button').find((b) => b.text().includes('Cancel'))
+    await cancel!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toContainEqual([false])
+    expect(api.updateNetwork).not.toHaveBeenCalled()
+  })
+
   it('reports save failures', async () => {
     vi.mocked(api.createNetwork).mockRejectedValue(new Error('subnet overlaps'))
     const wrapper = mountDialog()
