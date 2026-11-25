@@ -683,16 +683,19 @@ type ResourceMem struct {
 
 // Member is one Incus cluster member.
 type Member struct {
-	Name          string   `json:"name"`
-	URL           string   `json:"url,omitempty"`
-	Status        string   `json:"status"`
-	Message       string   `json:"message,omitempty"`
-	Database      bool     `json:"database"`
-	Roles         []string `json:"roles"`
-	Architecture  string   `json:"architecture,omitempty"`
-	Description   string   `json:"description,omitempty"`
-	FailureDomain string   `json:"failure_domain,omitempty"`
-	Groups        []string `json:"groups"`
+	Name          string       `json:"name"`
+	URL           string       `json:"url,omitempty"`
+	Status        string       `json:"status"`
+	Message       string       `json:"message,omitempty"`
+	Database      bool         `json:"database"`
+	Roles         []string     `json:"roles"`
+	Architecture  string       `json:"architecture,omitempty"`
+	Description   string       `json:"description,omitempty"`
+	FailureDomain string       `json:"failure_domain,omitempty"`
+	Groups        []string     `json:"groups"`
+	CPU           ResourcesCPU `json:"cpu"`
+	Memory        ResourceMem  `json:"memory"`
+	Storage       StorageUsage `json:"storage"`
 }
 
 // Counts summarizes instances by type and state.
@@ -705,9 +708,17 @@ type Counts struct {
 
 // StorageUsage summarizes the primary storage pool.
 type StorageUsage struct {
-	Pool  string `json:"pool,omitempty"`
-	Used  uint64 `json:"used"`
-	Total uint64 `json:"total"`
+	Pool   string `json:"pool,omitempty"`
+	Used   uint64 `json:"used"`
+	Total  uint64 `json:"total"`
+	Shared bool   `json:"shared,omitempty"`
+}
+
+// memberResourceServer is the subset shared by the narrow test client and the
+// member-targeted Incus client returned by UseTarget.
+type memberResourceServer interface {
+	GetServerResources() (*api.Resources, error)
+	GetStoragePoolResources(name string) (*api.ResourcesStoragePool, error)
 }
 
 // Summary probes the cluster and builds a status snapshot.
@@ -770,10 +781,86 @@ func (c *Connection) Summary() Summary {
 		}
 	}
 
+	pool := ""
+	driver := ""
 	if pools, err := client.GetStoragePoolNames(); err == nil && len(pools) > 0 {
 		sort.Strings(pools)
-		summary.Storage.Pool = pools[0]
-		if resources, err := client.GetStoragePoolResources(pools[0]); err == nil {
+		pool = pools[0]
+		summary.Storage.Pool = pool
+		if info, _, err := client.GetStoragePool(pool); err == nil {
+			driver = info.Driver
+		}
+	}
+	sharedStorage := sharedStorageDriver(driver)
+
+	// Cluster figures are sums over every member, not just the endpoint this
+	// request happened to hit. Each member also keeps its own copy for the node
+	// detail page.
+	var (
+		cpuTotal       uint64
+		memoryUsed     uint64
+		memoryTotal    uint64
+		storageUsed    uint64
+		storageTotal   uint64
+		storageSamples int
+		architecture   string
+		resourceCount  int
+	)
+	for i := range summary.Members {
+		member := &summary.Members[i]
+		var target memberResourceServer = client
+		if member.Name != "" {
+			target = client.UseTarget(member.Name)
+		}
+
+		if resources, err := target.GetServerResources(); err == nil {
+			member.CPU = ResourcesCPU{
+				Total:        resources.CPU.Total,
+				Architecture: resources.CPU.Architecture,
+			}
+			member.Memory = ResourceMem{
+				Used:  resources.Memory.Used,
+				Total: resources.Memory.Total,
+			}
+			cpuTotal += resources.CPU.Total
+			memoryUsed += resources.Memory.Used
+			memoryTotal += resources.Memory.Total
+			if architecture == "" {
+				architecture = resources.CPU.Architecture
+			}
+			resourceCount++
+		}
+
+		if pool != "" && !sharedStorage {
+			if resources, err := target.GetStoragePoolResources(pool); err == nil {
+				member.Storage = StorageUsage{
+					Pool:  pool,
+					Used:  resources.Space.Used,
+					Total: resources.Space.Total,
+				}
+				storageUsed += resources.Space.Used
+				storageTotal += resources.Space.Total
+				storageSamples++
+			}
+		}
+	}
+
+	if sharedStorage && pool != "" {
+		if resources, err := client.GetStoragePoolResources(pool); err == nil {
+			summary.Storage.Used = resources.Space.Used
+			summary.Storage.Total = resources.Space.Total
+			summary.Storage.Shared = true
+			for i := range summary.Members {
+				summary.Members[i].Storage = summary.Storage
+			}
+		}
+	} else if storageSamples > 0 {
+		summary.Storage.Used = storageUsed
+		summary.Storage.Total = storageTotal
+	} else if pool != "" {
+		// Non-clustered server, or every per-member query failed: fall back to
+		// the endpoint's own pool view.
+		if resources, err := client.GetStoragePoolResources(pool); err == nil {
 			summary.Storage.Used = resources.Space.Used
 			summary.Storage.Total = resources.Space.Total
 		}
@@ -793,7 +880,10 @@ func (c *Connection) Summary() Summary {
 		summary.Networks = managed
 	}
 
-	if resources, err := client.GetServerResources(); err == nil {
+	if resourceCount > 0 {
+		summary.CPU = ResourcesCPU{Total: cpuTotal, Architecture: architecture}
+		summary.Memory = ResourceMem{Used: memoryUsed, Total: memoryTotal}
+	} else if resources, err := client.GetServerResources(); err == nil {
 		summary.CPU = ResourcesCPU{
 			Total:        resources.CPU.Total,
 			Architecture: resources.CPU.Architecture,
@@ -805,6 +895,17 @@ func (c *Connection) Summary() Summary {
 	}
 
 	return summary
+}
+
+// sharedStorageDriver reports whether a pool is backed by storage shared by
+// every cluster member. Summing those pool views per member would double-count.
+func sharedStorageDriver(driver string) bool {
+	switch strings.ToLower(driver) {
+	case "ceph", "cephfs", "lvmcluster", "powerflex", "pure", "cephobject":
+		return true
+	default:
+		return false
+	}
 }
 
 // Register connects to a new cluster at runtime and adds it to the manager.

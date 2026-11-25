@@ -163,6 +163,24 @@ describe('ClusterView', () => {
     expect(wrapper.text()).toContain('Showing 2')
   })
 
+  it('renders aggregated cluster resources and per-node meters', async () => {
+    vi.mocked(api.listClusters).mockResolvedValue([
+      clusterSummary({
+        cpu: { total: 16, architecture: 'x86_64' },
+        memory: { used: 4_000_000_000, total: 32_000_000_000 },
+        storage: { pool: 'default', used: 100_000_000_000, total: 2_000_000_000_000 },
+      }),
+    ])
+
+    const { wrapper } = await mountCluster()
+
+    expect(wrapper.text()).toContain('Aggregated node resources')
+    expect(wrapper.text()).toContain('16')
+    expect(wrapper.text()).toContain('3.7 GiB')
+    expect(wrapper.text()).toContain('93.1 GiB')
+    expect(wrapper.text()).toContain('46.6 GiB')
+  })
+
   it('translates member status into the active language', async () => {
     setLocale('zh-CN')
     const { wrapper } = await mountCluster()

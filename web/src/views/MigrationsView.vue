@@ -105,6 +105,20 @@ const progressMarkers: Record<string, string> = {
 }
 
 /** Renders the Progress column value, replacing raw terminal markers. */
+/** Compact month-day + time for the narrow ID column. */
+function shortDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return '—'
+  }
+
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  return `${month}-${day} ${hour}:${minute}`
+}
+
 function progressLabel(progress: string, status: string): string {
   const marker = progressMarkers[progress]
   if (marker) {
@@ -250,25 +264,26 @@ async function onRetry(migration: Migration): Promise<void> {
           row-key="id"
           @row-click="openDetail"
         >
-          <el-table-column :label="t('common.id')" width="110">
+          <el-table-column :label="t('common.id')" width="105">
             <template #default="{ row }">
               <span class="mono">{{ shortID(row.id) }}</span>
+              <span class="mini-label">{{ shortDate(row.created_at) }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.instance')" min-width="150">
+          <el-table-column :label="t('common.instance')" min-width="135">
             <template #default="{ row }">
               <strong>{{ row.instance }}</strong>
               <span class="mini-label">{{ instanceTypeLabel(row.instance_type) }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.route')" min-width="160">
+          <el-table-column :label="t('common.route')" min-width="135">
             <template #default="{ row }">
               <el-tag size="small" effect="plain">{{ row.source_cluster }}</el-tag>
               <span class="arrow">→</span>
               <el-tag size="small" effect="plain" type="primary">{{ row.target_cluster }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.mode')" width="100">
+          <el-table-column :label="t('common.mode')" width="85">
             <template #default="{ row }">
               {{ modeLabel(row.mode) }}
               <el-tag v-if="row.live" size="small" type="success" effect="light">
@@ -276,12 +291,12 @@ async function onRetry(migration: Migration): Promise<void> {
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.status')" width="150">
+          <el-table-column :label="t('common.status')" width="120">
             <template #default="{ row }">
               <MigrationStatusTag :status="row.status" />
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.progress')" min-width="190">
+          <el-table-column :label="t('common.progress')" min-width="150">
             <template #default="{ row }">
               <div class="migration-progress">
                 <el-progress
@@ -292,18 +307,13 @@ async function onRetry(migration: Migration): Promise<void> {
                   :stroke-width="6"
                 />
                 <small>{{ progressLabel(row.progress, row.status) }}</small>
+                <small class="migration-duration">
+                  {{ formatDuration(row.created_at, row.status === 'done' || row.status === 'failed' ? row.updated_at : null) }}
+                </small>
               </div>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.duration')" width="110">
-            <template #default="{ row }">
-              {{ formatDuration(row.created_at, row.status === 'done' || row.status === 'failed' ? row.updated_at : null) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.created')" width="180">
-            <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="150" fixed="right">
+          <el-table-column :label="t('common.actions')" width="110">
             <template #default="{ row }">
               <el-button
                 v-if="canCancel(row)"

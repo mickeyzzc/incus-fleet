@@ -101,18 +101,26 @@ function choose(event: 'edit' | 'rename' | 'migrate' | 'delete' | 'clone'): void
       {{ t('common.restart') }}
     </el-button>
 
-    <div class="action-menu-wrap">
-      <el-button
-        :size="buttonSize"
-        :icon="MoreFilled"
-        :disabled="busy"
-        :aria-expanded="menuOpen"
-        @click="menuOpen = !menuOpen"
-      >
-        {{ t('common.actions') }}
-        <el-icon class="menu-caret"><ArrowDown /></el-icon>
-      </el-button>
-      <div v-show="menuOpen" class="action-menu" role="menu">
+    <el-popover
+      v-model:visible="menuOpen"
+      placement="bottom-end"
+      :width="176"
+      :show-arrow="false"
+      trigger="click"
+      popper-class="instance-actions-popover"
+    >
+      <template #reference>
+        <el-button
+          :size="buttonSize"
+          :icon="MoreFilled"
+          :disabled="busy"
+          :aria-expanded="menuOpen"
+        >
+          {{ t('common.actions') }}
+          <el-icon class="menu-caret"><ArrowDown /></el-icon>
+        </el-button>
+      </template>
+      <div class="action-menu" role="menu">
         <button
           v-if="showEdit"
           type="button"
@@ -157,7 +165,7 @@ function choose(event: 'edit' | 'rename' | 'migrate' | 'delete' | 'clone'): void
           <el-icon><Delete /></el-icon>{{ t('common.delete') }}
         </button>
       </div>
-    </div>
+    </el-popover>
   </div>
 </template>
 
@@ -173,26 +181,15 @@ function choose(event: 'edit' | 'rename' | 'migrate' | 'delete' | 'clone'): void
   margin-left: 0;
 }
 
-.action-menu-wrap {
-  position: relative;
-  display: inline-flex;
-}
-
 .menu-caret {
   margin-left: 2px;
 }
 
 .action-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
-  min-width: 150px;
-  padding: 6px;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  background: var(--el-bg-color-overlay);
-  box-shadow: var(--el-box-shadow-light);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: -6px;
 }
 
 .action-menu-item {

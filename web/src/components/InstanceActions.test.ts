@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import { describe, expect, it } from 'vitest'
 
@@ -43,9 +43,13 @@ describe('InstanceActions', () => {
 
     await buttonByText(wrapper, 'Stop').trigger('click')
     await buttonByText(wrapper, 'Restart').trigger('click')
-    await buttonByText(wrapper, 'Edit').trigger('click')
-    await buttonByText(wrapper, 'Migrate').trigger('click')
-    await buttonByText(wrapper, 'Delete').trigger('click')
+
+    for (const action of ['Edit', 'Migrate', 'Delete']) {
+      await buttonByText(wrapper, 'Actions').trigger('click')
+      await flushPromises()
+      await buttonByText(wrapper, action).trigger('click')
+      await flushPromises()
+    }
 
     expect(wrapper.emitted('action')).toEqual([['stop'], ['restart']])
     expect(wrapper.emitted('edit')).toHaveLength(1)

@@ -94,6 +94,14 @@ const paged = computed(() => {
   return filtered.value.slice(start, start + pageSize.value)
 })
 
+const runningCount = computed(
+  () => instances.items.filter((instance) => instance.status.toLowerCase() === 'running').length,
+)
+const vmCount = computed(
+  () => instances.items.filter((instance) => instance.type === 'virtual-machine').length,
+)
+const containerCount = computed(() => instances.items.length - vmCount.value)
+
 async function load(): Promise<void> {
   await Promise.all([clusters.fetchAll(), instances.fetchAll(typeFilter.value)])
 }
@@ -280,7 +288,8 @@ async function onSaved(): Promise<void> {
 
     <template v-else>
     <div class="page-header">
-      <div>
+      <div class="page-heading">
+        <span class="page-eyebrow">{{ t('instances.eyebrow') }}</span>
         <h2>{{ t('instances.title') }}</h2>
         <p class="subtitle">
           {{
@@ -300,6 +309,29 @@ async function onSaved(): Promise<void> {
           {{ t('common.refresh') }}
         </el-button>
       </div>
+    </div>
+
+    <div class="instance-summary">
+      <span class="summary-chip">
+        <strong>{{ instances.items.length }}</strong>
+        {{ t('dashboard.instances') }}
+      </span>
+      <span class="summary-chip is-running">
+        <strong>{{ runningCount }}</strong>
+        {{ t('status.running') }}
+      </span>
+      <span class="summary-chip">
+        <strong>{{ vmCount }}</strong>
+        {{ t('common.virtualMachines') }}
+      </span>
+      <span class="summary-chip">
+        <strong>{{ containerCount }}</strong>
+        {{ t('common.containers') }}
+      </span>
+      <span class="summary-chip is-cluster">
+        <strong>{{ clusters.items.length }}</strong>
+        {{ t('instances.clustersLabel') }}
+      </span>
     </div>
 
     <el-alert
@@ -415,7 +447,7 @@ async function onSaved(): Promise<void> {
           @selection-change="handleSelectionChange"
         >
           <el-table-column type="selection" width="42" reserve-selection />
-          <el-table-column :label="t('common.name')" min-width="170">
+          <el-table-column :label="t('common.name')" min-width="145">
             <template #default="{ row }">
               <el-button link type="primary" class="name-link" @click="openDetail(row)">
                 {{ row.name }}
@@ -428,30 +460,30 @@ async function onSaved(): Promise<void> {
               </span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.cluster')" width="90">
+          <el-table-column :label="t('common.cluster')" width="80">
             <template #default="{ row }">
               <el-tag size="small" effect="plain">{{ row.cluster }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.type')" width="85">
+          <el-table-column :label="t('common.type')" width="90">
             <template #default="{ row }">
               {{ row.type === 'virtual-machine' ? t('common.virtualMachine') : t('common.container') }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.status')" width="95">
+          <el-table-column :label="t('common.status')" width="80">
             <template #default="{ row }">
               <StatusTag :status="row.status" :status-code="row.status_code" />
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.address')" min-width="130">
+          <el-table-column :label="t('common.address')" min-width="115">
             <template #default="{ row }">
               <span class="mono">{{ primaryAddress(row.ipv4, row.ipv6) }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.memory')" width="100">
+          <el-table-column :label="t('common.memory')" width="80">
             <template #default="{ row }">{{ formatBytes(row.memory) }}</template>
           </el-table-column>
-          <el-table-column :label="t('common.actions')" width="250" fixed="right">
+          <el-table-column :label="t('common.actions')" width="250">
             <template #default="{ row }">
               <InstanceActions
                 :instance="row"
@@ -534,6 +566,46 @@ async function onSaved(): Promise<void> {
 </template>
 
 <style scoped>
+.page-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.instance-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.summary-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--fleet-line);
+  border-radius: 999px;
+  background: var(--fleet-panel);
+  color: var(--fleet-ink-soft);
+  font-size: 11.5px;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+}
+
+.summary-chip strong {
+  color: var(--fleet-ink);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-chip.is-running strong {
+  color: var(--fleet-good);
+}
+
+.summary-chip.is-cluster strong {
+  color: var(--el-color-primary);
+}
+
 .name-link {
   padding: 0;
   height: auto;

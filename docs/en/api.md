@@ -222,7 +222,10 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
           "message": "Fully operational",
           "database": true,
           "roles": ["database-leader"],
-          "architecture": "x86_64"
+          "architecture": "x86_64",
+          "cpu": {"total": 8, "architecture": "x86_64"},
+          "memory": {"used": 2000000000, "total": 16000000000},
+          "storage": {"pool": "default", "used": 50000000000, "total": 1700000000000}
         }
       ],
       "instances": {
@@ -231,6 +234,8 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
         "virtual_machines": 1,
         "running": 2
       },
+      "cpu": {"total": 8, "architecture": "x86_64"},
+      "memory": {"used": 2000000000, "total": 16000000000},
       "storage": {"pool": "default", "used": 250000000000, "total": 1000000000000},
       "networks": ["incusbr0"]
     }
@@ -239,7 +244,10 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 ```
 
 Offline clusters keep the same shape with `online: false` and an `error` string. Storage and
-instance counts may be zero when the cluster cannot be inspected.
+instance counts may be zero when the cluster cannot be inspected. Cluster `cpu` and `memory`
+are sums over every member; each member carries its own `cpu`, `memory`, and `storage` snapshot
+for node detail pages. Local storage pools are summed per member, while shared drivers such as
+Ceph report the pool once with `"shared": true`.
 
 `POST /clusters/{cluster}/reconnect` returns the updated summary object directly (not wrapped).
 

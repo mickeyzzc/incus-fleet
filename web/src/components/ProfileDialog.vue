@@ -230,6 +230,8 @@ async function submit(): Promise<void> {
                 circle
                 plain
                 type="danger"
+                :aria-label="t('common.delete')"
+                :title="t('common.delete')"
                 @click="removeDevice(index)"
               />
             </div>
