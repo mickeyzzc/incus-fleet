@@ -578,6 +578,10 @@ strong,
   font-size: 11.5px;
 }
 
+.migration-duration {
+  opacity: 0.8;
+}
+
 .arrow {
   color: var(--fleet-ink-soft);
   padding: 0 6px;
@@ -742,9 +746,49 @@ strong,
   font-weight: 500;
 }
 
+/* Element Plus' default light tag palette is too pale for small text. */
+.el-tag--success:not(.el-tag--dark) {
+  --el-tag-text-color: #237a3b;
+}
+
+.el-tag--danger:not(.el-tag--dark) {
+  --el-tag-text-color: #b42318;
+}
+
+.el-tag--warning:not(.el-tag--dark) {
+  --el-tag-text-color: #8a5a00;
+}
+
+.el-tag--info:not(.el-tag--dark) {
+  --el-tag-text-color: #5b6472;
+}
+
+@media (prefers-color-scheme: dark) {
+  .el-tag--success:not(.el-tag--dark) {
+    --el-tag-text-color: #7ee2a8;
+  }
+
+  .el-tag--danger:not(.el-tag--dark) {
+    --el-tag-text-color: #ffaaa2;
+  }
+
+  .el-tag--warning:not(.el-tag--dark) {
+    --el-tag-text-color: #f4c66a;
+  }
+
+  .el-tag--info:not(.el-tag--dark) {
+    --el-tag-text-color: #b3bfd2;
+  }
+}
+
 .el-tag--small {
   height: 22px;
   padding: 0 8px;
+}
+
+.instance-actions-popover.el-popover.el-popper {
+  padding: 6px;
+  border-radius: 10px;
 }
 
 .el-dialog {

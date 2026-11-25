@@ -75,7 +75,15 @@ function removeRow(index: number): void {
         class="kv-value"
         @update:model-value="rows[index] = [key, $event]; commit()"
       />
-      <el-button :icon="Delete" circle plain type="danger" @click="removeRow(index)" />
+      <el-button
+        :icon="Delete"
+        circle
+        plain
+        type="danger"
+        :aria-label="t('common.delete')"
+        :title="t('common.delete')"
+        @click="removeRow(index)"
+      />
     </div>
     <el-button plain size="small" @click="addRow">
       {{ addLabel || t('admin.addRow') }}

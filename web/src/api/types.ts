@@ -32,6 +32,9 @@ export interface ClusterMember {
   description?: string
   failure_domain?: string
   groups?: string[]
+  cpu?: ClusterCPU
+  memory?: ClusterMemory
+  storage?: StorageUsage
 }
 
 export interface InstanceCounts {
@@ -45,6 +48,7 @@ export interface StorageUsage {
   pool?: string
   used: number
   total: number
+  shared?: boolean
 }
 
 export interface ClusterSummary {

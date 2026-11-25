@@ -305,6 +305,62 @@ func TestDefaultDialMissingFiles(t *testing.T) {
 	}
 }
 
+func TestSummaryAggregatesMemberResources(t *testing.T) {
+	srv := &incusfake.Server{
+		Members: []api.ClusterMember{
+			{ServerName: "node-a", Status: "Online"},
+			{ServerName: "node-b", Status: "Online"},
+		},
+		ServerResources: &api.Resources{
+			CPU:    api.ResourcesCPU{Architecture: "x86_64", Total: 4},
+			Memory: api.ResourcesMemory{Used: 2_000_000_000, Total: 8_000_000_000},
+		},
+		PoolResources: &api.ResourcesStoragePool{Space: api.ResourcesStoragePoolSpace{Used: 50, Total: 100}},
+	}
+	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")},
+		fakeDialer(map[string]InstanceServer{"c1": srv}, nil), testLogger())
+	if err != nil {
+		t.Fatalf("NewWithDialer() error = %v", err)
+	}
+	t.Cleanup(m.Close)
+
+	summary := m.List()[0]
+	if summary.CPU.Total != 8 || summary.Memory.Used != 4_000_000_000 || summary.Memory.Total != 16_000_000_000 {
+		t.Fatalf("cluster resources = CPU %#v memory %#v", summary.CPU, summary.Memory)
+	}
+	if summary.Storage.Used != 100 || summary.Storage.Total != 200 {
+		t.Fatalf("cluster storage = %#v", summary.Storage)
+	}
+	for _, member := range summary.Members {
+		if member.CPU.Total != 4 || member.Memory.Total != 8_000_000_000 || member.Storage.Used != 50 {
+			t.Fatalf("member %s resources = CPU %#v memory %#v storage %#v",
+				member.Name, member.CPU, member.Memory, member.Storage)
+		}
+	}
+
+	// Shared pools already report cluster-wide usage; summing them per member
+	// would double-count the same bytes.
+	shared := &incusfake.Server{
+		Members: []api.ClusterMember{
+			{ServerName: "node-a", Status: "Online"},
+			{ServerName: "node-b", Status: "Online"},
+		},
+		Pool:          &api.StoragePool{Name: "default", Driver: "ceph"},
+		PoolResources: &api.ResourcesStoragePool{Space: api.ResourcesStoragePoolSpace{Used: 50, Total: 100}},
+	}
+	sharedManager, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")},
+		fakeDialer(map[string]InstanceServer{"c1": shared}, nil), testLogger())
+	if err != nil {
+		t.Fatalf("NewWithDialer() shared error = %v", err)
+	}
+	t.Cleanup(sharedManager.Close)
+
+	sharedSummary := sharedManager.List()[0]
+	if sharedSummary.Storage.Used != 50 || sharedSummary.Storage.Total != 100 || !sharedSummary.Storage.Shared {
+		t.Fatalf("shared storage = %#v", sharedSummary.Storage)
+	}
+}
+
 func TestConnectionAccessors(t *testing.T) {
 	cfg := testConfig("c1")
 	cfg.Project = "fleet"

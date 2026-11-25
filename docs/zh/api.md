@@ -217,7 +217,10 @@ POST /api/v1/auth/logout
           "message": "Fully operational",
           "database": true,
           "roles": ["database-leader"],
-          "architecture": "x86_64"
+          "architecture": "x86_64",
+          "cpu": {"total": 8, "architecture": "x86_64"},
+          "memory": {"used": 2000000000, "total": 16000000000},
+          "storage": {"pool": "default", "used": 50000000000, "total": 1700000000000}
         }
       ],
       "instances": {
@@ -226,6 +229,8 @@ POST /api/v1/auth/logout
         "virtual_machines": 1,
         "running": 2
       },
+      "cpu": {"total": 8, "architecture": "x86_64"},
+      "memory": {"used": 2000000000, "total": 16000000000},
       "storage": {"pool": "default", "used": 250000000000, "total": 1000000000000},
       "networks": ["incusbr0"]
     }
@@ -234,7 +239,9 @@ POST /api/v1/auth/logout
 ```
 
 离线集群保持相同结构，只是 `online: false` 并带有一个 `error` 字符串。当集群
-无法检查时，存储和实例计数可能为零。
+无法检查时，存储和实例计数可能为零。集群级 `cpu` 与 `memory` 是所有成员的合计；
+每个成员另外携带自己的 `cpu`、`memory`、`storage` 快照供节点详情页使用。本地存储池
+按成员求和，Ceph 等共享驱动只计一次并返回 `"shared": true`。
 
 `POST /clusters/{cluster}/reconnect` 直接返回更新后的摘要对象（不做外层包装）。
 

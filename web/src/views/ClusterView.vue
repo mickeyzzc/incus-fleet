@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, EditPen, Plus, Refresh } from '@element-plus/icons-vue'
+import { ArrowLeft, Box, Coin, Cpu, EditPen, Monitor, Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 import InstanceActions from '@/components/InstanceActions.vue'
@@ -143,6 +143,22 @@ const onlineTargets = computed(() =>
 function memberStatusLabel(status: string): string {
   const key = `cluster.memberStatus.${status.toLowerCase()}`
   return te(key) ? t(key) : status
+}
+
+function resourcePercent(used = 0, total = 0): number {
+  if (!Number.isFinite(total) || total <= 0) {
+    return 0
+  }
+
+  return Math.min(100, Math.max(0, (used / total) * 100))
+}
+
+function resourceShare(used = 0, total = 0): string {
+  if (!Number.isFinite(total) || total <= 0) {
+    return t('common.none')
+  }
+
+  return `${formatBytes(used)} / ${formatBytes(total)}`
 }
 
 async function load(force = false): Promise<void> {
@@ -537,8 +553,16 @@ function openNodeUpgrade(member: ClusterMember): void {
   <div class="page">
     <div class="page-header">
       <div class="title-with-back">
-        <el-button :icon="ArrowLeft" circle plain @click="router.push({ name: 'dashboard' })" />
+        <el-button
+          :icon="ArrowLeft"
+          circle
+          plain
+          :aria-label="t('cluster.back')"
+          :title="t('cluster.back')"
+          @click="router.push({ name: 'dashboard' })"
+        />
         <div>
+          <span class="page-eyebrow">{{ t('cluster.overview') }}</span>
           <div class="cluster-title-row">
             <h2>{{ summary?.display_name || cluster }}</h2>
             <el-button
@@ -598,74 +622,98 @@ function openNodeUpgrade(member: ClusterMember): void {
 
     <el-tabs v-model="activeTab" class="page-tabs">
       <el-tab-pane :label="t('cluster.tabOverview')" name="overview">
-      <section v-if="summary" class="panel">
-        <div class="panel-body cluster-detail">
-          <div class="detail-grid">
-            <div class="detail-item">
-              <div class="label">{{ t('cluster.server') }}</div>
-              <div class="value">{{ summary.server_name || t('common.none') }}</div>
-            </div>
-            <div class="detail-item">
-              <div class="label">{{ t('cluster.incusVersion') }}</div>
-              <div class="value">{{ summary.server_version || t('common.none') }}</div>
-            </div>
-            <div class="detail-item">
-              <div class="label">{{ t('cluster.members') }}</div>
-              <div class="value">{{ summary.members.length }}</div>
-            </div>
-            <div class="detail-item">
-              <div class="label">{{ t('cluster.instances') }}</div>
-              <div class="value">
-                {{
-                  t('cluster.instancesSummary', {
-                    total: summary.instances.total,
-                    running: summary.instances.running,
-                  })
-                }}
+      <section v-if="summary" class="panel cluster-summary-panel">
+        <div class="panel-head cluster-summary-head">
+          <div>
+            <span class="panel-eyebrow">{{ t('cluster.resourceTotalEyebrow') }}</span>
+            <h3 class="section-title">{{ t('cluster.resourceTotal') }}</h3>
+            <p class="subtitle">{{ t('cluster.resourceTotalHint', { count: summary.members.length }) }}</p>
+          </div>
+          <div class="cluster-facts">
+            <span>
+              <small>{{ t('cluster.server') }}</small>
+              <strong>{{ summary.server_name || t('common.none') }}</strong>
+            </span>
+            <span>
+              <small>{{ t('cluster.incusVersion') }}</small>
+              <strong>{{ summary.server_version || t('common.none') }}</strong>
+            </span>
+            <span>
+              <small>{{ t('cluster.members') }}</small>
+              <strong>{{ summary.members.length }}</strong>
+            </span>
+            <span>
+              <small>{{ t('cluster.architectures') }}</small>
+              <strong>{{ summary.architectures?.join(', ') || t('common.none') }}</strong>
+            </span>
+          </div>
+        </div>
+
+        <div class="panel-body">
+          <div class="cluster-resource-grid">
+            <article class="cluster-resource-card">
+              <span class="resource-icon cpu"><el-icon><Cpu /></el-icon></span>
+              <div class="resource-copy">
+                <span class="resource-label">{{ t('cluster.cpuTotal') }}</span>
+                <span class="resource-value">{{ summary.cpu?.total ?? '—' }} <small>vCPU</small></span>
+                <span class="resource-hint">{{ summary.cpu?.architecture || t('common.none') }}</span>
               </div>
-            </div>
-            <div class="detail-item">
-              <div class="label">{{ t('cluster.containersVms') }}</div>
-              <div class="value">
-                {{ summary.instances.containers }} / {{ summary.instances.virtual_machines }}
+            </article>
+
+            <article class="cluster-resource-card">
+              <span class="resource-icon memory"><el-icon><Box /></el-icon></span>
+              <div class="resource-copy">
+                <span class="resource-label">{{ t('cluster.memoryTotal') }}</span>
+                <span class="resource-value">
+                  {{ formatBytes(summary.memory?.used ?? 0) }}
+                  <small>/ {{ formatBytes(summary.memory?.total ?? 0) }}</small>
+                </span>
+                <div class="resource-bar">
+                  <div
+                    class="resource-bar-fill memory"
+                    :style="{ width: `${resourcePercent(summary.memory?.used, summary.memory?.total)}%` }"
+                  />
+                </div>
               </div>
-            </div>
-            <div class="detail-item">
-              <div class="label">{{ t('cluster.architectures') }}</div>
-              <div class="value">{{ summary.architectures?.join(', ') || t('common.none') }}</div>
-            </div>
-            <div class="detail-item">
-              <div class="label">{{ t('cluster.cpuCores') }}</div>
-              <div class="value">
-                {{ summary.cpu?.total ?? '—' }}{{ summary.cpu?.architecture ? ` · ${summary.cpu.architecture}` : '' }}
+            </article>
+
+            <article class="cluster-resource-card">
+              <span class="resource-icon storage"><el-icon><Coin /></el-icon></span>
+              <div class="resource-copy">
+                <span class="resource-label">
+                  {{ summary.storage.shared ? t('cluster.sharedStorage') : t('cluster.storageTotal') }}
+                </span>
+                <span class="resource-value">
+                  {{ formatBytes(summary.storage.used) }}
+                  <small>/ {{ formatBytes(summary.storage.total) }}</small>
+                </span>
+                <div class="resource-bar">
+                  <div
+                    class="resource-bar-fill storage"
+                    :style="{ width: `${resourcePercent(summary.storage.used, summary.storage.total)}%` }"
+                  />
+                </div>
               </div>
-            </div>
-            <div class="detail-item">
-              <div class="label">{{ t('cluster.memUsage') }}</div>
-              <div class="value">
-                <template v-if="summary.memory">
-                  {{ formatBytes(summary.memory.used) }} / {{ formatBytes(summary.memory.total) }}
-                </template>
-                <template v-else>{{ t('common.none') }}</template>
+            </article>
+
+            <article class="cluster-resource-card">
+              <span class="resource-icon instances"><el-icon><Monitor /></el-icon></span>
+              <div class="resource-copy">
+                <span class="resource-label">{{ t('cluster.instances') }}</span>
+                <span class="resource-value">
+                  {{ summary.instances.total }}
+                  <small>{{ t('dashboard.running', { count: summary.instances.running }) }}</small>
+                </span>
+                <span class="resource-hint">
+                  {{ summary.instances.containers }} {{ t('common.containers') }} ·
+                  {{ summary.instances.virtual_machines }} {{ t('common.virtualMachines') }}
+                </span>
               </div>
-            </div>
+            </article>
           </div>
 
-          <StorageBar
-            :used="summary.storage.used"
-            :total="summary.storage.total"
-            :pool="summary.storage.pool"
-          />
-
-          <div v-if="summary.memory && summary.memory.total > 0" class="mem-bar">
-            <el-progress
-              :percentage="Math.min(100, (summary.memory.used / summary.memory.total) * 100)"
-              :stroke-width="10"
-              :format="(p: number) => `${p.toFixed(1)}%`"
-            />
-          </div>
-
-          <div class="cluster-tags">
+          <div v-if="summary.networks.length > 0" class="cluster-tags cluster-summary-tags">
+            <span class="mini-label">{{ t('cluster.tabNetwork') }}</span>
             <el-tag v-for="network in summary.networks" :key="network" size="small" effect="plain">
               {{ network }}
             </el-tag>
@@ -687,55 +735,84 @@ function openNodeUpgrade(member: ClusterMember): void {
             </div>
           </div>
 
-          <el-table :data="summary.members" size="small" stripe>
-            <el-table-column :label="t('common.name')" min-width="150">
+          <el-table :data="summary.members" size="small" stripe class="node-table">
+            <el-table-column :label="t('common.name')" min-width="190">
               <template #default="{ row }">
-                <el-button link type="primary" @click="openNodeDetail(row)">
-                  {{ row.name }}
-                </el-button>
+                <div class="member-identity">
+                  <el-button link type="primary" class="member-name-link" @click="openNodeDetail(row)">
+                    {{ row.name }}
+                  </el-button>
+                  <span class="member-meta">
+                    <span class="mono">{{ row.architecture || t('common.none') }}</span>
+                    <span>{{ row.roles?.join(', ') || t('common.none') }}</span>
+                  </span>
+                  <span class="member-meta mono member-address" :title="row.url || summary.endpoint">
+                    {{ row.url || summary.endpoint }}
+                  </span>
+                </div>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.status')" width="95">
+            <el-table-column :label="t('common.status')" width="80">
               <template #default="{ row }">
                 <el-tag :type="row.status === 'Online' ? 'success' : 'info'" size="small" effect="plain">
                   {{ memberStatusLabel(row.status) }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.memberRoles')" min-width="120">
+            <el-table-column :label="t('cluster.cpuCores')" width="85">
               <template #default="{ row }">
-                <span class="mono">{{ row.roles?.join(', ') || t('common.none') }}</span>
+                <strong class="node-value">{{ row.cpu?.total ?? '—' }}</strong>
+                <small class="node-unit">vCPU</small>
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.architectures')" width="95">
-              <template #default="{ row }">{{ row.architecture || t('common.none') }}</template>
-            </el-table-column>
-            <el-table-column :label="t('cluster.memberAddress')" min-width="150">
+            <el-table-column :label="t('common.memory')" min-width="140">
               <template #default="{ row }">
-                <span class="mono member-address" :title="row.url || summary.endpoint">
-                  {{ row.url || summary.endpoint }}
-                </span>
+                <div class="node-meter">
+                  <span>{{ resourceShare(row.memory?.used, row.memory?.total) }}</span>
+                  <div class="node-meter-bar">
+                    <span
+                      class="memory"
+                      :style="{ width: `${resourcePercent(row.memory?.used, row.memory?.total)}%` }"
+                    />
+                  </div>
+                </div>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.actions')" width="300" fixed="right">
+            <el-table-column :label="t('nav.fleetVolumes')" min-width="140">
               <template #default="{ row }">
-                <el-button link type="primary" @click="openNodeDetail(row)">
-                  {{ t('cluster.manageNode') }}
-                </el-button>
-                <el-button link type="primary" @click="openMemberDialog(row)">
-                  {{ t('common.edit') }}
-                </el-button>
-                <el-button
-                  v-if="row.status === 'Online'"
-                  link
-                  type="warning"
-                  @click="openNodeUpgrade(row)"
-                >
-                  {{ t('node.upgrade') }}
-                </el-button>
-                <el-button link type="danger" @click="removeMember(row)">
-                  {{ t('cluster.removeMember') }}
-                </el-button>
+                <div class="node-meter">
+                  <span>{{ resourceShare(row.storage?.used, row.storage?.total) }}</span>
+                  <div class="node-meter-bar">
+                    <span
+                      class="storage"
+                      :style="{ width: `${resourcePercent(row.storage?.used, row.storage?.total)}%` }"
+                    />
+                  </div>
+                  <small v-if="row.storage?.shared">{{ t('cluster.sharedStorage') }}</small>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="245" fixed="right">
+              <template #default="{ row }">
+                <div class="member-actions">
+                  <el-button link type="primary" @click="openNodeDetail(row)">
+                    {{ t('cluster.manageNode') }}
+                  </el-button>
+                  <el-button link type="primary" @click="openMemberDialog(row)">
+                    {{ t('common.edit') }}
+                  </el-button>
+                  <el-button
+                    v-if="row.status === 'Online'"
+                    link
+                    type="warning"
+                    @click="openNodeUpgrade(row)"
+                  >
+                    {{ t('node.upgrade') }}
+                  </el-button>
+                  <el-button link type="danger" @click="removeMember(row)">
+                    {{ t('cluster.removeMember') }}
+                  </el-button>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -770,7 +847,7 @@ function openNodeUpgrade(member: ClusterMember): void {
           </div>
 
           <el-table v-loading="instances.loading" :data="pagedInstances" stripe>
-            <el-table-column :label="t('common.name')" min-width="160">
+            <el-table-column :label="t('common.name')" min-width="140">
               <template #default="{ row }">
                 <div class="status-cell">
                   <div>
@@ -787,26 +864,26 @@ function openNodeUpgrade(member: ClusterMember): void {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.type')" width="80">
+            <el-table-column :label="t('common.type')" width="75">
               <template #default="{ row }">
                 <el-tag size="small" effect="plain">{{ instanceTypeLabel(row.type) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.status')" width="90">
+            <el-table-column :label="t('common.status')" width="80">
               <template #default="{ row }">
                 <StatusTag :status="row.status" :status-code="row.status_code" />
               </template>
             </el-table-column>
             <el-table-column prop="location" :label="t('common.node')" width="100" />
-            <el-table-column :label="t('common.address')" min-width="120">
+            <el-table-column :label="t('common.address')" min-width="110">
               <template #default="{ row }">
                 <span class="mono">{{ primaryAddress(row.ipv4, row.ipv6) }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.memory')" width="100">
+            <el-table-column :label="t('common.memory')" width="80">
               <template #default="{ row }">{{ formatBytes(row.memory) }}</template>
             </el-table-column>
-            <el-table-column :label="t('common.actions')" width="260" fixed="right">
+            <el-table-column :label="t('common.actions')" width="250" fixed="right">
               <template #default="{ row }">
                 <InstanceActions
                   :instance="row"
@@ -849,30 +926,30 @@ function openNodeUpgrade(member: ClusterMember): void {
           </div>
 
           <el-table v-loading="instances.resourcesLoading" :data="resources?.storage_pools ?? []" stripe>
-            <el-table-column :label="t('cluster.poolName')" min-width="140">
+            <el-table-column :label="t('cluster.poolName')" min-width="120">
               <template #default="{ row }">
                 <strong>{{ row.name }}</strong>
                 <span v-if="row.description" class="mini-label">{{ row.description }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.driver')" width="110" prop="driver" />
-            <el-table-column :label="t('cluster.source')" min-width="150">
+            <el-table-column :label="t('cluster.driver')" width="90" prop="driver" />
+            <el-table-column :label="t('cluster.source')" min-width="120">
               <template #default="{ row }">
                 <span class="mono">{{ row.source || t('common.none') }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.usage')" min-width="220">
+            <el-table-column :label="t('cluster.usage')" min-width="180">
               <template #default="{ row }">
                 <StorageBar v-if="row.total > 0" :used="row.used" :total="row.total" />
                 <span v-else class="muted">{{ formatBytes(row.used) }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.usedBy')" width="130">
+            <el-table-column :label="t('cluster.usedBy')" width="110">
               <template #default="{ row }">
                 {{ t('cluster.usedByCount', { count: row.used_by.length }) }}
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.actions')" width="200" fixed="right">
+            <el-table-column :label="t('common.actions')" width="180" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openVolumesDialog(row)">
                   {{ t('volumes.manage') }}
@@ -1086,41 +1163,41 @@ function openNodeUpgrade(member: ClusterMember): void {
           </div>
 
           <el-table v-loading="overlayLoading" :data="overlayItems" stripe>
-            <el-table-column :label="t('cluster.overlaySubnet')" min-width="150">
+            <el-table-column :label="t('cluster.overlaySubnet')" min-width="130">
               <template #default="{ row }">
                 <strong>{{ row.name }}</strong>
                 <span class="mini-label mono">{{ row.subnet }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.overlayBridge')" width="130" prop="bridge" />
-            <el-table-column :label="t('cluster.overlayVNI')" width="100">
+            <el-table-column :label="t('cluster.overlayBridge')" width="100" prop="bridge" />
+            <el-table-column :label="t('cluster.overlayVNI')" width="70">
               <template #default="{ row }">
                 <span class="mono">{{ row.vni }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.overlayGateway')" min-width="130">
+            <el-table-column :label="t('cluster.overlayGateway')" min-width="100">
               <template #default="{ row }">
                 {{ row.gateway_member }}
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.overlayMTU')" width="90">
+            <el-table-column :label="t('cluster.overlayMTU')" width="60">
               <template #default="{ row }">
                 <span class="mono">{{ row.mtu }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.overlayTunnels', { count: 0 })" width="140">
+            <el-table-column :label="t('cluster.overlayTunnels', { count: 0 })" width="90">
               <template #default="{ row }">
                 {{ t('cluster.overlayTunnels', { count: row.tunnels.length }) }}
               </template>
             </el-table-column>
-            <el-table-column :label="t('cluster.overlayStatus')" width="110">
+            <el-table-column :label="t('cluster.overlayStatus')" width="90">
               <template #default="{ row }">
                 <el-tag :type="row.enabled ? 'success' : 'info'" size="small" effect="light">
                   {{ row.enabled ? t('cluster.overlayEnabled') : t('cluster.overlayDisabled') }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.actions')" width="240" fixed="right">
+            <el-table-column :label="t('common.actions')" width="200" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openEditOverlay(row)">
                   {{ t('common.edit') }}
@@ -1353,6 +1430,237 @@ function openNodeUpgrade(member: ClusterMember): void {
   gap: 18px;
 }
 
+.cluster-summary-panel {
+  overflow: hidden;
+}
+
+.cluster-summary-head {
+  align-items: flex-start;
+}
+
+.cluster-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 22px;
+}
+
+.cluster-facts span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cluster-facts small {
+  color: var(--fleet-ink-soft);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cluster-facts strong {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.cluster-resource-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.cluster-resource-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--fleet-line) 76%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--fleet-panel-muted) 72%, transparent);
+}
+
+.resource-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+.resource-icon.cpu {
+  background: #eef2ff;
+  color: #4562e8;
+}
+
+.resource-icon.memory {
+  background: #ecfeff;
+  color: #0891b2;
+}
+
+.resource-icon.storage {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.resource-icon.instances {
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+
+.resource-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.resource-label {
+  color: var(--fleet-ink-soft);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.resource-value {
+  font-size: 20px;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.3px;
+  line-height: 1.15;
+}
+
+.resource-value small {
+  color: var(--fleet-ink-soft);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.resource-hint {
+  color: var(--fleet-ink-soft);
+  font-size: 11.5px;
+}
+
+.resource-bar {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--el-fill-color);
+}
+
+.resource-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.4s ease;
+}
+
+.resource-bar-fill.memory {
+  background: linear-gradient(90deg, #3b82f6, #06b6d4);
+}
+
+.resource-bar-fill.storage {
+  background: linear-gradient(90deg, #10b981, #22c55e);
+}
+
+.cluster-summary-tags {
+  align-items: center;
+  margin-top: 16px;
+}
+
+.node-table {
+  --el-table-header-bg-color: var(--fleet-panel-muted);
+}
+
+.member-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.member-name-link {
+  align-self: flex-start;
+  height: auto;
+  padding: 0;
+  font-weight: 650;
+}
+
+.member-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--fleet-ink-soft);
+  font-size: 11px;
+}
+
+.member-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+.member-actions :deep(.el-button) {
+  height: auto;
+  margin-left: 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.node-value {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.node-unit {
+  margin-left: 2px;
+  color: var(--fleet-ink-soft);
+  font-size: 10.5px;
+}
+
+.node-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.node-meter > span:first-child {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.node-meter-bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--el-fill-color);
+}
+
+.node-meter-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.node-meter-bar .memory {
+  background: linear-gradient(90deg, #3b82f6, #06b6d4);
+}
+
+.node-meter-bar .storage {
+  background: linear-gradient(90deg, #10b981, #22c55e);
+}
+
+.node-meter small {
+  color: var(--fleet-ink-soft);
+  font-size: 10px;
+}
+
 .cluster-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1387,6 +1695,28 @@ function openNodeUpgrade(member: ClusterMember): void {
 .member-address {
   font-size: 11.5px;
   white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .resource-icon.cpu {
+    background: #1d2a4d;
+    color: #8fa4ff;
+  }
+
+  .resource-icon.memory {
+    background: #113640;
+    color: #67d9e9;
+  }
+
+  .resource-icon.storage {
+    background: #123b31;
+    color: #67e0b0;
+  }
+
+  .resource-icon.instances {
+    background: #2c2450;
+    color: #b49cff;
+  }
 }
 
 .member-tag {

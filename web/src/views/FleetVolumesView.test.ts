@@ -104,6 +104,45 @@ describe('FleetVolumesView', () => {
 
     expect(wrapper.text()).toContain('No volumes found')
   })
+
+  it('selects rows and bulk deletes them', async () => {
+    vi.mocked(api.deleteVolume).mockResolvedValue(undefined)
+    const wrapper = await mountView()
+
+    wrapper.findComponent({ name: 'ElTable' }).vm.$emit('selection-change', [volumeA, volumeB])
+    await flushPromises()
+    expect(wrapper.text()).toContain('2 selected')
+
+    const remove = wrapper.findAll('button').find((button) => button.text().includes('Delete selected'))
+    await remove?.trigger('click')
+    await flushPromises()
+
+    expect(api.deleteVolume).toHaveBeenCalledWith('c62', 'default', 'data-a')
+    expect(api.deleteVolume).toHaveBeenCalledWith('c63', 'fast', 'iso-b')
+    expect(ElMessage.success).toHaveBeenCalledWith('Deleted 2 volumes.')
+  })
+
+  it('reports partial bulk delete failures and single deletes', async () => {
+    vi.mocked(api.deleteVolume)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('volume is in use'))
+    const wrapper = await mountView()
+
+    wrapper.findComponent({ name: 'ElTable' }).vm.$emit('selection-change', [volumeA, volumeB])
+    await flushPromises()
+    const bulk = wrapper.findAll('button').find((button) => button.text().includes('Delete selected'))
+    await bulk?.trigger('click')
+    await flushPromises()
+
+    expect(ElMessage.warning).toHaveBeenCalledWith(
+      'Deleted 1 volumes; 1 failed (usually still attached to an instance).',
+    )
+
+    const single = wrapper.findAll('button').find((button) => button.text().trim() === 'Delete')
+    await single?.trigger('click')
+    await flushPromises()
+    expect(api.deleteVolume).toHaveBeenCalledWith('c62', 'default', 'data-a')
+  })
 })
 
 describe('FleetVolumesView filters and fallbacks', () => {

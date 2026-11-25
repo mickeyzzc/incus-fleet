@@ -542,12 +542,12 @@ function memberHint(cluster: ClusterSummary): string {
               <small>{{ memberHint(cluster) }}</small>
             </div>
             <div class="figure">
-              <span>{{ t('common.cpu') }}</span>
+              <span>{{ t('dashboard.cpuTotal') }}</span>
               <strong>{{ cluster.cpu?.total ?? '—' }}</strong>
               <small>vCPU</small>
             </div>
             <div class="figure figure--memory">
-              <span>{{ t('common.memory') }}</span>
+              <span>{{ t('dashboard.memoryTotal') }}</span>
               <strong>{{ memoryPercent(cluster) }}%</strong>
               <small :title="memoryShare(cluster)">{{ memoryShare(cluster) }}</small>
             </div>
@@ -1048,6 +1048,14 @@ function memberHint(cluster: ClusterSummary): string {
   gap: 8px;
   justify-content: flex-end;
   margin-top: 0;
+}
+
+.cluster-actions a {
+  display: inline-flex;
+}
+
+.cluster-actions :deep(.el-button) {
+  min-height: 30px;
 }
 
 .cluster-actions :deep(.el-button + .el-button) {

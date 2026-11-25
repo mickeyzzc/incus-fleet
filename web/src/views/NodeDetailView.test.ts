@@ -71,6 +71,18 @@ describe('NodeDetailView', () => {
     expect(panel.props()).toMatchObject({ cluster: 'c1', member: 'node-1' })
   })
 
+  it('shows resources belonging to this node only', async () => {
+    const clusters = useClustersStore()
+    await clusters.fetchAll()
+
+    const { wrapper } = await mountDetail()
+
+    expect(wrapper.text()).toContain('This node’s resources')
+    expect(wrapper.text()).toContain('vCPU')
+    expect(wrapper.text()).toContain('1.9 GiB')
+    expect(wrapper.text()).toContain('46.6 GiB')
+  })
+
   it('fetches the cluster inventory when opened directly', async () => {
     const { wrapper } = await mountDetail()
     await flushPromises()
