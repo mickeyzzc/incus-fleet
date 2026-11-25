@@ -9,8 +9,13 @@ import type { FleetVolume } from '@/api/types'
 import { api } from '@/api'
 import { errorMessage } from '@/utils/errors'
 import { formatBytes } from '@/utils/format'
+import { fleetVolumeCache } from './fleetVolumeCache'
 
 const { t } = useI18n()
+
+// Re-entering the page should reuse a recent inventory instead of walking
+// every cluster/pool again. Manual refresh still bypasses the cache.
+const CACHE_TTL_MS = 30_000
 
 const volumes = ref<FleetVolume[]>([])
 const clusters = ref<string[]>([])
@@ -69,15 +74,27 @@ function rowKey(volume: FleetVolume): string {
   return `${volume.cluster}/${volume.pool}/${volume.name}`
 }
 
-async function load(): Promise<void> {
+async function load(force = false): Promise<void> {
+  const cached = fleetVolumeCache.current
+  if (!force && cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    volumes.value = cached.items
+    clusters.value = cached.clusters
+    return
+  }
+
   loading.value = true
   error.value = ''
   try {
     clusters.value = (await api.listClusters()).map((cluster) => cluster.name)
-    const result = await api.listAllVolumesWithErrors()
+    const result = await api.listAllVolumesWithErrors(clusters.value)
     volumes.value = result.items
     selected.value = []
     tableRef.value?.clearSelection()
+    fleetVolumeCache.current = {
+      items: result.items,
+      clusters: [...clusters.value],
+      at: Date.now(),
+    }
     if (result.failedClusters.length > 0) {
       error.value = t('assets.partialFailure', { clusters: result.failedClusters.join(', ') })
     }
@@ -122,7 +139,8 @@ async function confirmDelete(volume: FleetVolume): Promise<void> {
   try {
     await api.deleteVolume(volume.cluster, volume.pool, volume.name)
     ElMessage.success(t('fleetVolumes.deleted', { name: volume.name }))
-    await load()
+    fleetVolumeCache.current = null
+    await load(true)
   } catch (err) {
     ElMessage.error(errorMessage(err))
   }
@@ -164,7 +182,8 @@ async function deleteSelected(): Promise<void> {
         }),
       )
     }
-    await load()
+    fleetVolumeCache.current = null
+    await load(true)
   } finally {
     bulkBusy.value = false
   }
@@ -180,7 +199,7 @@ async function deleteSelected(): Promise<void> {
         <p class="subtitle">{{ t('fleetVolumes.subtitle') }}</p>
       </div>
       <div class="page-actions">
-        <el-button :icon="Refresh" :loading="loading" @click="load">
+        <el-button :icon="Refresh" :loading="loading" @click="load(true)">
           {{ t('common.refresh') }}
         </el-button>
       </div>

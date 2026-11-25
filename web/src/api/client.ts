@@ -562,33 +562,37 @@ export class ApiClient {
     return (await this.listAllVolumesWithErrors()).items
   }
 
-  /** Lists volumes across all clusters and reports which clusters could not be read. */
-  async listAllVolumesWithErrors(): Promise<InventoryResult<FleetVolume>> {
-    const clusters = await this.listClusters()
+  /**
+   * Lists volumes across all clusters and reports which clusters could not be
+   * read. Callers that already loaded the cluster list can pass the names to
+   * avoid a second /clusters round trip.
+   */
+  async listAllVolumesWithErrors(clusterNames?: string[]): Promise<InventoryResult<FleetVolume>> {
+    const names = clusterNames ?? (await this.listClusters()).map((cluster) => cluster.name)
     const failedClusters: string[] = []
     const perCluster = await Promise.all(
-      clusters.map(async (cluster) => {
+      names.map(async (name) => {
         try {
-          const resources = await this.getResources(cluster.name)
+          const resources = await this.getResources(name)
           const pools = resources.storage_pools ?? []
           const perPool = await Promise.all(
             pools.map(async (pool) => {
               try {
-                const volumes = await this.listVolumes(cluster.name, pool.name)
+                const volumes = await this.listVolumes(name, pool.name)
                 return volumes.map((volume) => ({
                   ...volume,
-                  cluster: cluster.name,
+                  cluster: name,
                   pool: pool.name,
                 }))
               } catch {
-                failedClusters.push(`${cluster.name}/${pool.name}`)
+                failedClusters.push(`${name}/${pool.name}`)
                 return []
               }
             }),
           )
           return perPool.flat()
         } catch {
-          failedClusters.push(cluster.name)
+          failedClusters.push(name)
           return []
         }
       }),

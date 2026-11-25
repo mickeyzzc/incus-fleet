@@ -18,14 +18,17 @@ import { useInstancesStore } from '@/stores/instances'
 import { errorMessage } from '@/utils/errors'
 import { formatBytes, formatDateTime } from '@/utils/format'
 
+type DrawerTab = 'overview' | 'metrics' | 'snapshots' | 'devices'
+
 const props = withDefaults(
   defineProps<{
     modelValue: boolean
     cluster: string
     name: string
     canMigrate?: boolean
+    initialTab?: DrawerTab
   }>(),
-  { canMigrate: true },
+  { canMigrate: true, initialTab: 'overview' },
 )
 
 const emit = defineEmits<{
@@ -74,7 +77,7 @@ watch(
   () => [props.modelValue, props.cluster, props.name] as const,
   ([open, cluster, name]) => {
     if (open && cluster && name) {
-      activeTab.value = 'overview'
+      activeTab.value = props.initialTab
       void instances.fetchDetail(cluster, name)
     }
   },
@@ -108,7 +111,7 @@ function onDevicesChanged(updated: InstanceDetail): void {
 </script>
 
 <template>
-  <el-drawer v-model="visible" size="560px" :title="`${name} · ${cluster}`">
+  <el-drawer v-model="visible" size="620px" :title="`${name} · ${cluster}`">
     <div v-loading="instances.detailLoading">
       <template v-if="detail">
         <div class="drawer-section">
@@ -123,6 +126,7 @@ function onDevicesChanged(updated: InstanceDetail): void {
             @rename="emit('rename', detail)"
             @migrate="emit('migrate', detail)"
             @delete="emit('delete', detail)"
+            @devices="activeTab = 'devices'"
           />
           <div class="access-row">
             <el-button size="small" @click="terminalOpen = true">
@@ -130,6 +134,9 @@ function onDevicesChanged(updated: InstanceDetail): void {
             </el-button>
             <el-button size="small" @click="filesOpen = true">
               {{ t('files.open') }}
+            </el-button>
+            <el-button size="small" plain @click="activeTab = 'devices'">
+              {{ t('devices.manage') }}
             </el-button>
           </div>
           <div class="access-row">

@@ -257,8 +257,8 @@ installation media, forces the installer's default boot entry, and watches for c
    - Fill the template fields: hostname (defaults to the VM name), user account, password,
      timezone, target disk, locale, keyboard layout, and **additional packages** to install
      during the unattended install;
-   - Pick a saved **Answer profile** from the dropdown — configurations are managed under
-     **Images & automation → Answer profiles**, can be marked as the default for their installer,
+   - Pick a saved **Unattended install** template from the dropdown — templates are managed under
+     **Images & automation → Unattended install**, can be marked as the default for their installer,
      and are applied automatically when a launch supplies no answer content;
    - Enable **Provide my own answer file** and paste a complete preseed.cfg / ks.cfg / user-data.
 
@@ -611,7 +611,7 @@ Open **Images & automation** in the left menu and switch tabs:
 - **SSH public keys**: stores keys (name + key material; identical content is de-duplicated).
   Storing a key does not deploy it; you decide when to inject it.
 - **Scripts**: stores maintenance scripts (name + description + body), ready to reuse.
-- **Answer profiles**: unattended-install answer templates (hostname, account, password,
+- **Unattended install**: reusable unattended-install templates (hostname, account, password,
   timezone, target disk, locale, keyboard, **additional packages**, and an optional custom
   answer file), defaultable per installer. Passwords require **confirmation** and show a
   **strength** meter while you type. The **target disk** is relevant to Debian/d-i and

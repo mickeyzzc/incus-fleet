@@ -368,14 +368,22 @@ function avatarHue(cluster: ClusterSummary): string {
   return String(hash)
 }
 
-/** Compact memory share string for the cluster row, e.g. "3.2/16 GiB". */
+/** Compact memory share string for the cluster row, e.g. "3.2 / 16.0 GiB". */
 function memoryShare(cluster: ClusterSummary): string {
   const memory = cluster.memory
   if (!memory || memory.total <= 0) {
     return '—'
   }
 
-  return `${formatBytes(memory.used)} / ${formatBytes(memory.total)}`
+  const used = formatBytes(memory.used)
+  const total = formatBytes(memory.total)
+  const usedParts = used.split(' ')
+  const totalParts = total.split(' ')
+  if (usedParts[1] && usedParts[1] === totalParts[1]) {
+    return `${usedParts[0]} / ${total}`
+  }
+
+  return `${used} / ${total}`
 }
 
 function memoryPercent(cluster: ClusterSummary): number {
@@ -889,9 +897,9 @@ function memberHint(cluster: ClusterSummary): string {
 .cluster-row-main {
   display: grid;
   grid-template-areas: 'identity figures live actions';
-  grid-template-columns: minmax(220px, 1.25fr) minmax(300px, 1.15fr) minmax(210px, 0.85fr) auto;
+  grid-template-columns: minmax(230px, 1.05fr) minmax(340px, 1.3fr) minmax(200px, 0.8fr) auto;
   align-items: center;
-  gap: 22px;
+  gap: 20px;
   padding: 16px 20px 12px 22px;
 }
 
@@ -1001,7 +1009,7 @@ function memberHint(cluster: ClusterSummary): string {
   flex-direction: column;
   gap: 1px;
   min-width: 0;
-  padding: 7px 10px;
+  padding: 6px 8px;
   border: 1px solid color-mix(in srgb, var(--fleet-line) 76%, transparent);
   border-radius: 10px;
   background: color-mix(in srgb, var(--fleet-panel-muted) 78%, transparent);
@@ -1029,7 +1037,7 @@ function memberHint(cluster: ClusterSummary): string {
 .figure small {
   overflow: hidden;
   color: var(--fleet-ink-soft);
-  font-size: 10.5px;
+  font-size: 10px;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;

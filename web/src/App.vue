@@ -286,16 +286,31 @@ async function logout(): Promise<void> {
             :key="cluster.name"
             :index="`/clusters/${cluster.name}/group`"
             :title="cluster.display_name"
+            :show-timeout="80"
+            :hide-timeout="80"
           >
             <template #title>
               <el-icon><Grid /></el-icon>
               <span class="health-dot" :class="{ online: cluster.online }" />
               <span>{{ cluster.display_name }}</span>
             </template>
+            <el-menu-item
+              v-if="isCollapsed"
+              :index="`/clusters/${cluster.name}/label`"
+              class="menu-cluster-heading"
+              disabled
+            >
+              {{ cluster.display_name }}
+            </el-menu-item>
             <el-menu-item :index="`/clusters/${cluster.name}`" :title="t('cluster.overview')">
               {{ t('cluster.overview') }}
             </el-menu-item>
-            <el-sub-menu :index="`/clusters/${cluster.name}/members`" :title="t('nav.nodes')">
+            <el-sub-menu
+              :index="`/clusters/${cluster.name}/members`"
+              :title="t('nav.nodes')"
+              :show-timeout="80"
+              :hide-timeout="80"
+            >
               <template #title>{{ t('nav.nodes') }}</template>
               <el-menu-item
                 v-for="member in cluster.members ?? []"

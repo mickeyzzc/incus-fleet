@@ -57,6 +57,16 @@ describe('InstanceActions', () => {
     expect(wrapper.emitted('delete')).toHaveLength(1)
   })
 
+  it('opens the device manager from the action menu', async () => {
+    const wrapper = mountActions('Running')
+
+    await buttonByText(wrapper, 'Actions').trigger('click')
+    await flushPromises()
+    await buttonByText(wrapper, 'Disks & NICs').trigger('click')
+
+    expect(wrapper.emitted('devices')).toHaveLength(1)
+  })
+
   it('hides optional actions and disables the rest when busy', async () => {
     const wrapper = mountActions('Running', {
       busy: true,

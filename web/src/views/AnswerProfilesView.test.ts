@@ -44,7 +44,7 @@ describe('AnswerProfilesView', () => {
 
   it('opens the create dialog and submits a profile', async () => {
     const wrapper = await mountView()
-    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add profile'))
+    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add template'))
     expect(addButton).toBeTruthy()
     await addButton!.trigger('click')
     await flushPromises()
@@ -88,7 +88,7 @@ describe('AnswerProfilesView', () => {
 
   it('rejects an empty name before calling the API', async () => {
     const wrapper = await mountView()
-    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add profile'))
+    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add template'))
     await addButton!.trigger('click')
     await flushPromises()
     const dialog = wrapper.find('.el-dialog')
@@ -175,7 +175,7 @@ describe('AnswerProfilesView', () => {
   it('shows the empty state when no profiles are saved', async () => {
     vi.mocked(api.listAnswerProfiles).mockResolvedValue([])
     const wrapper = await mountView()
-    expect(wrapper.text()).toContain('No answer profiles saved yet.')
+    expect(wrapper.text()).toContain('No unattended-install templates saved yet.')
   })
 
   it('reports save and delete failures', async () => {
@@ -183,7 +183,7 @@ describe('AnswerProfilesView', () => {
     vi.mocked(api.deleteAnswerProfile).mockRejectedValue(new Error('boom'))
     const wrapper = await mountView()
     // failed create
-    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add profile'))
+    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add template'))
     await addButton!.trigger('click')
     await flushPromises()
     const dialog = wrapper.find('.el-dialog')
@@ -201,7 +201,7 @@ describe('AnswerProfilesView', () => {
 
   it('binds every template field', async () => {
     const wrapper = await mountView()
-    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add profile'))
+    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add template'))
     await addButton!.trigger('click')
     await flushPromises()
     const dialog = wrapper.find('.el-dialog')
@@ -238,7 +238,7 @@ describe('AnswerProfilesView', () => {
   it('rejects custom answers without content and reports preview failures', async () => {
     vi.mocked(api.previewAnswerProfile).mockRejectedValue(new Error('preview down'))
     const wrapper = await mountView()
-    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add profile'))
+    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add template'))
     await addButton!.trigger('click')
     await flushPromises()
     const dialog = wrapper.find('.el-dialog')
@@ -277,7 +277,7 @@ describe('AnswerProfilesView', () => {
       profile: 'debian-preseed',
     })
     const wrapper = await mountView()
-    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add profile'))
+    const addButton = wrapper.findAll('button').find((b) => b.text().includes('Add template'))
     await addButton!.trigger('click')
     await flushPromises()
     const dialog = wrapper.find('.el-dialog')

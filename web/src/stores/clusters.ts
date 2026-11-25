@@ -16,9 +16,15 @@ export const useClustersStore = defineStore('clusters', () => {
 
   const onlineCount = computed(() => items.value.filter((cluster) => cluster.online).length)
 
-  /** Fetches every configured cluster. */
-  async function fetchAll(): Promise<void> {
-    loading.value = true
+  /**
+   * Fetches every configured cluster. Once data exists, refreshes are silent:
+   * the table keeps rendering while new values arrive instead of flashing a
+   * full-panel loading mask.
+   */
+  async function fetchAll(silent = items.value.length > 0): Promise<void> {
+    if (!silent) {
+      loading.value = true
+    }
     error.value = ''
 
     try {
@@ -27,7 +33,9 @@ export const useClustersStore = defineStore('clusters', () => {
     } catch (err) {
       error.value = errorMessage(err)
     } finally {
-      loading.value = false
+      if (!silent) {
+        loading.value = false
+      }
     }
   }
 

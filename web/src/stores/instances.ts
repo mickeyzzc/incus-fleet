@@ -89,9 +89,14 @@ export const useInstancesStore = defineStore('instances', () => {
   }
 
   /** Fetches instances from all clusters, optionally filtered by type. */
-  async function fetchAll(type: InstanceType = filter.value): Promise<void> {
+  async function fetchAll(
+    type: InstanceType = filter.value,
+    silent = items.value.length > 0,
+  ): Promise<void> {
     filter.value = type
-    loading.value = true
+    if (!silent) {
+      loading.value = true
+    }
     error.value = ''
 
     try {
@@ -102,13 +107,21 @@ export const useInstancesStore = defineStore('instances', () => {
       error.value = errorMessage(err)
       unavailableClusters.value = []
     } finally {
-      loading.value = false
+      if (!silent) {
+        loading.value = false
+      }
     }
   }
 
   /** Replaces the inventory with one cluster's instances. */
-  async function fetchCluster(cluster: string, type: InstanceType = 'any'): Promise<void> {
-    loading.value = true
+  async function fetchCluster(
+    cluster: string,
+    type: InstanceType = 'any',
+    silent = items.value.length > 0,
+  ): Promise<void> {
+    if (!silent) {
+      loading.value = true
+    }
     error.value = ''
 
     try {
@@ -117,7 +130,9 @@ export const useInstancesStore = defineStore('instances', () => {
     } catch (err) {
       error.value = errorMessage(err)
     } finally {
-      loading.value = false
+      if (!silent) {
+        loading.value = false
+      }
     }
   }
 

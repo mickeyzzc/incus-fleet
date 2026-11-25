@@ -28,6 +28,26 @@ describe('clusters store', () => {
     expect(store.byName('missing')).toBeUndefined()
   })
 
+  it('keeps cached rows visible during a silent refresh', async () => {
+    vi.mocked(api.listClusters).mockResolvedValue([clusterSummary()])
+    const store = useClustersStore()
+    await store.fetchAll()
+
+    let resolve: (value: ReturnType<typeof clusterSummary>[]) => void = () => undefined
+    vi.mocked(api.listClusters).mockReturnValue(
+      new Promise((done) => {
+        resolve = done
+      }),
+    )
+    const pending = store.fetchAll()
+    expect(store.loading).toBe(false)
+    expect(store.items).toHaveLength(1)
+
+    resolve([clusterSummary({ display_name: 'Updated' })])
+    await pending
+    expect(store.items[0]?.display_name).toBe('Updated')
+  })
+
   it('records list errors', async () => {
     vi.mocked(api.listClusters).mockRejectedValue(new Error('control plane down'))
     const store = useClustersStore()

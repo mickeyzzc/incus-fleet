@@ -57,6 +57,7 @@ const instancePage = ref(1)
 const instancePageSize = ref(20)
 const detailOpen = ref(false)
 const detailName = ref('')
+const detailTab = ref<'overview' | 'devices'>('overview')
 const migrateOpen = ref(false)
 const migrateInstance = ref<InstanceSummary | null>(null)
 const renameOpen = ref(false)
@@ -209,6 +210,7 @@ function openDetail(instance: InstanceSummary): void {
     return
   }
   detailName.value = instance.name
+  detailTab.value = 'overview'
   detailOpen.value = true
 }
 
@@ -422,6 +424,15 @@ function openMemberDialog(member: ClusterMember): void {
 /** Opens the node detail page where host networking is managed. */
 function openNodeDetail(member: ClusterMember): void {
   void router.push({ name: 'node-detail', params: { cluster: props.cluster, member: member.name } })
+}
+
+function openDevices(instance: InstanceSummary): void {
+  if (!instance?.name) {
+    return
+  }
+  detailName.value = instance.name
+  detailTab.value = 'devices'
+  detailOpen.value = true
 }
 
 async function memberAdded(): Promise<void> {
@@ -855,7 +866,7 @@ function openNodeUpgrade(member: ClusterMember): void {
                       {{ row.name }}
                     </el-button>
                     <span class="name-meta">
-                      <span class="mini-label">{{ row.description || t('common.none') }}</span>
+                      <span v-if="row.description" class="mini-label">{{ row.description }}</span>
                       <el-tag v-if="row.live_migratable" size="small" type="success" effect="plain">
                         {{ t('common.live') }}
                       </el-tag>
@@ -893,6 +904,7 @@ function openNodeUpgrade(member: ClusterMember): void {
                   @rename="openRename(row)"
                   @migrate="openMigrate(row)"
                   @delete="confirmDelete(row)"
+                  @devices="openDevices(row)"
                 />
               </template>
             </el-table-column>
@@ -1298,6 +1310,7 @@ function openNodeUpgrade(member: ClusterMember): void {
       v-model="detailOpen"
       :cluster="cluster"
       :name="detailName"
+      :initial-tab="detailTab"
       @edit="openEditDetail"
       @rename="openRename"
       @migrate="openMigrate"
