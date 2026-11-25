@@ -426,6 +426,24 @@ describe('ClusterView', () => {
     expect(dialog.props('cluster')).toBe('c1')
   })
 
+  it('renames the cluster from the header dialog', async () => {
+    const { wrapper } = await mountCluster()
+
+    const rename = wrapper.findAll('button').find((button) => button.attributes('title') === 'Rename cluster')
+    expect(rename).toBeDefined()
+    await rename?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent({ name: 'RenameClusterDialog' })
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('currentName')).toBe('Cluster 62')
+
+    vi.mocked(api.listClusters).mockClear()
+    dialog.vm.$emit('renamed', 'Edge')
+    await flushPromises()
+    expect(api.listClusters).toHaveBeenCalled()
+  })
+
   it('opens the member dialog from the nodes table and saves changes', async () => {
     const { wrapper } = await mountCluster()
 
@@ -439,7 +457,7 @@ describe('ClusterView', () => {
     expect(dialog.props('member')).toMatchObject({ name: 'node-1' })
 
     const inputs = dialog.findAll('input')
-    await inputs[0]?.setValue('primary node, nvme')
+    await inputs[1]?.setValue('primary node, nvme')
     await dialog.findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 

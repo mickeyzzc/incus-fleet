@@ -100,6 +100,28 @@ describe('DashboardView', () => {
     expect(ElMessage.error).toHaveBeenCalledWith('still unreachable')
   })
 
+  it('opens the rename dialog from the cluster row and reloads after saving', async () => {
+    vi.mocked(api.listClusters).mockResolvedValue([clusterSummary()])
+    vi.mocked(api.listInstances).mockResolvedValue([])
+    vi.mocked(api.listMigrations).mockResolvedValue([])
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const rename = wrapper.findAll('button').find((button) => button.attributes('title') === 'Rename cluster')
+    expect(rename).toBeDefined()
+    await rename?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent({ name: 'RenameClusterDialog' })
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('currentName')).toBe('Cluster 62')
+
+    dialog.vm.$emit('renamed', 'Edge')
+    await flushPromises()
+    expect(api.listClusters).toHaveBeenCalledTimes(2)
+  })
+
   it('shows the empty state when no clusters are configured', async () => {
     vi.mocked(api.listClusters).mockResolvedValue([])
     vi.mocked(api.listInstances).mockResolvedValue([])

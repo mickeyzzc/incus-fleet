@@ -47,12 +47,13 @@ describe('MemberDialog', () => {
     await flushPromises()
 
     const inputs = wrapper.findAll('input')
-    expect((inputs[0]?.element as HTMLInputElement | undefined)?.value).toBe('primary node')
-    expect((inputs[1]?.element as HTMLInputElement | undefined)?.value).toBe('rack-a')
+    expect((inputs[0]?.element as HTMLInputElement | undefined)?.value).toBe('node-1')
+    expect((inputs[1]?.element as HTMLInputElement | undefined)?.value).toBe('primary node')
     expect((inputs[2]?.element as HTMLInputElement | undefined)?.value).toBe('rack-a')
+    expect((inputs[3]?.element as HTMLInputElement | undefined)?.value).toBe('rack-a')
 
-    await inputs[0]?.setValue('primary node, nvme pool')
-    await inputs[2]?.setValue('rack-a, gpu')
+    await inputs[1]?.setValue('primary node, nvme pool')
+    await inputs[3]?.setValue('rack-a, gpu')
 
     await wrapper.findAll('button').at(-1)?.trigger('click')
     await flushPromises()
@@ -65,6 +66,42 @@ describe('MemberDialog', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('Member node-1 updated.')
     expect(wrapper.emitted('saved')).toEqual([['node-1']])
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([false])
+  })
+
+  it('renames a member before saving metadata', async () => {
+    vi.mocked(api.renameClusterMember).mockResolvedValue(undefined)
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const inputs = wrapper.findAll('input')
+    await inputs[0]?.setValue('node-renamed')
+    await inputs[1]?.setValue('primary node')
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.renameClusterMember).toHaveBeenCalledWith('c1', 'node-1', 'node-renamed')
+    expect(api.updateMember).toHaveBeenCalledWith('c1', 'node-renamed', {
+      description: 'primary node',
+      failure_domain: 'rack-a',
+      groups: ['rack-a'],
+    })
+    expect(ElMessage.success).toHaveBeenCalledWith('Node renamed to node-renamed.')
+    expect(wrapper.emitted('saved')).toEqual([['node-renamed']])
+  })
+
+  it('blocks invalid member names', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const inputs = wrapper.findAll('input')
+    await inputs[0]?.setValue('bad name')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Enter a node name between 1 and 63 characters.')
+    expect(wrapper.findAll('button').at(-1)?.attributes('disabled')).toBeDefined()
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+    expect(api.updateMember).not.toHaveBeenCalled()
   })
 
   it('omits empty optional fields', async () => {

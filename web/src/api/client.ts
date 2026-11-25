@@ -213,6 +213,13 @@ export class ApiClient {
     )
   }
 
+  /** Changes the operator-facing cluster name; the Incus identifier is stable. */
+  async renameCluster(name: string, displayName: string): Promise<ClusterSummary> {
+    return this.request<ClusterSummary>('PATCH', `/api/v1/clusters/${encodeURIComponent(name)}`, {
+      display_name: displayName,
+    })
+  }
+
   async listClusterInstances(
     cluster: string,
     type: InstanceType = 'any',
@@ -874,6 +881,15 @@ export class ApiClient {
       'PATCH',
       `/api/v1/clusters/${encodeURIComponent(cluster)}/members/${encodeURIComponent(name)}`,
       request,
+    )
+  }
+
+  /** Renames an Incus cluster member. Instance locations follow the new name. */
+  async renameClusterMember(cluster: string, name: string, newName: string): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/members/${encodeURIComponent(name)}/rename`,
+      { name: newName },
     )
   }
 

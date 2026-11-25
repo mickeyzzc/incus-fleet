@@ -1027,6 +1027,21 @@ export const useInstancesStore = defineStore('instances', () => {
     }
   }
 
+  /** Renames one Incus cluster member and clears cached node detail. */
+  async function renameMember(cluster: string, name: string, newName: string): Promise<void> {
+    saving.value = true
+    error.value = ''
+
+    try {
+      await api.renameClusterMember(cluster, name, newName)
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      saving.value = false
+    }
+  }
+
   function detail(cluster: string, name: string): InstanceDetail | undefined {
     return details.value[detailKey(cluster, name)]
   }
@@ -1107,6 +1122,7 @@ export const useInstancesStore = defineStore('instances', () => {
     updateProfile,
     deleteProfile,
     updateMember,
+    renameMember,
     deleteImage,
     importImage,
     copyImage,

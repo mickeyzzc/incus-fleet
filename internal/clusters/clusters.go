@@ -98,6 +98,7 @@ type InstanceServer interface {
 	GetClusterMember(name string) (*api.ClusterMember, string, error)
 	CreateClusterMember(member api.ClusterMembersPost) (incus.Operation, error)
 	UpdateClusterMember(name string, member api.ClusterMemberPut, etag string) error
+	RenameClusterMember(name string, member api.ClusterMemberPost) error
 	DeleteClusterMember(name string, force bool) error
 	IsClustered() bool
 }
@@ -115,6 +116,7 @@ type Connection struct {
 	err           error
 	endpoints     []string
 	endpointIndex int
+	displayName   string
 
 	mu sync.RWMutex
 }
@@ -122,8 +124,26 @@ type Connection struct {
 // Name returns the configured short name.
 func (c *Connection) Name() string { return c.cfg.Name }
 
-// DisplayName returns the human-facing name.
-func (c *Connection) DisplayName() string { return c.cfg.DisplayName }
+// DisplayName returns the human-facing name. The operator override wins over
+// the configured display name and can change without reconnecting.
+func (c *Connection) DisplayName() string {
+	c.mu.RLock()
+	override := c.displayName
+	c.mu.RUnlock()
+	if override != "" {
+		return override
+	}
+
+	return c.cfg.DisplayName
+}
+
+// SetDisplayName updates the operator-facing name without touching the Incus
+// identifier or connection.
+func (c *Connection) SetDisplayName(name string) {
+	c.mu.Lock()
+	c.displayName = strings.TrimSpace(name)
+	c.mu.Unlock()
+}
 
 // Endpoint returns the configured primary API endpoint.
 func (c *Connection) Endpoint() string { return c.cfg.Endpoint }
@@ -509,6 +529,24 @@ func (m *Manager) Get(name string) (Summary, error) {
 	return conn.Summary(), nil
 }
 
+// SetDisplayName changes the human-facing name of one cluster. The Incus
+// identifier in routes and API calls is unchanged.
+func (m *Manager) SetDisplayName(name, displayName string) error {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return fmt.Errorf("clusters: display name is required")
+	}
+
+	conn, err := m.Connection(name)
+	if err != nil {
+		return err
+	}
+
+	conn.SetDisplayName(displayName)
+
+	return nil
+}
+
 // Names returns configured cluster names in config order.
 func (m *Manager) Names() []string {
 	m.mu.RLock()
@@ -676,7 +714,7 @@ type StorageUsage struct {
 func (c *Connection) Summary() Summary {
 	summary := Summary{
 		Name:        c.cfg.Name,
-		DisplayName: c.cfg.DisplayName,
+		DisplayName: c.DisplayName(),
 		Endpoint:    c.cfg.Endpoint,
 		Members:     []Member{},
 		Networks:    []string{},

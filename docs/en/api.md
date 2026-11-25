@@ -108,6 +108,7 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | GET | `/auth/session` | yes | Report whether the request is authenticated |
 | GET | `/clusters` | yes | All configured clusters with health summaries |
 | GET | `/clusters/{cluster}` | yes | One cluster summary |
+| PATCH | `/clusters/{cluster}` | yes | Change the operator-facing cluster display name; the Incus identifier stays stable |
 | POST | `/clusters/{cluster}/reconnect` | yes | Re-dial a cluster and return its summary |
 | GET | `/clusters/{cluster}/instances?type=` | yes | Instances on one cluster |
 | POST | `/clusters/{cluster}/instances` | yes | Create an instance from a local image |
@@ -152,6 +153,7 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | PATCH | `/clusters/{cluster}/profiles/{profile}` | yes | Update a profile |
 | DELETE | `/clusters/{cluster}/profiles/{profile}` | yes | Delete a profile |
 | PATCH | `/clusters/{cluster}/members/{member}` | yes | Update member description, failure domain, groups |
+| POST | `/clusters/{cluster}/members/{member}/rename` | yes | Rename an Incus cluster member; instance locations follow the new name |
 | GET | `/instances?type=` | yes | Instances across all clusters |
 | GET | `/migrations?limit=` | yes | Recent migration tasks (default 50) |
 | POST | `/migrations` | yes | Submit a migration (`202 Accepted`) |
@@ -831,7 +833,10 @@ follow the same merge rules; only managed networks can be updated or deleted.
 Profiles support full CRUD; updates replace the device map wholesale when `devices` is provided.
 
 `PATCH .../members/{member}` accepts `description`, `failure_domain`, and `groups` (nil keeps the
-current groups).
+current groups). `POST .../members/{member}/rename` takes `{"name": "new-node"}` and renames the
+Incus cluster member, updating every instance location. `PATCH /clusters/{cluster}` takes
+`{"display_name": "..."}` and only changes the Fleet label; routes and the Incus identifier stay
+stable, and the override is persisted for config-file and registered clusters.
 
 ### Volumes and images
 

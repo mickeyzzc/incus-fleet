@@ -320,6 +320,29 @@ func TestConnectionAccessors(t *testing.T) {
 	}
 }
 
+func TestSetDisplayNameOverridesConfiguredName(t *testing.T) {
+	srv := &incusfake.Server{}
+	m, err := NewWithDialer(context.Background(), []config.Cluster{testConfig("c1")}, fakeDialer(map[string]InstanceServer{"c1": srv}, nil), testLogger())
+	if err != nil {
+		t.Fatalf("NewWithDialer() error = %v", err)
+	}
+	t.Cleanup(m.Close)
+
+	if err := m.SetDisplayName("c1", "  Production  "); err != nil {
+		t.Fatalf("SetDisplayName() error = %v", err)
+	}
+	summary := m.List()[0]
+	if summary.DisplayName != "Production" || summary.Name != "c1" {
+		t.Fatalf("summary names = %q / %q", summary.DisplayName, summary.Name)
+	}
+	if err := m.SetDisplayName("missing", "x"); !errors.Is(err, ErrUnknownCluster) {
+		t.Fatalf("SetDisplayName() unknown error = %v", err)
+	}
+	if err := m.SetDisplayName("c1", "  "); err == nil {
+		t.Fatal("SetDisplayName() accepted an empty name")
+	}
+}
+
 func TestNewWithDefaultDialerRecordsErrors(t *testing.T) {
 	cfg := testConfig("c1")
 	cfg.TLSCert = "/missing/client.crt"
