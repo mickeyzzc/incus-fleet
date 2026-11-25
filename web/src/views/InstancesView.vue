@@ -56,6 +56,7 @@ const pageSize = ref(20)
 const detailOpen = ref(false)
 const detailCluster = ref('')
 const detailName = ref('')
+const detailTab = ref<'overview' | 'devices'>('overview')
 const migrateOpen = ref(false)
 const migrateInstance = ref<InstanceSummary | null>(null)
 const renameOpen = ref(false)
@@ -226,6 +227,14 @@ watch(
 function openDetail(instance: InstanceSummary): void {
   detailCluster.value = instance.cluster
   detailName.value = instance.name
+  detailTab.value = 'overview'
+  detailOpen.value = true
+}
+
+function openDevices(instance: InstanceSummary): void {
+  detailCluster.value = instance.cluster
+  detailName.value = instance.name
+  detailTab.value = 'devices'
   detailOpen.value = true
 }
 
@@ -432,6 +441,7 @@ async function onSaved(): Promise<void> {
                 @migrate="openMigrate(row)"
                 @clone="openClone(row)"
                 @delete="confirmDelete(row)"
+                @devices="openDevices(row)"
               />
             </div>
           </article>
@@ -453,7 +463,7 @@ async function onSaved(): Promise<void> {
                 {{ row.name }}
               </el-button>
               <span class="name-meta">
-                <span class="mini-label">{{ row.location || t('common.none') }}</span>
+                <span v-if="row.location" class="mini-label">{{ row.location }}</span>
                 <el-tag v-if="row.live_migratable" size="small" type="success" effect="plain">
                   {{ t('common.live') }}
                 </el-tag>
@@ -495,6 +505,7 @@ async function onSaved(): Promise<void> {
                 @migrate="openMigrate(row)"
                 @clone="openClone(row)"
                 @delete="confirmDelete(row)"
+                @devices="openDevices(row)"
               />
             </template>
           </el-table-column>
@@ -518,6 +529,7 @@ async function onSaved(): Promise<void> {
       v-model="detailOpen"
       :cluster="detailCluster"
       :name="detailName"
+      :initial-tab="detailTab"
       @edit="openEditDetail"
       @rename="openRename"
       @migrate="openMigrate"

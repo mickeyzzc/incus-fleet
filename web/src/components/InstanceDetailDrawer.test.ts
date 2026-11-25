@@ -28,6 +28,19 @@ describe('InstanceDetailDrawer', () => {
     expect(wrapper.text()).toContain('Storage pool')
   })
 
+  it('opens directly on the requested devices tab', async () => {
+    vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
+    const wrapper = mount(InstanceDetailDrawer, {
+      props: { modelValue: true, cluster: 'c1', name: 'web', initialTab: 'devices' },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'ElTabs' }).props('modelValue')).toBe('devices')
+    expect(wrapper.text()).toContain('Add disk')
+    expect(wrapper.text()).toContain('Add network card')
+  })
+
   it('lists snapshots in the snapshots tab', async () => {
     vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())
     vi.mocked(api.listSnapshots).mockResolvedValue([instanceSnapshot()])

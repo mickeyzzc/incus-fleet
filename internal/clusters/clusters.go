@@ -795,7 +795,54 @@ func (c *Connection) Summary() Summary {
 
 	// Cluster figures are sums over every member, not just the endpoint this
 	// request happened to hit. Each member also keeps its own copy for the node
-	// detail page.
+	// detail page. Member probes run concurrently so a large cluster does not
+	// serialize one round trip per node.
+	type memberSnapshot struct {
+		cpu      ResourcesCPU
+		memory   ResourceMem
+		storage  StorageUsage
+		hasCPU   bool
+		hasStore bool
+	}
+	snapshots := make([]memberSnapshot, len(summary.Members))
+	var probes sync.WaitGroup
+	for i := range summary.Members {
+		name := summary.Members[i].Name
+		probes.Add(1)
+		go func(index int, memberName string) {
+			defer probes.Done()
+
+			var target memberResourceServer = client
+			if memberName != "" {
+				target = client.UseTarget(memberName)
+			}
+
+			if resources, err := target.GetServerResources(); err == nil {
+				snapshots[index].cpu = ResourcesCPU{
+					Total:        resources.CPU.Total,
+					Architecture: resources.CPU.Architecture,
+				}
+				snapshots[index].memory = ResourceMem{
+					Used:  resources.Memory.Used,
+					Total: resources.Memory.Total,
+				}
+				snapshots[index].hasCPU = true
+			}
+
+			if pool != "" && !sharedStorage {
+				if resources, err := target.GetStoragePoolResources(pool); err == nil {
+					snapshots[index].storage = StorageUsage{
+						Pool:  pool,
+						Used:  resources.Space.Used,
+						Total: resources.Space.Total,
+					}
+					snapshots[index].hasStore = true
+				}
+			}
+		}(i, name)
+	}
+	probes.Wait()
+
 	var (
 		cpuTotal       uint64
 		memoryUsed     uint64
@@ -806,42 +853,25 @@ func (c *Connection) Summary() Summary {
 		architecture   string
 		resourceCount  int
 	)
-	for i := range summary.Members {
+	for i := range snapshots {
+		snapshot := snapshots[i]
 		member := &summary.Members[i]
-		var target memberResourceServer = client
-		if member.Name != "" {
-			target = client.UseTarget(member.Name)
-		}
-
-		if resources, err := target.GetServerResources(); err == nil {
-			member.CPU = ResourcesCPU{
-				Total:        resources.CPU.Total,
-				Architecture: resources.CPU.Architecture,
-			}
-			member.Memory = ResourceMem{
-				Used:  resources.Memory.Used,
-				Total: resources.Memory.Total,
-			}
-			cpuTotal += resources.CPU.Total
-			memoryUsed += resources.Memory.Used
-			memoryTotal += resources.Memory.Total
+		if snapshot.hasCPU {
+			member.CPU = snapshot.cpu
+			member.Memory = snapshot.memory
+			cpuTotal += snapshot.cpu.Total
+			memoryUsed += snapshot.memory.Used
+			memoryTotal += snapshot.memory.Total
 			if architecture == "" {
-				architecture = resources.CPU.Architecture
+				architecture = snapshot.cpu.Architecture
 			}
 			resourceCount++
 		}
-
-		if pool != "" && !sharedStorage {
-			if resources, err := target.GetStoragePoolResources(pool); err == nil {
-				member.Storage = StorageUsage{
-					Pool:  pool,
-					Used:  resources.Space.Used,
-					Total: resources.Space.Total,
-				}
-				storageUsed += resources.Space.Used
-				storageTotal += resources.Space.Total
-				storageSamples++
-			}
+		if snapshot.hasStore {
+			member.Storage = snapshot.storage
+			storageUsed += snapshot.storage.Used
+			storageTotal += snapshot.storage.Total
+			storageSamples++
 		}
 	}
 

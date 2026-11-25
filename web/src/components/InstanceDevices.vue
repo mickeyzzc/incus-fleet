@@ -24,6 +24,7 @@ const instances = useInstancesStore()
 const { t } = useI18n()
 
 const attachOpen = ref(false)
+const attachType = ref<'disk' | 'nic' | 'proxy'>('disk')
 const form = reactive({
   name: '',
   type: 'disk' as 'disk' | 'nic' | 'proxy',
@@ -134,8 +135,8 @@ watch(attachOpen, (open) => {
     return
   }
 
-  form.name = 'data0'
-  form.type = 'disk'
+  form.name = attachType.value === 'nic' ? 'eth1' : 'data0'
+  form.type = attachType.value
   form.pool = pools.value[0]?.name ?? ''
   form.source = ''
   form.path = ''
@@ -157,7 +158,8 @@ function deviceLabel(type: string): string {
         : type
 }
 
-async function openAttach(): Promise<void> {
+async function openAttach(type: 'disk' | 'nic' | 'proxy' = 'disk'): Promise<void> {
+  attachType.value = type
   await instances.fetchResources(props.cluster)
   attachOpen.value = true
 }
@@ -316,10 +318,19 @@ async function detach(name: string): Promise<void> {
 
 <template>
   <div class="device-panel">
-    <div class="table-toolbar" style="margin-bottom: 12px">
-      <el-button :icon="Plus" type="primary" size="small" @click="openAttach">
-        {{ t('devices.attach') }}
-      </el-button>
+    <div class="device-toolbar">
+      <div>
+        <el-button :icon="Plus" type="primary" size="small" @click="openAttach('disk')">
+          {{ t('devices.addDisk') }}
+        </el-button>
+        <el-button :icon="Plus" size="small" @click="openAttach('nic')">
+          {{ t('devices.addNIC') }}
+        </el-button>
+        <el-button size="small" text @click="openAttach('proxy')">
+          {{ t('devices.addProxy') }}
+        </el-button>
+      </div>
+      <p class="field-hint">{{ t('devices.addHint') }}</p>
     </div>
 
     <el-table :data="rows" size="small" stripe>
@@ -333,17 +344,17 @@ async function detach(name: string): Promise<void> {
           </div>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.name')" min-width="110">
+      <el-table-column :label="t('common.name')" min-width="90">
         <template #default="{ row }">
           <strong>{{ row.name }}</strong>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.type')" width="90">
+      <el-table-column :label="t('common.type')" width="70">
         <template #default="{ row }">
           <el-tag size="small" effect="plain">{{ deviceLabel(row.device.type) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="t('admin.config')" min-width="220">
+      <el-table-column :label="t('admin.config')" min-width="160">
         <template #default="{ row }">
           <CopyableText
             class="device-config"
@@ -352,7 +363,7 @@ async function detach(name: string): Promise<void> {
           />
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.actions')" width="130" fixed="right">
+      <el-table-column :label="t('common.actions')" width="110">
         <template #default="{ row }">
           <el-button link type="primary" @click="openEdit(row)">
             {{ t('common.edit') }}
@@ -546,6 +557,20 @@ async function detach(name: string): Promise<void> {
 </template>
 
 <style scoped>
+.device-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.device-toolbar .field-hint {
+  margin: 0;
+  max-width: 34ch;
+}
+
 .device-panel {
   display: flex;
   flex-direction: column;

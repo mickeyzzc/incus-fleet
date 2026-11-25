@@ -48,7 +48,7 @@ describe('InstanceDevices', () => {
   it('attaches a disk device backed by an existing volume without a size', async () => {
     const wrapper = mountPanel()
 
-    await wrapper.findAll('button').find((b) => b.text().includes('Attach device'))?.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('Add disk'))?.trigger('click')
     await flushPromises()
 
     const dialog = wrapper.findComponent({ name: 'ElDialog' })
@@ -77,7 +77,7 @@ describe('InstanceDevices', () => {
   it('disables the size field while a source volume is set', async () => {
     const wrapper = mountPanel()
 
-    await wrapper.findAll('button').find((b) => b.text().includes('Attach device'))?.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('Add disk'))?.trigger('click')
     await flushPromises()
 
     const dialog = wrapper.findComponent({ name: 'ElDialog' })
@@ -97,7 +97,7 @@ describe('InstanceDevices', () => {
   it('attaches a fresh disk with a size quota', async () => {
     const wrapper = mountPanel()
 
-    await wrapper.findAll('button').find((b) => b.text().includes('Attach device'))?.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('Add disk'))?.trigger('click')
     await flushPromises()
 
     const dialog = wrapper.findComponent({ name: 'ElDialog' })
@@ -121,13 +121,12 @@ describe('InstanceDevices', () => {
   it('attaches a NIC device through the nic branch', async () => {
     const wrapper = mountPanel()
 
-    await wrapper.findAll('button').find((b) => b.text().includes('Attach device'))?.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('Add network card'))?.trigger('click')
     await flushPromises()
 
     const dialog = wrapper.findComponent({ name: 'ElDialog' })
     const group = dialog.findComponent({ name: 'ElRadioGroup' })
-    group.vm.$emit('update:modelValue', 'nic')
-    await flushPromises()
+    expect(group.props('modelValue')).toBe('nic')
 
     const inputs = dialog.findAll('input[type="text"]')
     await inputs[0]?.setValue('eth1')
@@ -151,13 +150,12 @@ describe('InstanceDevices', () => {
   it('attaches a proxy port forward', async () => {
     const wrapper = mountPanel()
 
-    await wrapper.findAll('button').find((b) => b.text().includes('Attach device'))?.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('Port forward'))?.trigger('click')
     await flushPromises()
 
     const dialog = wrapper.findComponent({ name: 'ElDialog' })
     const group = dialog.findComponent({ name: 'ElRadioGroup' })
-    group.vm.$emit('update:modelValue', 'proxy')
-    await flushPromises()
+    expect(group.props('modelValue')).toBe('proxy')
 
     const inputs = dialog.findAll('input[type="text"]')
     await inputs[0]?.setValue('web80')
@@ -193,7 +191,7 @@ describe('InstanceDevices', () => {
   it('rejects an empty device name', async () => {
     const wrapper = mountPanel()
 
-    await wrapper.findAll('button').find((b) => b.text().includes('Attach device'))?.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('Add disk'))?.trigger('click')
     await flushPromises()
 
     const dialog = wrapper.findComponent({ name: 'ElDialog' })

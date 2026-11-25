@@ -286,7 +286,7 @@ describe('AssetsView fleet-wide images and ISOs', () => {
     window.history.replaceState(null, '', '/assets?tab=answers')
     const wrapper = await mountView()
 
-    expect(wrapper.find('.el-tabs__item.is-active').text()).toBe('Answer profiles')
+    expect(wrapper.find('.el-tabs__item.is-active').text()).toBe('Unattended install')
 
     await wrapper.findAll('.el-tabs__item').find((tab) => tab.text() === 'Scripts')!.trigger('click')
     await flushPromises()

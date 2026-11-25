@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/api'
 import type { FleetVolume } from '@/api/types'
 import FleetVolumesView from './FleetVolumesView.vue'
+import { fleetVolumeCache } from './fleetVolumeCache'
 
 const volumeA: FleetVolume = {
   name: 'data-a',
@@ -46,6 +47,7 @@ async function mountView() {
 describe('FleetVolumesView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    fleetVolumeCache.current = null
     mockFleet()
   })
 
@@ -75,6 +77,16 @@ describe('FleetVolumesView', () => {
     // 10 GiB volume plus one with no size configured.
     expect(wrapper.text()).toContain('2 volumes')
     expect(wrapper.text()).toMatch(/10\.0 GiB/)
+  })
+
+  it('reuses the recent inventory when the page is reopened', async () => {
+    const first = await mountView()
+    const calls = vi.mocked(api.listAllVolumesWithErrors).mock.calls.length
+    first.unmount()
+
+    const second = await mountView()
+    expect(api.listAllVolumesWithErrors).toHaveBeenCalledTimes(calls)
+    expect(second.text()).toContain('data-a')
   })
 
   it('filters by search text', async () => {
@@ -148,6 +160,7 @@ describe('FleetVolumesView', () => {
 describe('FleetVolumesView filters and fallbacks', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    fleetVolumeCache.current = null
     mockFleet()
   })
 

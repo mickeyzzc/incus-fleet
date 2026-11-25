@@ -30,9 +30,11 @@ export const useMigrationsStore = defineStore('migrations', () => {
   )
   const hasActive = computed(() => active.value.length > 0)
 
-  /** Fetches recent migrations. */
-  async function fetchAll(limit = 50): Promise<void> {
-    loading.value = true
+  /** Fetches recent migrations. Polling stays silent after the first load. */
+  async function fetchAll(limit = 50, silent = items.value.length > 0): Promise<void> {
+    if (!silent) {
+      loading.value = true
+    }
     error.value = ''
 
     try {
@@ -41,7 +43,9 @@ export const useMigrationsStore = defineStore('migrations', () => {
     } catch (err) {
       error.value = errorMessage(err)
     } finally {
-      loading.value = false
+      if (!silent) {
+        loading.value = false
+      }
     }
   }
 

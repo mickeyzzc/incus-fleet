@@ -106,6 +106,25 @@ describe('InstancesView', () => {
     expect(dialog.props('instance')).toMatchObject({ name: 'web', cluster: 'c1' })
   })
 
+  it('opens the disk and NIC manager from the row action menu', async () => {
+    const wrapper = mountInstances()
+    await flushPromises()
+
+    const row = wrapper.find('.el-table__row')
+    await row.findAll('button').find((button) => button.text().includes('操作'))?.trigger('click')
+    await flushPromises()
+    const devices = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('磁盘与网卡') || button.text().includes('Disks & NICs'))
+    await devices?.trigger('click')
+    await flushPromises()
+
+    const drawer = wrapper.findComponent(InstanceDetailDrawer)
+    expect(drawer.props('modelValue')).toBe(true)
+    expect(drawer.props('initialTab')).toBe('devices')
+    expect(api.getInstance).toHaveBeenCalledWith('c1', 'web')
+  })
+
   it('opens the create dialog and lifecycle actions', async () => {
     const wrapper = mountInstances()
     await flushPromises()
