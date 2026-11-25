@@ -506,6 +506,20 @@ describe('instances store', () => {
     expect(store.saving).toBe(false)
   })
 
+  it('renames cluster members and records errors', async () => {
+    vi.mocked(api.renameClusterMember).mockResolvedValue(undefined)
+    const store = useInstancesStore()
+
+    await store.renameMember('c1', 'node-1', 'node-2')
+    expect(api.renameClusterMember).toHaveBeenCalledWith('c1', 'node-1', 'node-2')
+    expect(store.saving).toBe(false)
+
+    vi.mocked(api.renameClusterMember).mockRejectedValue(new Error('rename failed'))
+    await expect(store.renameMember('c1', 'node-1', 'node-2')).rejects.toThrow('rename failed')
+    expect(store.error).toBe('rename failed')
+    expect(store.saving).toBe(false)
+  })
+
   it('fetches, creates, restores, and deletes snapshots', async () => {
     vi.mocked(api.listSnapshots).mockResolvedValue([instanceSnapshot()])
     vi.mocked(api.getInstance).mockResolvedValue(instanceDetail())

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Plus, Refresh } from '@element-plus/icons-vue'
+import { ArrowLeft, EditPen, Plus, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 import InstanceActions from '@/components/InstanceActions.vue'
@@ -17,6 +17,7 @@ import IsoImportDialog from '@/components/IsoImportDialog.vue'
 import IsoLaunchDialog from '@/components/IsoLaunchDialog.vue'
 import MemberDialog from '@/components/MemberDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
+import RenameClusterDialog from '@/components/RenameClusterDialog.vue'
 import RenameInstanceDialog from '@/components/RenameInstanceDialog.vue'
 import NetworkDialog from '@/components/NetworkDialog.vue'
 import OverlayDialog from '@/components/OverlayDialog.vue'
@@ -75,6 +76,7 @@ const profileDialogOpen = ref(false)
 const profileEditing = ref<Profile | null>(null)
 const memberDialogOpen = ref(false)
 const memberEditing = ref<ClusterMember | null>(null)
+const renameClusterOpen = ref(false)
 const addMemberOpen = ref(false)
 const volumesDialogOpen = ref(false)
 const volumesPool = ref<StoragePoolResource | null>(null)
@@ -410,6 +412,10 @@ async function memberAdded(): Promise<void> {
   await clusters.fetchAll()
 }
 
+async function clusterRenamed(): Promise<void> {
+  await clusters.fetchAll()
+}
+
 function openVolumesDialog(pool: StoragePoolResource): void {
   volumesPool.value = pool
   volumesDialogOpen.value = true
@@ -533,7 +539,19 @@ function openNodeUpgrade(member: ClusterMember): void {
       <div class="title-with-back">
         <el-button :icon="ArrowLeft" circle plain @click="router.push({ name: 'dashboard' })" />
         <div>
-          <h2>{{ summary?.display_name || cluster }}</h2>
+          <div class="cluster-title-row">
+            <h2>{{ summary?.display_name || cluster }}</h2>
+            <el-button
+              class="title-edit"
+              text
+              circle
+              size="small"
+              :icon="EditPen"
+              :title="t('dashboard.renameCluster')"
+              :aria-label="t('dashboard.renameCluster')"
+              @click="renameClusterOpen = true"
+            />
+          </div>
           <p class="subtitle">
             {{ summary?.endpoint || t('cluster.endpointUnavailable') }} ·
             {{ t('cluster.refreshed', { time: formatDateTime(instances.lastUpdated?.toISOString()) }) }}
@@ -1255,6 +1273,12 @@ function openNodeUpgrade(member: ClusterMember): void {
     />
     <AddClusterMemberDialog v-model="addMemberOpen" :cluster="cluster" @added="memberAdded" />
     <MemberDialog v-model="memberDialogOpen" :cluster="cluster" :member="memberEditing" />
+    <RenameClusterDialog
+      v-model="renameClusterOpen"
+      :cluster="cluster"
+      :current-name="summary?.display_name || cluster"
+      @renamed="clusterRenamed"
+    />
     <NodeUpgradeDialog
       v-model="nodeUpgradeDialogOpen"
       :member-name="nodeUpgradeMember.name"
@@ -1307,10 +1331,32 @@ function openNodeUpgrade(member: ClusterMember): void {
   gap: 14px;
 }
 
+.cluster-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.title-edit {
+  color: var(--fleet-ink-soft);
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.title-edit:hover {
+  opacity: 1;
+}
+
 .cluster-detail {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.cluster-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .mem-bar {

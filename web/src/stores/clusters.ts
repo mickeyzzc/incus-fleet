@@ -12,6 +12,7 @@ export const useClustersStore = defineStore('clusters', () => {
   const error = ref('')
   const lastUpdated = ref<Date | null>(null)
   const reconnecting = ref('')
+  const renaming = ref('')
 
   const onlineCount = computed(() => items.value.filter((cluster) => cluster.online).length)
 
@@ -63,15 +64,35 @@ export const useClustersStore = defineStore('clusters', () => {
     }
   }
 
+  /** Renames the operator-facing cluster label and updates the cache. */
+  async function rename(name: string, displayName: string): Promise<ClusterSummary> {
+    renaming.value = name
+    error.value = ''
+
+    try {
+      const summary = await api.renameCluster(name, displayName)
+      replace(summary)
+      lastUpdated.value = new Date()
+      return summary
+    } catch (err) {
+      error.value = errorMessage(err)
+      throw err
+    } finally {
+      renaming.value = ''
+    }
+  }
+
   return {
     items,
     loading,
     error,
     lastUpdated,
     reconnecting,
+    renaming,
     onlineCount,
     fetchAll,
     byName,
     reconnect,
+    rename,
   }
 })

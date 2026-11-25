@@ -381,6 +381,39 @@ func TestDeleteProfile(t *testing.T) {
 	}
 }
 
+func TestRenameMember(t *testing.T) {
+	srv := &incusfake.Server{}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if err := svc.RenameMember("c1", " node-a ", " node-b "); err != nil {
+		t.Fatalf("RenameMember() error = %v", err)
+	}
+	args := srv.RenameMemberArgs()
+	if len(args) != 1 || args[0].Name != "node-a" || args[0].Post.ServerName != "node-b" {
+		t.Fatalf("RenameMemberArgs() = %#v", args)
+	}
+
+	// Reusing the same name is a no-op and must not reach Incus.
+	if err := svc.RenameMember("c1", "node-a", "node-a"); err != nil {
+		t.Fatalf("RenameMember() no-op error = %v", err)
+	}
+	if len(srv.RenameMemberArgs()) != 1 {
+		t.Fatalf("no-op rename reached Incus")
+	}
+
+	if err := svc.RenameMember("c1", "", "node-b"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("empty source error = %v", err)
+	}
+	if err := svc.RenameMember("c1", "node-a", " "); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("empty target error = %v", err)
+	}
+
+	srv.RenameMemberErr = errors.New("name exists")
+	if err := svc.RenameMember("c1", "node-a", "node-b"); err == nil {
+		t.Fatal("RenameMember() expected server error")
+	}
+}
+
 func TestUpdateMember(t *testing.T) {
 	srv := &incusfake.Server{Member: &api.ClusterMember{
 		ServerName:    "node-a",

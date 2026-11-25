@@ -388,6 +388,34 @@ func (s *Service) UpdateMember(clusterName, name string, req MemberUpdateRequest
 	return nil
 }
 
+// RenameMember changes the Incus cluster member name. The identifier is used by
+// instance locations and node access, so callers must refresh their summaries
+// afterwards.
+func (s *Service) RenameMember(clusterName, name, newName string) error {
+	name = strings.TrimSpace(name)
+	newName = strings.TrimSpace(newName)
+	if err := validateResourceName("cluster member", name); err != nil {
+		return err
+	}
+	if err := validateResourceName("cluster member", newName); err != nil {
+		return err
+	}
+	if name == newName {
+		return nil
+	}
+
+	client, err := s.client(clusterName)
+	if err != nil {
+		return err
+	}
+
+	if err := client.RenameClusterMember(name, api.ClusterMemberPost{ServerName: newName}); err != nil {
+		return fmt.Errorf("instances: rename cluster member %s:%s: %w", clusterName, name, err)
+	}
+
+	return nil
+}
+
 // RemoveMember removes one member from the cluster. Incus requires the member
 // to be evacuated or empty first; force only bypasses the health check.
 func (s *Service) RemoveMember(clusterName, name string, force bool) error {

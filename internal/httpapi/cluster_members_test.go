@@ -3,7 +3,9 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -166,6 +168,40 @@ func TestAddClusterMemberSuccess(t *testing.T) {
 	}
 	if !strings.Contains(commands, "query -X PUT") {
 		t.Fatalf("join command missing:\n%s", commands)
+	}
+}
+
+func TestRenameClusterMember(t *testing.T) {
+	source := &incusfake.Server{}
+	f := newAPIFixture(t, source, &incusfake.Server{})
+	cookie := f.login(t)
+
+	rec := f.request(t, "POST", "/api/v1/clusters/c1/members/test-node/rename",
+		map[string]string{"name": "renamed-node"}, cookie, "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("rename member status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	args := source.RenameMemberArgs()
+	if len(args) != 1 || args[0].Name != "test-node" || args[0].Post.ServerName != "renamed-node" {
+		t.Fatalf("rename args = %#v", args)
+	}
+
+	badJSON := f.request(t, "POST", "/api/v1/clusters/c1/members/test-node/rename", "{not json", cookie, "")
+	if badJSON.Code != http.StatusBadRequest {
+		t.Fatalf("bad JSON status = %d", badJSON.Code)
+	}
+
+	empty := f.request(t, "POST", "/api/v1/clusters/c1/members/test-node/rename",
+		map[string]string{"name": " "}, cookie, "")
+	if empty.Code != http.StatusBadRequest {
+		t.Fatalf("empty name status = %d body=%s", empty.Code, empty.Body.String())
+	}
+
+	source.RenameMemberErr = errors.New("name exists")
+	failed := f.request(t, "POST", "/api/v1/clusters/c1/members/test-node/rename",
+		map[string]string{"name": "renamed-node"}, cookie, "")
+	if failed.Code != http.StatusInternalServerError {
+		t.Fatalf("rename failure status = %d body=%s", failed.Code, failed.Body.String())
 	}
 }
 

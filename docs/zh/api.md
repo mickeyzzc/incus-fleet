@@ -103,6 +103,7 @@ POST /api/v1/auth/logout
 | GET | `/auth/session` | 是 | 报告当前请求是否已认证 |
 | GET | `/clusters` | 是 | 所有已配置集群及其健康摘要 |
 | GET | `/clusters/{cluster}` | 是 | 单个集群摘要 |
+| PATCH | `/clusters/{cluster}` | 是 | 修改 Fleet 中显示的集群名称；Incus 标识保持不变 |
 | POST | `/clusters/{cluster}/reconnect` | 是 | 重新连接集群并返回其摘要 |
 | GET | `/clusters/{cluster}/instances?type=` | 是 | 单个集群上的实例 |
 | POST | `/clusters/{cluster}/instances` | 是 | 从本地镜像创建实例 |
@@ -147,6 +148,7 @@ POST /api/v1/auth/logout
 | PATCH | `/clusters/{cluster}/profiles/{profile}` | 是 | 更新 Profile |
 | DELETE | `/clusters/{cluster}/profiles/{profile}` | 是 | 删除 Profile |
 | PATCH | `/clusters/{cluster}/members/{member}` | 是 | 更新成员描述、故障域、分组 |
+| POST | `/clusters/{cluster}/members/{member}/rename` | 是 | 重命名 Incus 集群成员；实例位置记录随新名称更新 |
 | GET | `/instances?type=` | 是 | 所有集群上的实例 |
 | GET | `/migrations?limit=` | 是 | 最近的迁移任务（默认 50） |
 | POST | `/migrations` | 是 | 提交迁移（`202 Accepted`） |

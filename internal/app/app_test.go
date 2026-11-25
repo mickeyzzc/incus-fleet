@@ -26,6 +26,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/agentgw"
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
+	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
 )
 
@@ -96,6 +97,39 @@ func TestNewStoreError(t *testing.T) {
 
 	if _, err := New(context.Background(), cfg, testLogger(), WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{}))); err == nil {
 		t.Fatal("New() expected store error")
+	}
+}
+
+func TestNewAppliesClusterDisplayNameOverrides(t *testing.T) {
+	ctx := context.Background()
+	cfg := testConfig(t)
+
+	st, err := store.Open(ctx, "sqlite", cfg.Database.DSN)
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	if err := st.SetClusterDisplayName(ctx, "c1", "Edge cluster"); err != nil {
+		t.Fatalf("SetClusterDisplayName() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("store.Close() error = %v", err)
+	}
+
+	application, err := New(ctx, cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+
+	summary, err := application.clusters.Get("c1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if summary.DisplayName != "Edge cluster" {
+		t.Fatalf("DisplayName = %q", summary.DisplayName)
 	}
 }
 

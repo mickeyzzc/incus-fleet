@@ -10,11 +10,13 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 )
 
-func (a *API) listClusters(w http.ResponseWriter, _ *http.Request) {
+func (a *API) listClusters(w http.ResponseWriter, r *http.Request) {
+	a.applyClusterDisplayNames(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{"clusters": a.clusters.List()})
 }
 
 func (a *API) getCluster(w http.ResponseWriter, r *http.Request) {
+	a.applyClusterDisplayNames(r.Context())
 	summary, err := a.clusters.Get(r.PathValue("cluster"))
 	if err != nil {
 		a.serviceError(w, r, err)
@@ -22,6 +24,23 @@ func (a *API) getCluster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, summary)
+}
+
+// applyClusterDisplayNames keeps every center in a shared deployment on the
+// same operator-facing labels. Renames are rare, so one small read per list or
+// detail request is cheaper than a cross-center watch.
+func (a *API) applyClusterDisplayNames(ctx context.Context) {
+	if a.store == nil {
+		return
+	}
+
+	overrides, err := a.store.ListClusterDisplayNames(ctx)
+	if err != nil {
+		return
+	}
+	for name, displayName := range overrides {
+		_ = a.clusters.SetDisplayName(name, displayName)
+	}
 }
 
 func (a *API) reconnectCluster(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +201,25 @@ func (a *API) updateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.instances.UpdateMember(r.PathValue("cluster"), r.PathValue("member"), req); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// renameClusterMember changes an Incus cluster member name. The Incus API
+// updates the member record and every instance location in one operation.
+func (a *API) renameClusterMember(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := a.instances.RenameMember(r.PathValue("cluster"), r.PathValue("member"), req.Name); err != nil {
 		a.serviceError(w, r, err)
 		return
 	}

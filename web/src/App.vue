@@ -251,29 +251,29 @@ async function logout(): Promise<void> {
         >
           <div v-if="!isCollapsed" class="nav-group-label">{{ t('nav.workbench') }}</div>
 
-          <el-menu-item index="/">
+          <el-menu-item index="/" :title="t('nav.dashboard')">
             <el-icon><Odometer /></el-icon>
             <span>{{ t('nav.dashboard') }}</span>
           </el-menu-item>
 
-          <el-menu-item index="/instances">
+          <el-menu-item index="/instances" :title="t('nav.instances')">
             <el-icon><Box /></el-icon>
             <span>{{ t('nav.instances') }}</span>
           </el-menu-item>
 
-          <el-menu-item index="/volumes">
+          <el-menu-item index="/volumes" :title="t('nav.fleetVolumes')">
             <el-icon><Coin /></el-icon>
             <span>{{ t('nav.fleetVolumes') }}</span>
           </el-menu-item>
 
           <div v-if="!isCollapsed" class="nav-group-label">{{ t('nav.resources') }}</div>
 
-          <el-menu-item index="/assets">
+          <el-menu-item index="/assets" :title="t('nav.assets')">
             <el-icon><Collection /></el-icon>
             <span>{{ t('nav.assets') }}</span>
           </el-menu-item>
 
-          <el-menu-item v-if="auth.canAdmin" index="/plugins">
+          <el-menu-item v-if="auth.canAdmin" index="/plugins" :title="t('nav.plugins')">
             <el-icon><Grid /></el-icon>
             <span>{{ t('nav.plugins') }}</span>
             <span v-if="!isCollapsed && plugins.count > 0" class="nav-count">{{ plugins.count }}</span>
@@ -285,21 +285,23 @@ async function logout(): Promise<void> {
             v-for="cluster in clusters.items"
             :key="cluster.name"
             :index="`/clusters/${cluster.name}/group`"
+            :title="cluster.display_name"
           >
             <template #title>
               <el-icon><Grid /></el-icon>
               <span class="health-dot" :class="{ online: cluster.online }" />
               <span>{{ cluster.display_name }}</span>
             </template>
-            <el-menu-item :index="`/clusters/${cluster.name}`">
+            <el-menu-item :index="`/clusters/${cluster.name}`" :title="t('cluster.overview')">
               {{ t('cluster.overview') }}
             </el-menu-item>
-            <el-sub-menu :index="`/clusters/${cluster.name}/members`">
+            <el-sub-menu :index="`/clusters/${cluster.name}/members`" :title="t('nav.nodes')">
               <template #title>{{ t('nav.nodes') }}</template>
               <el-menu-item
                 v-for="member in cluster.members ?? []"
                 :key="member.name"
                 :index="`/clusters/${cluster.name}/members/${member.name}`"
+                :title="member.name"
               >
                 <span class="health-dot" :class="{ online: member.status === 'Online' }" />
                 <span>{{ member.name }}</span>
@@ -313,7 +315,7 @@ async function logout(): Promise<void> {
 
           <template v-if="auth.canAdmin">
             <div class="nav-group-label">{{ t('nav.admin') }}</div>
-            <el-menu-item index="/users">
+            <el-menu-item index="/users" :title="t('nav.users')">
               <el-icon><UserFilled /></el-icon>
               <span>{{ t('nav.users') }}</span>
             </el-menu-item>

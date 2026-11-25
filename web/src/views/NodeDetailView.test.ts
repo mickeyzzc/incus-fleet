@@ -6,9 +6,11 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { defineComponent } from 'vue'
 
 import NodeDetailView from './NodeDetailView.vue'
+import MemberDialog from '@/components/MemberDialog.vue'
 import { api } from '@/api'
 import { setLocale } from '@/i18n'
 import { clusterSummary } from '@/test/fixtures'
+import { useAuthStore } from '@/stores/auth'
 import { useClustersStore } from '@/stores/clusters'
 
 const Blank = { template: '<div />' }
@@ -109,6 +111,29 @@ describe('NodeDetailView', () => {
 
     expect(router.currentRoute.value.name).toBe('cluster')
     expect(router.currentRoute.value.params.cluster).toBe('c1')
+  })
+
+  it('opens the member editor and follows a renamed node route', async () => {
+    const auth = useAuthStore()
+    auth.role = 'admin'
+    const clusters = useClustersStore()
+    await clusters.fetchAll()
+
+    const { wrapper, router } = await mountDetail()
+    const edit = wrapper.findAll('button').find((button) => button.text().includes('Edit node'))
+    expect(edit).toBeDefined()
+    await edit?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(MemberDialog)
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('member')).toMatchObject({ name: 'node-1' })
+
+    dialog.vm.$emit('saved', 'node-renamed')
+    await flushPromises()
+
+    expect(router.currentRoute.value.params.member).toBe('node-renamed')
+    expect(api.listClusters).toHaveBeenCalled()
   })
 
   it('refreshes the cluster inventory from the header', async () => {

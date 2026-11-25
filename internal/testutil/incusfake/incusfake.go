@@ -106,6 +106,7 @@ type Server struct {
 	JoinTokenMetadata map[string]any
 	UpdateMemberErr   error
 	DeleteMemberErr   error
+	RenameMemberErr   error
 	RenameInstanceErr error
 	PoolNames         []string
 	PoolNamesErr      error
@@ -141,6 +142,7 @@ type Server struct {
 	updateProfiles  []UpdateProfileArgs
 	deleteProfiles  []string
 	updateMembers   []UpdateMemberArgs
+	renameMembers   []RenameMemberArgs
 	createMembers   []api.ClusterMembersPost
 	deletedMembers  []DeleteMemberArgs
 	renameArgs      []RenameInstanceArgs
@@ -354,6 +356,12 @@ type UpdateMemberArgs struct {
 	ETag   string
 }
 
+// RenameMemberArgs records one RenameClusterMember call.
+type RenameMemberArgs struct {
+	Name string
+	Post api.ClusterMemberPost
+}
+
 // UpdateInstanceArgs records one UpdateInstance call.
 type UpdateInstanceArgs struct {
 	Name     string
@@ -528,6 +536,14 @@ func (s *Server) UpdateMemberArgs() []UpdateMemberArgs {
 	defer s.mu.Unlock()
 
 	return append([]UpdateMemberArgs(nil), s.updateMembers...)
+}
+
+// RenameMemberArgs returns the arguments recorded by RenameClusterMember.
+func (s *Server) RenameMemberArgs() []RenameMemberArgs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]RenameMemberArgs(nil), s.renameMembers...)
 }
 
 func (s *Server) record(call string) {
@@ -1522,6 +1538,16 @@ func (s *Server) UpdateClusterMember(name string, member api.ClusterMemberPut, e
 	s.mu.Unlock()
 
 	return s.UpdateMemberErr
+}
+
+// RenameClusterMember implements clusters.InstanceServer.
+func (s *Server) RenameClusterMember(name string, member api.ClusterMemberPost) error {
+	s.record("RenameClusterMember:" + name)
+	s.mu.Lock()
+	s.renameMembers = append(s.renameMembers, RenameMemberArgs{Name: name, Post: member})
+	s.mu.Unlock()
+
+	return s.RenameMemberErr
 }
 
 // DeleteClusterMember implements clusters.InstanceServer.

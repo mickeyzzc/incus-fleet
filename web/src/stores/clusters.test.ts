@@ -64,6 +64,34 @@ describe('clusters store', () => {
     expect(store.items.map((cluster) => cluster.name)).toEqual(['c2'])
   })
 
+  it('renames a cached cluster and records failures', async () => {
+    vi.mocked(api.listClusters).mockResolvedValue([clusterSummary()])
+    vi.mocked(api.renameCluster).mockResolvedValue(clusterSummary({ display_name: 'Edge' }))
+    const store = useClustersStore()
+    await store.fetchAll()
+
+    const summary = await store.rename('c1', 'Edge')
+
+    expect(api.renameCluster).toHaveBeenCalledWith('c1', 'Edge')
+    expect(summary.display_name).toBe('Edge')
+    expect(store.items[0]?.display_name).toBe('Edge')
+    expect(store.renaming).toBe('')
+
+    vi.mocked(api.renameCluster).mockRejectedValue(new Error('bad name'))
+    await expect(store.rename('c1', '')).rejects.toThrow('bad name')
+    expect(store.error).toBe('bad name')
+    expect(store.renaming).toBe('')
+  })
+
+  it('appends a renamed cluster that was not cached', async () => {
+    vi.mocked(api.renameCluster).mockResolvedValue(clusterSummary({ name: 'c2', display_name: 'New' }))
+    const store = useClustersStore()
+
+    await store.rename('c2', 'New')
+
+    expect(store.items.map((cluster) => cluster.name)).toEqual(['c2'])
+  })
+
   it('records reconnect failures and resets the in-flight marker', async () => {
     vi.mocked(api.reconnectCluster).mockRejectedValue(new Error('refused'))
     const store = useClustersStore()

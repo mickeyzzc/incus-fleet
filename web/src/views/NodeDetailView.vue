@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Back } from '@element-plus/icons-vue'
+import { Back, EditPen } from '@element-plus/icons-vue'
 
 import HostMetricsPanel from '@/components/HostMetricsPanel.vue'
+import MemberDialog from '@/components/MemberDialog.vue'
 import NodeNetworkPanel from '@/components/NodeNetworkPanel.vue'
 import type { ClusterMember } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
@@ -24,6 +25,7 @@ const summary = computed(() => clusters.byName(props.cluster))
 const memberInfo = computed<ClusterMember | undefined>(() =>
   summary.value?.members.find((item) => item.name === props.member),
 )
+const editOpen = ref(false)
 
 /** Renders a cluster member status enum value in the active language. */
 function memberStatusLabel(status: string): string {
@@ -38,6 +40,16 @@ function backToCluster(): void {
 function ensureCluster(): void {
   if (!clusters.byName(props.cluster)) {
     void clusters.fetchAll()
+  }
+}
+
+async function memberSaved(name: string): Promise<void> {
+  await clusters.fetchAll()
+  if (name !== props.member) {
+    await router.replace({
+      name: 'node-detail',
+      params: { cluster: props.cluster, member: name },
+    })
   }
 }
 
@@ -68,9 +80,14 @@ watch(() => props.cluster, ensureCluster)
         </p>
         <p class="node-hint">{{ t('nodeDetail.hint') }}</p>
       </div>
-      <el-button :loading="clusters.loading" @click="clusters.fetchAll()">
-        {{ t('common.refresh') }}
-      </el-button>
+      <div class="page-actions">
+        <el-button v-if="auth.canWrite" :icon="EditPen" :disabled="!memberInfo" @click="editOpen = true">
+          {{ t('admin.editMember') }}
+        </el-button>
+        <el-button :loading="clusters.loading" @click="clusters.fetchAll()">
+          {{ t('common.refresh') }}
+        </el-button>
+      </div>
     </header>
 
     <el-alert
@@ -125,6 +142,13 @@ watch(() => props.cluster, ensureCluster)
       <NodeNetworkPanel :cluster="cluster" :member="memberInfo.name" :can-write="auth.canWrite" />
     </template>
     <el-skeleton v-else-if="clusters.loading" :rows="6" animated />
+
+    <MemberDialog
+      v-model="editOpen"
+      :cluster="cluster"
+      :member="memberInfo ?? null"
+      @saved="memberSaved"
+    />
   </div>
 </template>
 

@@ -47,6 +47,7 @@ const label = computed(() =>
       :status="status"
       :show-text="false"
       :stroke-width="8"
+      :aria-label="`${label}: ${formatBytes(used)} / ${formatBytes(total)}`"
     />
   </div>
 </template>

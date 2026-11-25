@@ -75,6 +75,41 @@ func TestRegisteredClusterDuplicate(t *testing.T) {
 	}
 }
 
+func TestClusterDisplayNameOverrides(t *testing.T) {
+	ctx := context.Background()
+	s := openSQLite(t)
+
+	if err := s.SetClusterDisplayName(ctx, "c62", "Edge cluster"); err != nil {
+		t.Fatalf("SetClusterDisplayName() error = %v", err)
+	}
+	if err := s.SetClusterDisplayName(ctx, "c63", "Core cluster"); err != nil {
+		t.Fatalf("SetClusterDisplayName() second error = %v", err)
+	}
+	// Re-setting the same cluster updates instead of failing on the primary key.
+	if err := s.SetClusterDisplayName(ctx, "c62", "Edge renamed"); err != nil {
+		t.Fatalf("SetClusterDisplayName() update error = %v", err)
+	}
+
+	names, err := s.ListClusterDisplayNames(ctx)
+	if err != nil {
+		t.Fatalf("ListClusterDisplayNames() error = %v", err)
+	}
+	if names["c62"] != "Edge renamed" || names["c63"] != "Core cluster" {
+		t.Fatalf("display names = %#v", names)
+	}
+
+	if err := s.DeleteClusterDisplayName(ctx, "c62"); err != nil {
+		t.Fatalf("DeleteClusterDisplayName() error = %v", err)
+	}
+	names, err = s.ListClusterDisplayNames(ctx)
+	if err != nil {
+		t.Fatalf("ListClusterDisplayNames() after delete error = %v", err)
+	}
+	if _, ok := names["c62"]; ok {
+		t.Fatalf("display names after delete = %#v", names)
+	}
+}
+
 func TestRegisteredClusterClosedStore(t *testing.T) {
 	ctx := context.Background()
 	s := openSQLite(t)
@@ -93,5 +128,14 @@ func TestRegisteredClusterClosedStore(t *testing.T) {
 	}
 	if err := s.DeleteCluster(ctx, "x"); err == nil {
 		t.Fatalf("DeleteCluster() on closed store error = nil")
+	}
+	if err := s.SetClusterDisplayName(ctx, "x", "X"); err == nil {
+		t.Fatalf("SetClusterDisplayName() on closed store error = nil")
+	}
+	if _, err := s.ListClusterDisplayNames(ctx); err == nil {
+		t.Fatalf("ListClusterDisplayNames() on closed store error = nil")
+	}
+	if err := s.DeleteClusterDisplayName(ctx, "x"); err == nil {
+		t.Fatalf("DeleteClusterDisplayName() on closed store error = nil")
 	}
 }

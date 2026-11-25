@@ -94,6 +94,53 @@ func (a *API) registerCluster(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, summary)
 }
 
+// renameCluster changes the operator-facing display name of any cluster while
+// keeping the Incus identifier used by routes and API calls stable.
+func (a *API) renameCluster(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("cluster")
+	if _, err := a.clusters.Connection(name); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	var req struct {
+		DisplayName string `json:"display_name"`
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	displayName := strings.TrimSpace(req.DisplayName)
+	if displayName == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "display name is required")
+		return
+	}
+	if len(displayName) > 64 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "display name must be 64 characters or fewer")
+		return
+	}
+
+	if a.store != nil {
+		if err := a.store.SetClusterDisplayName(r.Context(), name, displayName); err != nil {
+			a.serviceError(w, r, err)
+			return
+		}
+	}
+	if err := a.clusters.SetDisplayName(name, displayName); err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	summary, err := a.clusters.Get(name)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, summary)
+}
+
 // unregisterCluster removes one dynamically registered cluster. Config-file
 // clusters cannot be removed this way.
 func (a *API) unregisterCluster(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +165,8 @@ func (a *API) unregisterCluster(w http.ResponseWriter, r *http.Request) {
 		a.serviceError(w, r, err)
 		return
 	}
+	// A display-name override is only meaningful while the cluster exists.
+	_ = a.store.DeleteClusterDisplayName(r.Context(), registered.Name)
 
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -130,6 +130,17 @@ var schemaMigrations = []schemaMigration{
 			{table: "answer_profiles", column: "packages", definition: `TEXT NOT NULL DEFAULT ''`},
 		},
 	},
+	{
+		// Display-name overrides apply to config-file clusters too. Keeping them
+		// in the shared store means a rename survives restarts on every center.
+		version: 12,
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS cluster_display_names (
+				cluster TEXT PRIMARY KEY,
+				display_name TEXT NOT NULL
+			)`,
+		},
+	},
 }
 
 // userSchema holds local accounts. Usernames are compared case-insensitively by

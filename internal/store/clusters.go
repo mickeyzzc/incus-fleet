@@ -101,6 +101,55 @@ FROM registered_clusters WHERE name = ?`
 	return &cluster, nil
 }
 
+// SetClusterDisplayName stores the operator-facing name for any cluster,
+// including config-file clusters. The Incus identifier in the name column stays
+// untouched.
+func (s *SQLStore) SetClusterDisplayName(ctx context.Context, cluster, displayName string) error {
+	const query = `
+INSERT INTO cluster_display_names (cluster, display_name)
+VALUES (?, ?)
+ON CONFLICT(cluster) DO UPDATE SET display_name = excluded.display_name`
+	if _, err := s.db.ExecContext(ctx, s.rebind(query), cluster, displayName); err != nil {
+		return fmt.Errorf("store: set cluster display name: %w", err)
+	}
+
+	return nil
+}
+
+// ListClusterDisplayNames returns every persisted display-name override.
+func (s *SQLStore) ListClusterDisplayNames(ctx context.Context) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT cluster, display_name FROM cluster_display_names`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list cluster display names: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := map[string]string{}
+	for rows.Next() {
+		var cluster, displayName string
+		if err := rows.Scan(&cluster, &displayName); err != nil {
+			return nil, fmt.Errorf("store: scan cluster display name: %w", err)
+		}
+		out[cluster] = displayName
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list cluster display names rows: %w", err)
+	}
+
+	return out, nil
+}
+
+// DeleteClusterDisplayName removes a stale override after a cluster is
+// unregistered.
+func (s *SQLStore) DeleteClusterDisplayName(ctx context.Context, cluster string) error {
+	const query = `DELETE FROM cluster_display_names WHERE cluster = ?`
+	if _, err := s.db.ExecContext(ctx, s.rebind(query), cluster); err != nil {
+		return fmt.Errorf("store: delete cluster display name: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteCluster removes one registered cluster.
 func (s *SQLStore) DeleteCluster(ctx context.Context, name string) error {
 	const deleteQuery = `DELETE FROM registered_clusters WHERE name = ?`

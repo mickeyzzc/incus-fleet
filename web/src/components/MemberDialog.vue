@@ -24,10 +24,18 @@ const instances = useInstancesStore()
 const { t } = useI18n()
 
 const form = reactive({
+  name: '',
   description: '',
   failureDomain: '',
   groups: '',
 })
+
+const nameValid = computed(() => {
+  const value = form.name.trim()
+  return value.length > 0 && value.length <= 63 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)
+})
+
+const nameChanged = computed(() => form.name.trim() !== (props.member?.name ?? ''))
 
 const visible = computed({
   get: () => props.modelValue,
@@ -41,6 +49,7 @@ watch(
       return
     }
 
+    form.name = props.member?.name ?? ''
     form.description = props.member?.description ?? ''
     form.failureDomain = props.member?.failure_domain ?? ''
     form.groups = (props.member?.groups ?? []).join(', ')
@@ -49,10 +58,11 @@ watch(
 )
 
 async function submit(): Promise<void> {
-  if (!props.member) {
+  if (!props.member || !nameValid.value) {
     return
   }
 
+  const newName = form.name.trim()
   const request: { description?: string; failure_domain?: string; groups?: string[] } = {
     description: form.description,
   }
@@ -70,10 +80,17 @@ async function submit(): Promise<void> {
   }
 
   try {
-    await instances.updateMember(props.cluster, props.member.name, request)
+    if (nameChanged.value) {
+      await instances.renameMember(props.cluster, props.member.name, newName)
+    }
+    await instances.updateMember(props.cluster, newName, request)
     await clusters.fetchAll()
-    ElMessage.success(t('admin.memberSaved', { name: props.member.name }))
-    emit('saved', props.member.name)
+    ElMessage.success(
+      nameChanged.value
+        ? t('admin.memberRenamed', { name: newName })
+        : t('admin.memberSaved', { name: newName }),
+    )
+    emit('saved', newName)
     visible.value = false
   } catch (err) {
     ElMessage.error(errorMessage(err))
@@ -89,6 +106,14 @@ async function submit(): Promise<void> {
     destroy-on-close
   >
     <el-form label-position="top" @submit.prevent="submit">
+      <el-form-item :label="t('admin.memberName')" required>
+        <el-input v-model="form.name" maxlength="63" @keyup.enter="submit" />
+        <p class="field-hint">{{ t('admin.memberNameHint') }}</p>
+        <p v-if="!nameValid" class="field-hint field-hint--error">
+          {{ t('admin.memberNameInvalid') }}
+        </p>
+      </el-form-item>
+
       <el-form-item :label="t('admin.description')">
         <el-input v-model="form.description" />
       </el-form-item>
@@ -105,7 +130,7 @@ async function submit(): Promise<void> {
 
     <template #footer>
       <el-button @click="visible = false">{{ t('common.cancel') }}</el-button>
-      <el-button type="primary" :loading="instances.saving" @click="submit">
+      <el-button type="primary" :loading="instances.saving" :disabled="!nameValid" @click="submit">
         {{ t('common.save') }}
       </el-button>
     </template>
@@ -118,5 +143,9 @@ async function submit(): Promise<void> {
   color: var(--fleet-ink-soft);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.field-hint--error {
+  color: var(--el-color-danger);
 }
 </style>

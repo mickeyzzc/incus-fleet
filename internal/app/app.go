@@ -381,6 +381,18 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		}
 	}
 
+	// Display-name overrides are shared by config-file and registered
+	// clusters, so apply them after every connection exists.
+	if overrides, err := st.ListClusterDisplayNames(ctx); err != nil {
+		logger.Warn("cluster display names unavailable", "error", err)
+	} else {
+		for name, displayName := range overrides {
+			if err := manager.SetDisplayName(name, displayName); err != nil {
+				logger.Debug("cluster display name skipped", "cluster", name, "error", err)
+			}
+		}
+	}
+
 	handler := httpapi.New(httpapi.Deps{
 		Clusters:       manager,
 		Instances:      instancesService,
