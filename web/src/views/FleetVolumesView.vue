@@ -7,11 +7,13 @@ import { useI18n } from 'vue-i18n'
 
 import type { FleetVolume } from '@/api/types'
 import { api } from '@/api'
+import { useClustersStore } from '@/stores/clusters'
 import { errorMessage } from '@/utils/errors'
 import { formatBytes } from '@/utils/format'
 import { fleetVolumeCache } from './fleetVolumeCache'
 
 const { t } = useI18n()
+const clusterStore = useClustersStore()
 
 // Re-entering the page should reuse a recent inventory instead of walking
 // every cluster/pool again. Manual refresh still bypasses the cache.
@@ -85,7 +87,16 @@ async function load(force = false): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    clusters.value = (await api.listClusters()).map((cluster) => cluster.name)
+    // The shell already loads the cluster list for the sidebar; reuse it
+    // instead of issuing a second /clusters request on this page.
+    if (clusterStore.items.length === 0) {
+      await clusterStore.fetchAll()
+    }
+    clusters.value = clusterStore.items.map((cluster) => cluster.name)
+    if (clusterStore.error) {
+      error.value = clusterStore.error
+    }
+
     const result = await api.listAllVolumesWithErrors(clusters.value)
     volumes.value = result.items
     selected.value = []
