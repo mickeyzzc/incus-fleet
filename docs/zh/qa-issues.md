@@ -4,6 +4,38 @@
 
 > 全部问题均通过浏览器 UI 真实操作发现。状态：待修复 / 已修复 / 已验证。
 
+## BUG-018 创建实例表单的「额外存储」缺少 source，导致创建失败
+
+- **环境**：c63 / 虚拟机 `debian-lab-oldpc`
+- **现象**：在「创建实例 → 额外存储」填写 `vardata / /var / 100GiB` 后提交，返回 500；
+  日志为 `instances: create debian-lab-oldpc: ... Device validation failed for "vardata":
+  Disk entry is missing the required "source" or "path" property`。
+- **根因**：`internal/instances/management.go` 把 `disks[]` 转成设备时只写入
+  `type/path/pool/size`，没有写入 `source`；而 `AttachDevice` 路径已经通过
+  `ensureVMDiskVolume` 正确创建了卷并回填 `source`。
+- **规避**：创建实例时留空「额外存储」，创建完成后到「详情 → 磁盘与网卡 → 添加磁盘」。
+- **状态**：待修复。
+
+## BUG-019 非受管网桥被当作 macvlan 父接口，第二网卡无链路
+
+- **环境**：c63 / `fleetbr0`（带宿主地址的宿主网桥）
+- **现象**：通过「添加网卡」选择 `fleetbr0` 后设备为 `nictype=macvlan parent=fleetbr0`，
+  客机接口始终 DOWN，无法获取 10.99 网段地址。同样的问题也出现在把带宿主 IP 的
+  物理网卡 `enp4s0` 用作 macvlan 父接口时。
+- **根因**：Fleet 的 `InstanceDevices` / `InstanceFormDialog` 对所有非受管网络统一生成
+  `macvlan`，没有依据网络类型（`bridge`）选择 `bridged`。
+- **规避**：CLI 重建设备为 `nictype=bridged parent=fleetbr0`（63 网段同理接到宿主网桥）。
+- **状态**：待修复。
+
+## BUG-020 新建网络对话框无法设置成员级 parent
+
+- **现象**：「集群 → 网络 → 新建网络」选择 `physical` 并填写 `parent=enp4s0` 后提交，
+  后端报 `Config key "parent" is cluster member specific`；留空则网络无法被实例使用
+  （状态 `Pending`，报 `Specified network is not fully created`）。
+- **根因**：`NetworkDialog` 没有成员选择控件，而 Incus 集群网络需要先按成员定义，再实例化。
+- **规避**：CLI 两步 `incus network create ... --target <member>` + `incus network create ...`。
+- **状态**：待修复。
+
 ## BUG-016 Ubuntu 24.04 无人值守安装未写入根盘、apt 阻塞、SSH 密码不可用
 
 - **环境**：c63 / Ubuntu 24.04.3 live-server ISO / Subiquity 24.04
