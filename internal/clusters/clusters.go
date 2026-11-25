@@ -845,7 +845,8 @@ func (c *Connection) Summary() Summary {
 		}
 	}
 
-	if sharedStorage && pool != "" {
+	switch {
+	case sharedStorage && pool != "":
 		if resources, err := client.GetStoragePoolResources(pool); err == nil {
 			summary.Storage.Used = resources.Space.Used
 			summary.Storage.Total = resources.Space.Total
@@ -854,10 +855,10 @@ func (c *Connection) Summary() Summary {
 				summary.Members[i].Storage = summary.Storage
 			}
 		}
-	} else if storageSamples > 0 {
+	case storageSamples > 0:
 		summary.Storage.Used = storageUsed
 		summary.Storage.Total = storageTotal
-	} else if pool != "" {
+	case pool != "":
 		// Non-clustered server, or every per-member query failed: fall back to
 		// the endpoint's own pool view.
 		if resources, err := client.GetStoragePoolResources(pool); err == nil {
