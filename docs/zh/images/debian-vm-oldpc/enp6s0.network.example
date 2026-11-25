@@ -1,0 +1,12 @@
+[Match]
+Name=enp6s0
+
+[Network]
+DHCP=true
+
+[DHCPv4]
+UseDomains=true
+UseMTU=true
+
+[DHCP]
+ClientIdentifier=mac
