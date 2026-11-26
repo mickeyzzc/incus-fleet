@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import { nextTick } from 'vue'
 
@@ -92,8 +92,7 @@ describe('HostMetricsPanel', () => {
       props: { cluster: 'c1', member: 'node-a' },
       global: { plugins: [ElementPlus], stubs: { Sparkline: true, ElProgress: true } },
     })
-    await nextTick()
-    await nextTick()
+    await flushPromises()
     await nextTick()
 
     expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('external')
