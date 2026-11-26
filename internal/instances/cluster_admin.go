@@ -19,8 +19,12 @@ type StoragePoolRequest struct {
 
 // NetworkRequest creates or updates a managed cluster network.
 type NetworkRequest struct {
-	Name        string            `json:"name,omitempty"`
-	Type        string            `json:"type,omitempty"`
+	Name string `json:"name,omitempty"`
+	Type string `json:"type,omitempty"`
+	// Member defines the network on one cluster member first. Incus requires
+	// member-specific keys such as "parent" to be set this way, then the
+	// network must be instantiated cluster-wide in a second call.
+	Member      string            `json:"member,omitempty"`
 	Description *string           `json:"description,omitempty"`
 	Config      map[string]string `json:"config,omitempty"`
 }
@@ -158,7 +162,13 @@ func (s *Service) CreateNetwork(clusterName string, req NetworkRequest) error {
 			Description: stringValue(req.Description),
 		},
 	}
-	if err := client.CreateNetwork(network); err != nil {
+	var creator interface {
+		CreateNetwork(network api.NetworksPost) error
+	} = client
+	if member := strings.TrimSpace(req.Member); member != "" {
+		creator = client.UseTarget(member)
+	}
+	if err := creator.CreateNetwork(network); err != nil {
 		return fmt.Errorf("instances: create network %s:%s: %w", clusterName, req.Name, err)
 	}
 

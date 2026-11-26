@@ -24,10 +24,11 @@ Debian 测试虚拟机，并配置 2C/4G、20GiB 系统盘、100GiB `/var` 数�
 | 10.99 网段网卡 | `eth1`，bridged → `fleetbr0`（Fleet 私有互联网络） |
 | 客机地址 | 63 网段 DHCP 自动获取；10.99 网段 DHCP 自动获取 |
 
-## 前置条件（命令行一次性准备）
+## 前置条件
 
-Web 界面目前只能上传镜像文件（且单文件有大小上限），并且无法为物理网络设置成员级
-`parent`。因此以下三步通过 CLI 完成，之后的所有实例操作都在 Web 界面进行。
+以下命令只在准备宿主机环境时使用；实例创建、磁盘、网卡、客机配置、远程桌面全部可在
+Web 界面完成。镜像导入本身 Web 也支持（上传本地镜像文件），本环境因浏览器工具单次上传
+上限而改用 CLI。
 
 ### 1. 导入 Debian 虚拟机镜像
 
@@ -66,11 +67,9 @@ sudo systemctl restart incus
 
 ### 3. 说明
 
-- 集群版 Incus 创建网络是两步流程：先在成员上 `incus network create lan63 --type
-  physical parent=enp4s0 --target old-pc-server` 定义，再执行
-  `incus network create lan63 --type physical` 实例化。仅定义不实例化时状态为
-  `Pending`，Web 创建实例会报「Specified network is not fully created」。
-- 本例最终没有使用该物理网络，而是直接使用宿主网桥 `lan63br2`。
+- 集群版 Incus 创建物理网络是两步流程：先按成员定义（设置成员级 `parent`），再留空成员
+  实例化。`Web → 集群 → 网络 → 新建网络` 已提供「成员」下拉和操作提示，可直接在 Web 完成。
+- 本例最终没有使用 Incus 物理网络，而是直接使用宿主网桥 `lan63br2`。
 
 ## Web 操作步骤
 
@@ -95,9 +94,8 @@ sudo systemctl restart incus
 - 存储池：`default`
 - 网络：`lan63`（稍后在设备页改为宿主网桥）
 
-> **已知缺陷 BUG-01**：创建表单里的「额外存储」会生成缺少 `source` 的磁盘设备，
-> 后端报 `Disk entry is missing the required "source" or "path" property`。
-> 请留空该项，创建完成后到「设备」页添加数据盘（见步骤 3）。
+> 创建表单里的「额外存储」现在会先创建卷并回填 `source`，可以直接填写；
+> 创建完成后也可以继续到「设备」页添加数据盘。
 
 ![创建实例表单](images/debian-vm-oldpc/02-create-form.jpg)
 
@@ -126,21 +124,10 @@ sudo systemctl restart incus
 
 ![添加第二张网卡](images/debian-vm-oldpc/04-attach-nic.jpg)
 
-> **已知缺陷 BUG-02**：Fleet 把所有非受管网络都按 `macvlan` 处理。
-> `fleetbr0` 是带宿主地址的网桥，按 macvlan 添加后接口无法获得链路。
-> 需要把该设备改成桥接：
->
-> ```bash
-> incus config device remove debian-lab-oldpc eth1
-> incus config device add debian-lab-oldpc eth1 nic nictype=bridged parent=fleetbr0
-> ```
->
-> 同理 63 网段网卡也用桥接方式接入宿主网桥：
->
-> ```bash
-> incus config device remove debian-lab-oldpc eth0
-> incus config device add debian-lab-oldpc eth0 nic nictype=bridged parent=lan63br2
-> ```
+> Fleet 现在会根据网络类型选择网卡模式：`bridge` 类型使用 `bridged`，物理网卡才使用
+> `macvlan`。因此选择 `fleetbr0` 会直接得到 `nictype=bridged parent=fleetbr0`，客机接口
+> 正常获取 DHCP 地址。本例的 `debian-lab-oldpc` 是在修复前创建的，网卡仍是旧的 macvlan
+> 配置；新建实例不需要再做任何 CLI 修正。
 
 ### 步骤 5：在客机内配置第二个网卡持久化
 
@@ -185,10 +172,9 @@ ClientIdentifier=mac
    `root` 登录。
 3. **SSH**：镜像未安装 sshd，需要自行 `apt install openssh-server` 并配置密码登录后才能使用。
 
-注意「远程桌面」按钮会调用 `POST .../spice/prepare` 并带 `apply: true`。实现上会先把
-`-spice ...` 写入 `raw.qemu`，而 Incus 不允许在虚拟机运行时修改 `raw.qemu`，因此它会
-**强制关机 → 写配置 → 再开机**。所以列表里状态已是「运行中」时，第一次打开远程桌面仍会
-看到一次重启，这是预期行为；不打开远程桌面时虚拟机没有 SPICE 监听端口，自然看不到桌面。
+新建的虚拟机在创建时就已经写入 `-spice ...`、`raw.qemu.conf`（QMP 监视器）和
+`raw.apparmor`。因此打开「远程桌面」只是连接已有监听，**不会**再关机/开机；列表里的
+「运行中」与实际桌面状态一致。旧实例若缺少这些配置，首次打开会补写并重启一次。
 
 ## 验证结果
 
@@ -216,14 +202,17 @@ Mem:           3.8Gi   ...    ...
 - `/var` 已挂在独立卷上。
 - 两个网段均可达；重启后地址保持稳定。
 
-## 发现的 Web 缺陷（待修复）
+## 已修复的 Web 缺陷
 
-| 编号 | 现象 | 影响 | 临时规避 |
-| --- | --- | --- | --- |
-| BUG-01 | 创建实例表单的「额外存储」生成的磁盘设备没有 `source` | 创建实例直接失败 | 创建后到「设备」页添加磁盘 |
-| BUG-02 | 非受管网桥（如 `fleetbr0`）被当作 macvlan 处理，接口无链路 | 第二网卡不可用 | CLI 改成 `nictype=bridged, parent=fleetbr0` |
-| BUG-03 | 「新建网络」对话框无法设置成员级 `parent`，集群级创建报 `parent is cluster member specific` | 无法通过 Web 添加物理网络 | CLI 两步定义 + 实例化 |
-| BUG-04 | `dir` 池下 100GiB 卷没有硬配额，客户机看到的是宿主池容量 | 空间可能超用 | 换用支持配额的存储驱动 |
+| 编号 | 现象 | 修复 |
+| --- | --- | --- |
+| BUG-018 | 「额外存储」生成的磁盘缺少 `source` | 创建前预建卷并回填 `source` |
+| BUG-019 | 网桥被当作 macvlan 父接口 | 按网络类型选择 `bridged` / `macvlan` |
+| BUG-020 | 网络对话框无法设置成员级 `parent` | 增加成员下拉与两步定义/实例化 |
+| BUG-021 | 终端里直接打字无反应 | 绑定 xterm `onData` 到会话 |
+| BUG-022 | 打开远程桌面对运行中的 VM 关机重启 | 创建时预置 SPICE/QMP/AppArmor 配置，打开时不再改写 |
+
+仍需注意：`dir` 存储池不执行 100GiB 硬配额，如需强制限额请换用支持配额的存储驱动。
 
 ## 相关文档
 

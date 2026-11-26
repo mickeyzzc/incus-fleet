@@ -82,6 +82,16 @@ async function mountTerminal(): Promise<boolean> {
       fitAddon = new FitAddon()
       term.loadAddon(fitAddon)
       term.open(host)
+      // Typing straight into the terminal must reach the session. Without
+      // this handler the xterm surface is display-only and users were told
+      // to type into the separate command field instead.
+      term.onData((data) => {
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+          return
+        }
+        ensureExecStarted()
+        socket.send(new TextEncoder().encode(data))
+      })
       try {
         fitAddon.fit()
       } catch {
@@ -180,26 +190,31 @@ function submitCommand(): void {
   connect('exec')
 }
 
+/** Starts the exec shell once; console input goes straight to the serial device. */
+function ensureExecStarted(): void {
+  if (mode.value !== 'exec' || execStarted || !socket || socket.readyState !== WebSocket.OPEN) {
+    return
+  }
+
+  execStarted = true
+  socket.send(
+    JSON.stringify({
+      command: ['bash'],
+      width: term?.cols ?? 80,
+      height: term?.rows ?? 25,
+    }),
+  )
+}
+
 function sendLine(line: string): void {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     return
   }
 
-  // Only exec sessions need a launch frame; console input goes straight to the
-  // serial device. Keying this on mode as well as the flag prevents a console
-  // session from consuming the flag and leaving the following exec session
-  // without a launch request (which silently swallowed every command).
-  if (mode.value === 'exec' && !execStarted) {
-    execStarted = true
-    socket.send(
-      JSON.stringify({
-        command: ['bash'],
-        width: term?.cols ?? 80,
-        height: term?.rows ?? 25,
-      }),
-    )
-  }
-
+  // Keying this on mode as well as the flag prevents a console session from
+  // consuming the flag and leaving the following exec session without a launch
+  // request (which silently swallowed every command).
+  ensureExecStarted()
   socket.send(new TextEncoder().encode(`${line}\n`))
 }
 

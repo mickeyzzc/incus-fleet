@@ -59,6 +59,49 @@ func spicePortFromConfig(raw string) int {
 	return port
 }
 
+// SPICEQemuArg builds the managed QEMU argument for a SPICE listener.
+func SPICEQemuArg(port int) string {
+	return fmt.Sprintf("%s unix=off,port=%d,disable-ticketing=on,addr=%s", spiceArgMarker, port, spiceListenAddr)
+}
+
+// EnsureSPICEConfig adds the managed SPICE listener to a VM config when absent
+// and returns the port to use. Unrelated raw.qemu arguments are preserved, and
+// an existing managed listener is left untouched so a running VM never needs a
+// power cycle just to open its desktop.
+func EnsureSPICEConfig(config api.ConfigMap, requested int) (int, error) {
+	if requested < 0 || requested > spicePortMax {
+		return 0, fmt.Errorf("%w: spice port must be between %d and %d", ErrInvalidRequest, spicePortMin, spicePortMax)
+	}
+
+	port := requested
+	if port == 0 {
+		port = spicePortFromConfig(config["raw.qemu"])
+	}
+	if port == 0 {
+		allocated, err := allocateSPICEPort()
+		if err != nil {
+			return 0, fmt.Errorf("instances: allocate SPICE port: %w", err)
+		}
+		port = allocated
+	}
+
+	raw := config["raw.qemu"]
+	if spicePortFromConfig(raw) == port {
+		return port, nil
+	}
+
+	var lines []string
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.TrimSpace(line) != "" && !strings.Contains(line, spiceArgMarker) {
+			lines = append(lines, line)
+		}
+	}
+	lines = append(lines, SPICEQemuArg(port))
+	config["raw.qemu"] = strings.Join(lines, "\n")
+
+	return port, nil
+}
+
 // allocateSPICEPort picks a currently free loopback port for a new VM. The
 // deterministic SPICEPortFor hash only covers 80 ports and collides as soon as
 // the fleet runs more than a handful of VMs; a launch that loses that race
@@ -110,20 +153,26 @@ func (s *Service) PrepareSPICE(ctx context.Context, clusterName, name string, po
 		return SPICEPrepare{}, fmt.Errorf("instances: get %s:%s: %w", clusterName, name, err)
 	}
 
-	// The web client requests the default (port 0): use the port the launch
-	// already stored in raw.qemu so a dynamically allocated listener is not
-	// overwritten by the collision-prone deterministic hash.
+	// VMs are created with a SPICE listener already in raw.qemu. The web
+	// client asks for port 0, which keeps that listener instead of replacing
+	// it with the old collision-prone hash.
+	existing := spicePortFromConfig(instance.Config["raw.qemu"])
 	if port == 0 {
-		port = spicePortFromConfig(instance.Config["raw.qemu"])
-		if port == 0 {
+		if existing != 0 {
+			port = existing
+		} else {
 			port = SPICEPortFor(name)
 		}
 	}
 
-	// Incus refuses raw.qemu updates while the VM runs; stop it up front and
-	// boot it again once the new qemu args are in place.
 	wasRunning := instance.StatusCode == api.Running || instance.StatusCode == api.Starting
-	if wasRunning && apply {
+	needsUpdate := existing != port
+	stopped := false
+
+	// Incus refuses raw.qemu updates while a VM runs, so a running VM is only
+	// stopped when the listener actually needs to change. With creation-time
+	// SPICE configuration this is no longer the case on a normal desktop open.
+	if needsUpdate && wasRunning && apply {
 		if err := s.Action(ctx, clusterName, name, ActionRequest{Action: "stop", Force: true}); err != nil {
 			return SPICEPrepare{}, fmt.Errorf("instances: cycle %s:%s: %w", clusterName, name, err)
 		}
@@ -131,48 +180,43 @@ func (s *Service) PrepareSPICE(ctx context.Context, clusterName, name string, po
 		if err != nil {
 			return SPICEPrepare{}, fmt.Errorf("instances: get %s:%s: %w", clusterName, name, err)
 		}
+		stopped = true
 	}
 
-	put := instance.InstancePut
-	put.Config = copyConfig(instance.Config)
-	put.Devices = copyDevices(instance.Devices)
-	put.Profiles = append([]string{}, instance.Profiles...)
+	if needsUpdate {
+		put := instance.InstancePut
+		put.Config = copyConfig(instance.Config)
+		put.Devices = copyDevices(instance.Devices)
+		put.Profiles = append([]string{}, instance.Profiles...)
 
-	// Drop any previously managed -spice line, keep foreign raw.qemu args.
-	var lines []string
-	for _, line := range strings.Split(put.Config["raw.qemu"], "\n") {
-		if strings.TrimSpace(line) != "" && !strings.Contains(line, spiceArgMarker) {
-			lines = append(lines, line)
+		port, err = EnsureSPICEConfig(put.Config, port)
+		if err != nil {
+			return SPICEPrepare{}, err
+		}
+
+		op, err := client.UpdateInstance(name, put, etag)
+		if err != nil {
+			return SPICEPrepare{}, fmt.Errorf("instances: prepare spice %s:%s: %w", clusterName, name, err)
+		}
+		if err := waitOperation(ctx, op, "prepare spice "+name); err != nil {
+			return SPICEPrepare{}, err
+		}
+
+		if wasRunning && !apply {
+			// Config is armed; the owner chooses when to power cycle.
+			return SPICEPrepare{Port: port, Applied: false, RestartRequired: true}, nil
 		}
 	}
-	lines = append(lines, fmt.Sprintf("%s unix=off,port=%d,disable-ticketing=on,addr=%s", spiceArgMarker, port, spiceListenAddr))
-	put.Config["raw.qemu"] = strings.Join(lines, "\n")
 
-	op, err := client.UpdateInstance(name, put, etag)
-	if err != nil {
-		return SPICEPrepare{}, fmt.Errorf("instances: prepare spice %s:%s: %w", clusterName, name, err)
-	}
-	if err := waitOperation(ctx, op, "prepare spice "+name); err != nil {
-		return SPICEPrepare{}, err
+	// apply guarantees a running VM: the browser is about to open the desktop.
+	// A VM that already runs with the right listener is left untouched.
+	if apply && (!wasRunning || stopped) {
+		if err := s.Action(ctx, clusterName, name, ActionRequest{Action: "start"}); err != nil {
+			return SPICEPrepare{}, fmt.Errorf("instances: cycle %s:%s: %w", clusterName, name, err)
+		}
 	}
 
-	result := SPICEPrepare{Port: port}
-	if wasRunning && !apply {
-		// Config is armed; the owner chooses when to power cycle.
-		result.Applied = false
-		result.RestartRequired = true
-		return result, nil
-	}
-
-	// apply guarantees a running VM: the browser is about to open the
-	// desktop, so boot the instance regardless of its previous state.
-	if err := s.Action(ctx, clusterName, name, ActionRequest{Action: "start"}); err != nil {
-		return SPICEPrepare{}, fmt.Errorf("instances: cycle %s:%s: %w", clusterName, name, err)
-	}
-	result.Applied = true
-	result.RestartRequired = false
-
-	return result, nil
+	return SPICEPrepare{Port: port, Applied: true, RestartRequired: false}, nil
 }
 
 // SPICEDial dials the SPICE TCP listener of the member currently hosting the

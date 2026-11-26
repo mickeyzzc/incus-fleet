@@ -13,8 +13,11 @@
 - **根因**：`internal/instances/management.go` 把 `disks[]` 转成设备时只写入
   `type/path/pool/size`，没有写入 `source`；而 `AttachDevice` 路径已经通过
   `ensureVMDiskVolume` 正确创建了卷并回填 `source`。
-- **规避**：创建实例时留空「额外存储」，创建完成后到「详情 → 磁盘与网卡 → 添加磁盘」。
-- **状态**：待修复。
+- **修复**：`Create` 在生成 `disks[]` 设备前用 `ensureVMDiskVolume` 创建卷并回填 `source`，
+  与「添加磁盘」路径一致。
+- **验证**：Web 创建 `qa-spice-check` 时填写 `/data / 5GiB`，实例设备的 `data0` 带
+  `source=dev-qa-spice-check-data0`，卷已创建。
+- **状态**：已修复、已验证。
 
 ## BUG-019 非受管网桥被当作 macvlan 父接口，第二网卡无链路
 
@@ -24,8 +27,11 @@
   物理网卡 `enp4s0` 用作 macvlan 父接口时。
 - **根因**：Fleet 的 `InstanceDevices` / `InstanceFormDialog` 对所有非受管网络统一生成
   `macvlan`，没有依据网络类型（`bridge`）选择 `bridged`。
-- **规避**：CLI 重建设备为 `nictype=bridged parent=fleetbr0`（63 网段同理接到宿主网桥）。
-- **状态**：待修复。
+- **修复**：`applyNICNetwork` 和创建路径按 `api.Network.Type == "bridge"` 选择
+  `nictype=bridged`，仅物理网卡使用 `macvlan`。
+- **验证**：以 `fleetbr0`（type=bridge）创建/添加网卡，设备为
+  `nictype=bridged parent=fleetbr0`，客机接口正常 UP。
+- **状态**：已修复、已验证。
 
 ## BUG-020 新建网络对话框无法设置成员级 parent
 
@@ -33,8 +39,36 @@
   后端报 `Config key "parent" is cluster member specific`；留空则网络无法被实例使用
   （状态 `Pending`，报 `Specified network is not fully created`）。
 - **根因**：`NetworkDialog` 没有成员选择控件，而 Incus 集群网络需要先按成员定义，再实例化。
-- **规避**：CLI 两步 `incus network create ... --target <member>` + `incus network create ...`。
-- **状态**：待修复。
+- **修复**：`NetworkRequest` 增加 `member`，`NetworkDialog` 增加成员下拉（含操作提示）；
+  选择成员时后端用 `client.UseTarget(member)` 定义网络，留空时按原有流程实例化。
+- **验证**：Web 打开「新建网络」可见「成员」下拉及两步操作说明。
+- **状态**：已修复、已验证。
+
+## BUG-021 终端里直接打字没有任何反应
+
+- **现象**：实例详情 →「终端」打开后，在 xterm 黑色区域直接输入命令，屏幕只回显字符，
+  不会执行；用户误以为终端坏了。
+- **根因**：`TerminalDialog` 只把下方「输入命令并回车」输入框绑定到 WebSocket，
+  没有注册 xterm 的 `onData`，xterm 表面是只读的。
+- **修复**：注册 `term.onData`，把键盘输入直接发到会话；同时抽出 `ensureExecStarted`，
+  首次按键也会正确启动 exec 的 bash shell。
+- **验证**：浏览器中在终端区域输入 `hostname -f` 并回车，返回 `debian-lab-oldpc`。
+- **状态**：已修复、已验证。
+
+## BUG-022 打开远程桌面会把正在运行的 VM 关机再开机
+
+- **现象**：实例列表显示「运行中」，但点「远程桌面」后客户机重新走一遍启动流程。
+- **根因**：两个配置都是在首次打开桌面时才写入，而 Incus 不允许 VM 运行时修改
+  `raw.qemu` / `raw.qemu.conf`，因此实现里先 `stop --force`、写配置、再 `start`。
+  - SPICE 监听（`-spice ...`）由 `PrepareSPICE` 写入。
+  - QMP 监视器（`raw.qemu.conf` + `raw.apparmor`）由 `console.Monitor.EnsureMonitor` 写入。
+- **修复**：
+  1. VM 创建时就把 `-spice` 参数、`raw.qemu.conf` 和 `raw.apparmor` 写进实例配置；
+  2. `PrepareSPICE` 检测已有同端口监听时不再停机/写配置；
+  3. `EnsureMonitor` 先用 QMP 握手探测现有监视器，可响应时直接返回，不改写配置。
+- **验证**：Web 创建 `qa-spice-check2`（自带配置），启动后记录 `started_at` 与客机 uptime，
+  再打开远程桌面：桌面正常连接，`started_at` 不变、uptime 持续增长。
+- **状态**：已修复、已验证。
 
 ## BUG-016 Ubuntu 24.04 无人值守安装未写入根盘、apt 阻塞、SSH 密码不可用
 

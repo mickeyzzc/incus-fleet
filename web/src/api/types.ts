@@ -207,6 +207,8 @@ export interface StoragePoolRequest {
 export interface NetworkRequest {
   name?: string
   type?: string
+  /** Define a member-specific network on this member before instantiating. */
+  member?: string
   description?: string
   config?: Record<string, string>
 }
