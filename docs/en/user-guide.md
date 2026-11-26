@@ -804,17 +804,17 @@ settings control which backend is allowed; see
 
 ## Plugins (admin)
 
-Administrators see **Plugins** under **Resources** in the sidebar. The page has two top-level
-tabs: **Installed** (a table of registered plugins with status, version, role and wiring summary)
-and **Catalog** (cards for community packages; the listing is still planned). Selecting a plugin
-opens a detail drawer with five tabs in a fixed order: **Overview**, **Configuration**, **Wiring**,
-**Events**, and **Danger zone**. Across the product the same **status vocabulary** is used:
-*installing / healthy / degraded / stopped / failed*, with a consistent color for each state.
+Administrators see **Plugins** in the sidebar. The page has two top-level tabs: **Installed**
+(status, version, role and wiring summary, with Disable / Uninstall actions) and **Catalog**
+(built-in `vm` / `vmlogs` entries). Click **One-click install** and enter the upstream address
+of an already running service to connect it; Fleet issues a plugin-bound scoped token and adds
+a menu entry. Selecting a plugin opens a detail drawer with five tabs in a fixed order:
+**Overview**, **Configuration**, **Wiring**, **Events**, and **Danger zone**.
 
-Installed plugin UIs are served through the same-origin **`/plugin-ui/<id>/…`** proxy; this is the
-only proxy namespace, and external origins are never loaded directly. Note that plugin **install
-and orchestration are future work** — see [the plugin specification](plugins.md) for the
-manifest format, the planned install wizard and the phased rollout.
+Installed plugin UIs are served through the same-origin **`/plugin-ui/<id>/…`** proxy, which
+never forwards the Fleet session cookie to the upstream. See
+[one-click plugin connect](plugins-one-click.md) for the guided walkthrough and sanitized
+screenshots, and [the plugin specification](plugins.md) for the manifest format and roadmap.
 
 ### API tokens (scoped)
 
