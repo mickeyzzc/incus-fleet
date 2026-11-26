@@ -52,7 +52,9 @@ plugins:
 
    ![已安装插件](images/plugins/02-installed.jpg)
 
-4. 安装后侧边栏「插件」下方会出现对应菜单项。
+4. 安装后侧边栏「插件」下方会出现对应菜单项。点击后仍停留在 Fleet 界面，插件页面以
+   同源 iframe 嵌在 `/plugin/<id>` 中，左侧导航始终可用；如果上游不可达，只会看到 iframe
+   内的错误提示，不会把整个 Fleet 页面替换掉。
 
    ![侧边栏插件菜单](images/plugins/03-sidebar.jpg)
 

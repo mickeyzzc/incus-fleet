@@ -43,7 +43,9 @@ Run VictoriaMetrics (default port 8428) or VictoriaLogs (default port 9428) your
 
    ![Installed plugins](images/plugins/02-installed.jpg)
 
-4. Each installed plugin adds a menu entry below the Plugins item in the sidebar.
+4. Each installed plugin adds a menu entry below the Plugins item in the sidebar. Clicking it
+   keeps the Fleet shell and embeds the proxied UI in a same-origin iframe at `/plugin/<id>`;
+   an unreachable upstream only produces an error inside the frame, never a full-page detour.
 
    ![Plugin menu entry](images/plugins/03-sidebar.jpg)
 

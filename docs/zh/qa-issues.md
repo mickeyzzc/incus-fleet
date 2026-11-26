@@ -70,6 +70,27 @@
   再打开远程桌面：桌面正常连接，`started_at` 不变、uptime 持续增长。
 - **状态**：已修复、已验证。
 
+## BUG-023 打开插件菜单会跳出 Fleet，之后无法返回
+
+- **现象**：安装插件后点击侧边栏插件菜单，页面直接跳到 `/plugin-ui/vm/`；上游不可用时
+  只看到一段 JSON 错误，侧边栏消失，用户无法继续操作。
+- **根因**：菜单点击用了 `window.location.assign()` 整页跳转到代理地址。
+- **修复**：新增站内路由 `/plugin/:id` 与 `PluginPage`，用同源 iframe 加载 `/plugin-ui/<id>/`；
+  侧边栏菜单走 Vue Router，Fleet 外壳始终保留。
+- **验证**：浏览器中点击 `VictoriaMetrics` 菜单，URL 为 `/plugin/vm`、iframe 存在且
+  `.nav-menu` 仍在；随后点击节点菜单可正常进入节点详情。
+- **状态**：已修复、已验证。
+
+## BUG-024 部署后长时间打开的标签页里所有懒加载菜单都点不动
+
+- **现象**：Fleet 升级部署后，仍开着的旧标签页点击插件、节点等菜单无反应；控制台报
+  `Failed to fetch dynamically imported module: .../NodeDetailView-<旧hash>.js`。
+- **根因**：浏览器仍在运行旧 `index-<hash>.js`，它请求已被新构建覆盖的 chunk（404）。
+- **修复**：Router 的 `onError` 捕获 chunk 加载失败，用 sessionStorage 标记只自动刷新一次，
+  让页面加载当前构建而不是留下死菜单。
+- **验证**：旧标签页刷新后加载 `index-CQyHZ8BN.js`，节点菜单与插件菜单均可正常进入。
+- **状态**：已修复、已验证。
+
 ## BUG-016 Ubuntu 24.04 无人值守安装未写入根盘、apt 阻塞、SSH 密码不可用
 
 - **环境**：c63 / Ubuntu 24.04.3 live-server ISO / Subiquity 24.04
