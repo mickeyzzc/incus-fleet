@@ -224,6 +224,28 @@ describe('App shell', () => {
 
     expect(wrapper.text()).not.toContain('Plugins')
   })
+
+  it('opens an installed plugin with a full document navigation', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({
+      plugins: [{
+        id: 'vm', name: 'VictoriaMetrics', version: '', enabled: true,
+        upstream: 'http://127.0.0.1:8428', role: 'viewer', kind: 'external',
+        ui: { path: '/plugin-ui/vm/', title_key: 'VictoriaMetrics', requires_role: 'viewer' },
+      }],
+      enabled: true,
+    })
+    const assign = vi.fn()
+    vi.stubGlobal('location', { assign, href: 'http://localhost/' })
+
+    const { wrapper } = await mountApp('/', true, 'admin')
+    await flushPromises()
+
+    const item = wrapper.findAll('.el-menu-item').find((el) => el.text().includes('VictoriaMetrics'))
+    expect(item).toBeDefined()
+    await item!.trigger('click')
+    expect(assign).toHaveBeenCalledWith('/plugin-ui/vm/')
+    vi.unstubAllGlobals()
+  })
 })
 
   it('keeps the active menu highlight for a trailing-slash deep link', async () => {
