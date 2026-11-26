@@ -4,12 +4,28 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
 import { setLocale } from '@/i18n'
-import { createFleetRouter } from './index'
+import { createFleetRouter, handleRouteError } from './index'
 
 describe('fleet router', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     document.title = ''
+    sessionStorage.removeItem('incus-fleet.chunk-reload')
+  })
+
+  it('reloads once on a stale chunk load failure', () => {
+    const reload = vi.fn()
+    vi.stubGlobal('location', { reload, href: 'http://localhost/' })
+
+    handleRouteError(new Error('Failed to fetch dynamically imported module: old.js'))
+    handleRouteError(new Error('Failed to fetch dynamically imported module: old.js'))
+
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(sessionStorage.getItem('incus-fleet.chunk-reload')).toBeTruthy()
+
+    handleRouteError(new Error('unrelated failure'))
+    expect(reload).toHaveBeenCalledTimes(1)
+    vi.unstubAllGlobals()
   })
 
   it('sends unauthenticated visitors to login without a redirect for the dashboard', async () => {
