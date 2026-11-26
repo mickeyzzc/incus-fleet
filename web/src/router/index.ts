@@ -168,7 +168,7 @@ export function createFleetRouter(history: RouterHistory = createWebHistory()): 
   // A tab left open across a deployment keeps the old entry bundle and asks
   // for hashed chunks that no longer exist. Reload once so the user gets the
   // current build instead of a dead menu item.
-  router.onError(handleRouteError)
+  router.onError((error) => handleRouteError(error))
 
   router.afterEach((to) => {
     applyDocumentTitle(to)
