@@ -15,7 +15,10 @@ import type {
   NodeSnapshot,
   NodeTask,
   NodeTaskEvent,
+  PluginCatalogResponse,
   PluginEntry,
+  PluginInstallRequest,
+  PluginInstallResponse,
   PluginListResponse,
   TelemetrySeries,
   TokenScopesResponse,
@@ -1373,6 +1376,27 @@ export class ApiClient {
   /** Loads one plugin descriptor. */
   async getPlugin(id: string): Promise<PluginEntry> {
     return this.request<PluginEntry>('GET', `/api/v1/plugins/${encodeURIComponent(id)}`)
+  }
+
+  /** Lists first-party plugins that can be connected with one click. */
+  async listPluginCatalog(): Promise<PluginCatalogResponse> {
+    return this.request<PluginCatalogResponse>('GET', '/api/v1/plugins/catalog')
+  }
+
+  async installPlugin(request: PluginInstallRequest): Promise<PluginInstallResponse> {
+    return this.request<PluginInstallResponse>('POST', '/api/v1/plugins/install', request)
+  }
+
+  async togglePlugin(id: string, enabled: boolean): Promise<PluginEntry> {
+    return this.request<PluginEntry>(
+      'POST',
+      `/api/v1/plugins/${encodeURIComponent(id)}/toggle`,
+      { enabled },
+    )
+  }
+
+  async uninstallPlugin(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/api/v1/plugins/${encodeURIComponent(id)}`)
   }
 
   /** Lists API tokens visible to the caller. */

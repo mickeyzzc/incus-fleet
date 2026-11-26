@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { Connection, Refresh, Setting, WarningFilled } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
-import type { PluginEntry } from '@/api/types'
+import type { PluginCatalogEntry, PluginEntry } from '@/api/types'
 import { pluginStatus, usePluginsStore } from '@/stores/plugins'
 import type { PluginStatus } from '@/stores/plugins'
 
@@ -17,6 +18,27 @@ const selectedId = ref('')
 const detailTab = ref('overview')
 
 const selected = computed<PluginEntry | undefined>(() => plugins.byId(selectedId.value))
+const installTarget = ref<PluginCatalogEntry | null>(null)
+const upstream = ref('')
+const installedIDs = computed(() => new Set(plugins.installed.map((entry) => entry.id)))
+
+function openInstall(entry: PluginCatalogEntry): void {
+  installTarget.value = entry
+  upstream.value = entry.upstream_hint
+}
+
+async function confirmInstall(): Promise<void> {
+  const target = installTarget.value
+  if (!target || !upstream.value.trim()) {
+    return
+  }
+
+  const token = await plugins.install(target.id, upstream.value.trim())
+  if (token) {
+    ElMessage.success(t('plugins.installed'))
+    installTarget.value = null
+  }
+}
 
 const statusLabels: Record<PluginStatus, string> = {
   installing: 'Installing',
@@ -100,11 +122,11 @@ function closeDetail(): void {
 
     <!-- Empty state: one next action. In the catalog the action would point at
          itself, so that view only explains how entries get registered. -->
-    <div v-else-if="!plugins.loading && !plugins.hasPlugins" class="state-block empty">
+    <div v-else-if="view === 'installed' && !plugins.loading && !plugins.hasPlugins" class="state-block empty">
       <el-icon class="empty-icon"><Connection /></el-icon>
-      <h3>{{ view === 'catalog' ? t('plugins.catalogEmptyTitle') : t('plugins.emptyTitle') }}</h3>
-      <p>{{ view === 'catalog' ? t('plugins.catalogEmpty') : t('plugins.emptyBody') }}</p>
-      <el-button v-if="view === 'installed'" type="primary" @click="view = 'catalog'">
+      <h3>{{ t('plugins.emptyTitle') }}</h3>
+      <p>{{ t('plugins.emptyBody') }}</p>
+      <el-button type="primary" @click="view = 'catalog'">
         {{ t('plugins.browseCatalog') }}
       </el-button>
     </div>
@@ -136,20 +158,38 @@ function closeDetail(): void {
             <span class="muted">{{ pluginStatus(row).detail }}</span>
           </template>
         </el-table-column>
+        <el-table-column :label="t('common.actions')" width="190">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click.stop="plugins.toggle(row.id, !row.enabled)">
+              {{ row.enabled ? t('plugins.disable') : t('plugins.enable') }}
+            </el-button>
+            <el-button link type="danger" size="small" @click.stop="plugins.uninstall(row.id)">
+              {{ t('plugins.uninstall') }}
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
 
       <div v-else class="catalog-grid">
-        <article v-for="entry in plugins.installed" :key="entry.id" class="catalog-card">
+        <article v-for="entry in plugins.catalog" :key="entry.id" class="catalog-card">
           <header>
-            <h3>{{ entry.name || entry.id }}</h3>
-            <span class="tier-chip">{{ entry.kind }}</span>
+            <h3>{{ entry.name }}</h3>
+            <span class="tier-chip">{{ entry.wiring }}</span>
           </header>
-          <p class="card-body">{{ entry.upstream || t('plugins.noUpstream') }}</p>
+          <p class="card-body">{{ entry.description }}</p>
+          <p class="muted">{{ t('plugins.upstream') }}: {{ entry.upstream_hint }}</p>
           <footer>
-            <el-button size="small" @click="openDetail(entry)">{{ t('plugins.details') }}</el-button>
+            <el-button
+              size="small"
+              type="primary"
+              :disabled="installedIDs.has(entry.id)"
+              @click="openInstall(entry)"
+            >
+              {{ installedIDs.has(entry.id) ? t('plugins.installed') : t('plugins.install') }}
+            </el-button>
           </footer>
         </article>
-        <p v-if="plugins.count === 0" class="muted">{{ t('plugins.catalogEmpty') }}</p>
+        <p v-if="plugins.catalog.length === 0" class="muted">{{ t('plugins.catalogEmpty') }}</p>
       </div>
     </template>
 
@@ -211,6 +251,26 @@ function closeDetail(): void {
         </footer>
       </template>
     </el-drawer>
+
+    <el-dialog
+      :model-value="installTarget !== null"
+      :title="t('plugins.installTitle', { name: installTarget?.name ?? '' })"
+      width="460px"
+      @update:model-value="installTarget = null"
+    >
+      <p class="muted">{{ t('plugins.installHint') }}</p>
+      <el-form label-position="top" @submit.prevent="confirmInstall">
+        <el-form-item :label="t('plugins.upstream')">
+          <el-input v-model="upstream" :placeholder="installTarget?.upstream_hint" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="installTarget = null">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :disabled="!upstream.trim()" @click="confirmInstall">
+          {{ t('plugins.install') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 

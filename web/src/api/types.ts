@@ -991,6 +991,31 @@ export interface PluginListResponse {
   enabled: boolean
 }
 
+/** A first-party plugin available for one-click connection. */
+export interface PluginCatalogEntry {
+  id: string
+  name: string
+  description: string
+  upstream_hint: string
+  ui_path: string
+  wiring: string
+}
+
+export interface PluginCatalogResponse {
+  catalog: PluginCatalogEntry[] | null
+}
+
+export interface PluginInstallRequest {
+  id: string
+  upstream: string
+}
+
+export interface PluginInstallResponse {
+  plugin: PluginEntry
+  /** Shown once at install time; fleet stores only the token id. */
+  token: string
+}
+
 /** One issued API token. The secret is only present in the creation response. */
 export interface APIToken {
   id: string

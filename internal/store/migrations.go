@@ -141,7 +141,27 @@ var schemaMigrations = []schemaMigration{
 			)`,
 		},
 	},
+	{
+		// Installed plugins are persisted so a one-click install survives a
+		// restart without editing the fleet YAML configuration.
+		version:    13,
+		statements: []string{installedPluginSchema},
+	},
 }
+
+const installedPluginSchema = `
+CREATE TABLE IF NOT EXISTS installed_plugins (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	version TEXT NOT NULL DEFAULT '',
+	upstream TEXT NOT NULL,
+	ui_path TEXT NOT NULL,
+	role TEXT NOT NULL DEFAULT 'viewer',
+	enabled INTEGER NOT NULL DEFAULT 1,
+	token_id TEXT NOT NULL DEFAULT '',
+	created_at BIGINT NOT NULL,
+	updated_at BIGINT NOT NULL
+)`
 
 // userSchema holds local accounts. Usernames are compared case-insensitively by
 // storing them lowercase.

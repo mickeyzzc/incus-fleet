@@ -109,6 +109,7 @@ HTTP API 见 [docs/zh/api.md](api.md)，日常操作见
 | --- | --- | --- |
 | 用户手册 | [docs/en/user-guide.md](../en/user-guide.md) | [docs/zh/user-guide.md](user-guide.md) |
 | Debian 测试机部署实战 | [docs/en/debian-vm-oldpc.md](../en/debian-vm-oldpc.md) | [docs/zh/debian-vm-oldpc.md](debian-vm-oldpc.md) |
+| 插件一键接入与默认模板 | [docs/en/plugins-one-click.md](../en/plugins-one-click.md) | [docs/zh/plugins-one-click.md](plugins-one-click.md) |
 | 架构 | [docs/en/architecture.md](../en/architecture.md) | [docs/zh/architecture.md](architecture.md) |
 | 部署 | [docs/en/deployment.md](../en/deployment.md) | [docs/zh/deployment.md](deployment.md) |
 | HTTP API | [docs/en/api.md](../en/api.md) | [docs/zh/api.md](api.md) |

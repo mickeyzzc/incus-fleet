@@ -35,7 +35,11 @@ type pluginUIView struct {
 // CSP forbids external framing.
 func (a *API) registerPluginRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/plugins", a.requireScope(auth.ScopeReadPlugins, http.HandlerFunc(a.listPlugins)))
+	mux.Handle("GET /api/v1/plugins/catalog", a.requireScope(auth.ScopeReadPlugins, http.HandlerFunc(a.listPluginCatalog)))
 	mux.Handle("GET /api/v1/plugins/{id}", a.requireScope(auth.ScopeReadPlugins, http.HandlerFunc(a.getPlugin)))
+	mux.Handle("POST /api/v1/plugins/install", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.installPlugin)))
+	mux.Handle("POST /api/v1/plugins/{id}/toggle", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.togglePlugin)))
+	mux.Handle("DELETE /api/v1/plugins/{id}", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.uninstallPlugin)))
 
 	// Proxy mount. Plugin UIs live under their own prefix, never under
 	// /plugins/ — that path belongs to the manager page itself, and sharing it
@@ -76,7 +80,10 @@ func (a *API) pluginEntries() []config.PluginEntry {
 		return nil
 	}
 
-	return a.pluginsConfig.Entries
+	entries := append([]config.PluginEntry{}, a.pluginsConfig.Entries...)
+	entries = append(entries, a.installedPluginEntries()...)
+
+	return entries
 }
 
 func toPluginView(entry config.PluginEntry) pluginView {
