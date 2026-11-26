@@ -93,12 +93,6 @@ func ScreenshotPath(instance string) string {
 	return "/tmp/incus_screenshot_" + instance
 }
 
-// EnsureMonitor installs the QEMU configuration that exposes a QMP socket, and
-// relaxes AppArmor so QEMU may bind it. It is idempotent: the instance is only
-// restarted when the configuration actually changes.
-//
-// A running VM is restarted when the monitor config changes, because QEMU only
-// reads raw.qemu.conf at start.
 // MonitorConfig is the QEMU configuration that exposes the QMP monitor used by
 // the web desktop. It is installed when a VM is created so opening the desktop
 // does not have to restart the guest.
@@ -125,6 +119,10 @@ func MonitorAppArmor(instance string) string {
 	return fmt.Sprintf("%s mrw,\n%s mrw,", qmpSocketPath(instance), ScreenshotPath(instance))
 }
 
+// EnsureMonitor installs the QEMU configuration that exposes a QMP socket and
+// relaxes AppArmor so QEMU may bind it. It is idempotent: a live monitor is left
+// untouched, and a running VM is only restarted when the configuration changes
+// because QEMU reads raw.qemu.conf at start.
 func (m *Monitor) EnsureMonitor(ctx context.Context, guest Guest) (bool, error) {
 	conf := MonitorConfig(guest.Instance)
 	apparmor := MonitorAppArmor(guest.Instance)
