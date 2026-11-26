@@ -100,6 +100,21 @@ describe('HostMetricsPanel', () => {
     expect(wrapper.text()).toContain('2.00')
   })
 
+  it('switches back to the center source', async () => {
+    const wrapper = mount(HostMetricsPanel, {
+      props: { cluster: 'c1', member: 'node-a' },
+      global: { stubs: { Sparkline: true, ElButton: true, ElProgress: true, ElAlert: true } },
+    })
+    await nextTick()
+    await wrapper.find('select').setValue('external')
+    await nextTick()
+    await wrapper.find('select').setValue('center')
+    await flushPromises()
+
+    expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('center')
+    expect(api.hostMetrics).toHaveBeenCalledWith('c1', 'node-a')
+  })
+
   it('explains disabled external metrics and can switch back to the center', async () => {
     vi.mocked(api.hostMetrics).mockResolvedValue([])
     vi.mocked(api.metricQueryRange).mockRejectedValueOnce(

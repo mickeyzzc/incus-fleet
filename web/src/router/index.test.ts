@@ -3,14 +3,26 @@ import { createMemoryHistory } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
-import { setLocale } from '@/i18n'
-import { createFleetRouter, handleRouteError } from './index'
+import i18n, { setLocale } from '@/i18n'
+import { applyDocumentTitle, createFleetRouter, handleRouteError, routeTitle } from './index'
 
 describe('fleet router', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     document.title = ''
     sessionStorage.removeItem('incus-fleet.chunk-reload')
+  })
+
+  it('resolves titles from route metadata', () => {
+    const dashboard = i18n.global.t('titles.dashboard')
+    const brand = i18n.global.t('app.brand')
+
+    expect(routeTitle({ meta: { titleKey: 'titles.dashboard' } } as any)).toBe(dashboard)
+    expect(routeTitle({ meta: { title: 'Plain title' } } as any)).toBe('Plain title')
+    expect(routeTitle({ meta: {} } as any)).toBe(brand)
+
+    applyDocumentTitle({ meta: { titleKey: 'titles.dashboard' } } as any)
+    expect(document.title).toBe(`${dashboard} · ${brand}`)
   })
 
   it('reloads once on a stale chunk load failure', () => {

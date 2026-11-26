@@ -996,9 +996,16 @@ export interface PluginCatalogEntry {
   id: string
   name: string
   description: string
-  upstream_hint: string
+  upstream_hint?: string
   ui_path: string
   wiring: string
+  image?: string
+  default_cpu?: string
+  default_memory?: string
+  default_disk?: string
+  default_network?: string
+  port?: number
+  health_path?: string
 }
 
 export interface PluginCatalogResponse {
@@ -1007,7 +1014,14 @@ export interface PluginCatalogResponse {
 
 export interface PluginInstallRequest {
   id: string
-  upstream: string
+  cluster?: string
+  member?: string
+  name?: string
+  cpu?: string
+  memory?: string
+  disk?: string
+  network?: string
+  upstream?: string
 }
 
 export interface PluginInstallResponse {

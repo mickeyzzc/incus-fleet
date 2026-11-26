@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
+	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
@@ -82,6 +83,20 @@ func TestPluginOneClickInstall(t *testing.T) {
 	}
 	if len(list.Plugins) != 0 {
 		t.Fatalf("plugins after uninstall = %#v", list.Plugins)
+	}
+}
+
+func TestPickLeastLoadedMember(t *testing.T) {
+	members := []clusters.Member{
+		{Name: "busy", Status: "Online", Memory: clusters.ResourceMem{Used: 90, Total: 100}, Storage: clusters.StorageUsage{Used: 90, Total: 100}},
+		{Name: "offline", Status: "Offline", Memory: clusters.ResourceMem{Used: 1, Total: 100}},
+		{Name: "idle", Status: "Online", Memory: clusters.ResourceMem{Used: 10, Total: 100}, Storage: clusters.StorageUsage{Used: 5, Total: 100}},
+	}
+	if got := pickLeastLoadedMember(members); got != "idle" {
+		t.Fatalf("pickLeastLoadedMember() = %q, want idle", got)
+	}
+	if got := pickLeastLoadedMember(nil); got != "" {
+		t.Fatalf("empty members = %q", got)
 	}
 }
 

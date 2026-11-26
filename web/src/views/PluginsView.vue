@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { Connection, Refresh, Setting, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import type { PluginCatalogEntry, PluginEntry } from '@/api/types'
+import { useClustersStore } from '@/stores/clusters'
 import { pluginStatus, usePluginsStore } from '@/stores/plugins'
 import type { PluginStatus } from '@/stores/plugins'
 
 const plugins = usePluginsStore()
+const clusters = useClustersStore()
 const { t } = useI18n()
 
 /** Which top-level view is showing: the catalogue or what is already installed. */
@@ -19,21 +21,59 @@ const detailTab = ref('overview')
 
 const selected = computed<PluginEntry | undefined>(() => plugins.byId(selectedId.value))
 const installTarget = ref<PluginCatalogEntry | null>(null)
-const upstream = ref('')
+const installForm = reactive({
+  cluster: '',
+  member: '',
+  name: '',
+  cpu: '',
+  memory: '',
+  disk: '',
+  network: '',
+  upstream: '',
+})
 const installedIDs = computed(() => new Set(plugins.installed.map((entry) => entry.id)))
+const installMembers = computed(() => {
+  const summary = clusters.items.find((item) => item.name === installForm.cluster)
+  return summary?.members ?? []
+})
+const deploysInstance = computed(() => Boolean(installTarget.value?.image))
 
 function openInstall(entry: PluginCatalogEntry): void {
   installTarget.value = entry
-  upstream.value = entry.upstream_hint
+  installForm.cluster = clusters.items.find((item) => item.online)?.name ?? ''
+  installForm.member = ''
+  installForm.name = `fleet-${entry.id}`
+  installForm.cpu = entry.default_cpu ?? '2'
+  installForm.memory = entry.default_memory ?? '2GiB'
+  installForm.disk = entry.default_disk ?? '20GiB'
+  installForm.network = entry.default_network ?? 'incusbr0'
+  installForm.upstream = ''
+  void clusters.fetchAll()
 }
 
 async function confirmInstall(): Promise<void> {
   const target = installTarget.value
-  if (!target || !upstream.value.trim()) {
+  if (!target) {
+    return
+  }
+  if (!deploysInstance.value && !installForm.upstream.trim()) {
     return
   }
 
-  const token = await plugins.install(target.id, upstream.value.trim())
+  const token = await plugins.install({
+    id: target.id,
+    ...(deploysInstance.value
+      ? {
+          cluster: installForm.cluster,
+          member: installForm.member || undefined,
+          name: installForm.name.trim(),
+          cpu: installForm.cpu,
+          memory: installForm.memory,
+          disk: installForm.disk,
+          network: installForm.network,
+        }
+      : { upstream: installForm.upstream.trim() }),
+  })
   if (token) {
     ElMessage.success(t('plugins.installed'))
     installTarget.value = null
@@ -68,7 +108,7 @@ const detailTabs = [
 ] as const
 
 onMounted(async () => {
-  await plugins.fetch(true)
+  await Promise.all([plugins.fetch(true), clusters.fetchAll()])
 })
 
 function openDetail(entry: PluginEntry): void {
@@ -260,13 +300,62 @@ function closeDetail(): void {
     >
       <p class="muted">{{ t('plugins.installHint') }}</p>
       <el-form label-position="top" @submit.prevent="confirmInstall">
-        <el-form-item :label="t('plugins.upstream')">
-          <el-input v-model="upstream" :placeholder="installTarget?.upstream_hint" />
+        <template v-if="deploysInstance">
+          <div class="install-grid">
+            <el-form-item :label="t('plugins.installCluster')">
+              <el-select v-model="installForm.cluster" style="width: 100%">
+                <el-option
+                  v-for="cluster in clusters.items"
+                  :key="cluster.name"
+                  :label="cluster.display_name || cluster.name"
+                  :value="cluster.name"
+                  :disabled="!cluster.online"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item :label="t('plugins.installMember')">
+              <el-select v-model="installForm.member" clearable style="width: 100%">
+                <el-option :label="t('plugins.installAuto')" value="" />
+                <el-option
+                  v-for="member in installMembers"
+                  :key="member.name"
+                  :label="member.name"
+                  :value="member.name"
+                  :disabled="member.status !== 'Online'"
+                />
+              </el-select>
+            </el-form-item>
+          </div>
+          <el-form-item :label="t('plugins.installName')">
+            <el-input v-model="installForm.name" />
+          </el-form-item>
+          <div class="install-grid">
+            <el-form-item :label="t('plugins.installCPU')">
+              <el-input v-model="installForm.cpu" />
+            </el-form-item>
+            <el-form-item :label="t('plugins.installMemory')">
+              <el-input v-model="installForm.memory" />
+            </el-form-item>
+            <el-form-item :label="t('plugins.installDisk')">
+              <el-input v-model="installForm.disk" />
+            </el-form-item>
+            <el-form-item :label="t('plugins.installNetwork')">
+              <el-input v-model="installForm.network" />
+            </el-form-item>
+          </div>
+        </template>
+        <el-form-item v-else :label="t('plugins.upstream')">
+          <el-input v-model="installForm.upstream" :placeholder="installTarget?.upstream_hint" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="installTarget = null">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :disabled="!upstream.trim()" @click="confirmInstall">
+        <el-button
+          type="primary"
+          :loading="plugins.loading"
+          :disabled="deploysInstance ? !installForm.cluster : !installForm.upstream.trim()"
+          @click="confirmInstall"
+        >
           {{ t('plugins.install') }}
         </el-button>
       </template>
@@ -310,4 +399,9 @@ function closeDetail(): void {
 .danger { display: flex; gap: 8px; align-items: flex-start; }
 .danger-icon { color: var(--el-color-danger); margin-top: 2px; }
 .drawer-footer { margin-top: 16px; display: flex; justify-content: flex-end; }
+.install-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+}
 </style>
