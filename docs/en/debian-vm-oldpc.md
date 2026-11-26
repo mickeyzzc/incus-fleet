@@ -55,6 +55,18 @@ network `parent` keys, so these steps use the CLI. Everything after them is done
 6. Restart the VM and verify both DHCP leases (`06-final-list.jpg`,
    `07-final-devices.jpg`).
 
+## Access
+
+The official Debian image ships **only a locked `root` account** and no SSH server, so there
+is no default username/password. Use the web **Terminal** (exec) for a passwordless root
+shell, set a root password with `passwd root` before using the remote-desktop console, or
+install `openssh-server` if you need SSH.
+
+Opening **Remote desktop** calls `POST .../spice/prepare` with `apply: true`. Because Incus
+refuses `raw.qemu` changes while a VM runs, Fleet force-stops the VM, writes the `-spice`
+listener, and starts it again. Seeing a boot sequence after clicking Remote desktop, even
+though the list already said "Running", is expected.
+
 ## Known web gaps
 
 | ID | Issue | Workaround |
