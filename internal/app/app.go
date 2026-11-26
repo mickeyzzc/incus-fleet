@@ -247,6 +247,9 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 			Timeout:     parseDuration(cfg.Metrics.Query.Timeout, 15*time.Second),
 		})
 	}
+	if ctx != nil {
+		go pushPluginMetrics(ctx, manager, st, logger)
+	}
 	var agentInstall *agentinstall.Handler
 	var centerMesh *mesh.Mesh
 	var taskRunner *taskrunner.Runner

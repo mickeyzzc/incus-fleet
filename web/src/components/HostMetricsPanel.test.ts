@@ -100,6 +100,26 @@ describe('HostMetricsPanel', () => {
     expect(wrapper.text()).toContain('2.00')
   })
 
+  it('falls back when the center is enabled but empty', async () => {
+    vi.mocked(api.hostMetrics).mockResolvedValue([])
+    vi.mocked(api.metricQueryRange).mockResolvedValue([
+      {
+        name: 'fleet_host_memory_bytes',
+        labels: { cluster: 'c1', member: 'node-a', state: 'total' },
+        type: 'gauge',
+        points: [{ at: '2026-11-18T00:00:00Z', value: 1024 }],
+      },
+    ])
+    const wrapper = mount(HostMetricsPanel, {
+      props: { cluster: 'c1', member: 'node-a' },
+      global: { plugins: [ElementPlus], stubs: { Sparkline: true, ElProgress: true } },
+    })
+    await flushPromises()
+
+    expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('external')
+    expect(wrapper.text()).toContain('1.0 KiB')
+  })
+
   it('switches back to the center source', async () => {
     const wrapper = mount(HostMetricsPanel, {
       props: { cluster: 'c1', member: 'node-a' },

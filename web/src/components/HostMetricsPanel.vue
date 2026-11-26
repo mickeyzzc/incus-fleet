@@ -98,7 +98,20 @@ async function refresh(): Promise<void> {
       series.value = await externalSeries()
     } else {
       try {
-        series.value = (await api.hostMetrics(props.cluster, props.member)) ?? []
+        const local = (await api.hostMetrics(props.cluster, props.member)) ?? []
+        if (local.length > 0) {
+          series.value = local
+        } else {
+          // The center may be enabled yet empty (no agent reporting). Use the
+          // connected VictoriaMetrics automatically when it has samples.
+          const external = await externalSeries()
+          if (external.length > 0) {
+            series.value = external
+            source.value = 'external'
+          } else {
+            series.value = local
+          }
+        }
       } catch (err) {
         // No incus-fleet-agent reporting yet: fall back to the VictoriaMetrics
         // query proxy automatically instead of asking the operator to toggle it.
