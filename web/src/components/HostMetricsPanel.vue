@@ -86,14 +86,29 @@ function useCenterSource(): void {
   source.value = 'local'
 }
 
+function externalSeries(): Promise<TelemetrySeries[]> {
+  const selector = `{cluster="${props.cluster}",member="${props.member}",__name__=~"fleet_host_cpu_usage_ratio|fleet_host_memory_bytes|fleet_host_load|fleet_host_uptime_seconds"}`
+  return api.metricQueryRange(selector, '1h', '30s')
+}
+
 async function refresh(): Promise<void> {
   loading.value = true
   try {
     if (source.value === 'external') {
-      const selector = `{cluster="${props.cluster}",member="${props.member}",__name__=~"fleet_host_cpu_usage_ratio|fleet_host_memory_bytes|fleet_host_load|fleet_host_uptime_seconds"}`
-      series.value = await api.metricQueryRange(selector, '1h', '30s')
+      series.value = await externalSeries()
     } else {
-      series.value = (await api.hostMetrics(props.cluster, props.member)) ?? []
+      try {
+        series.value = (await api.hostMetrics(props.cluster, props.member)) ?? []
+      } catch (err) {
+        // No incus-fleet-agent reporting yet: fall back to the VictoriaMetrics
+        // query proxy automatically instead of asking the operator to toggle it.
+        const message = errorMessage(err)
+        if (!/telemetry is not enabled/i.test(message)) {
+          throw err
+        }
+        series.value = await externalSeries()
+        source.value = 'external'
+      }
     }
     error.value = ''
   } catch (err) {

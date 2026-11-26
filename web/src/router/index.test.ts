@@ -15,17 +15,15 @@ describe('fleet router', () => {
 
   it('reloads once on a stale chunk load failure', () => {
     const reload = vi.fn()
-    vi.stubGlobal('location', { reload, href: 'http://localhost/' })
 
-    handleRouteError(new Error('Failed to fetch dynamically imported module: old.js'))
-    handleRouteError(new Error('Failed to fetch dynamically imported module: old.js'))
+    handleRouteError(new Error('Failed to fetch dynamically imported module: old.js'), reload)
+    handleRouteError(new Error('Failed to fetch dynamically imported module: old.js'), reload)
 
     expect(reload).toHaveBeenCalledTimes(1)
     expect(sessionStorage.getItem('incus-fleet.chunk-reload')).toBeTruthy()
 
-    handleRouteError(new Error('unrelated failure'))
+    handleRouteError(new Error('unrelated failure'), reload)
     expect(reload).toHaveBeenCalledTimes(1)
-    vi.unstubAllGlobals()
   })
 
   it('sends unauthenticated visitors to login without a redirect for the dashboard', async () => {
