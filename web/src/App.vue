@@ -28,6 +28,12 @@ const clusters = useClustersStore()
 const plugins = usePluginsStore()
 const { t, locale } = useI18n()
 
+/** Plugin UIs are served by fleet's same-origin proxy, so they need a real
+ * document load instead of a client-side router push. */
+function openPlugin(path: string): void {
+  window.location.assign(path)
+}
+
 const publicPage = computed(() => route.meta.public === true)
 const mobileQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
   ? window.matchMedia('(max-width: 960px)')
@@ -277,6 +283,17 @@ async function logout(): Promise<void> {
             <el-icon><Grid /></el-icon>
             <span>{{ t('nav.plugins') }}</span>
             <span v-if="!isCollapsed && plugins.count > 0" class="nav-count">{{ plugins.count }}</span>
+          </el-menu-item>
+
+          <el-menu-item
+            v-for="item in plugins.navigation"
+            :key="item.id"
+            :index="`plugin-${item.id}`"
+            :title="item.fallbackTitle"
+            @click="openPlugin(item.path)"
+          >
+            <el-icon><Grid /></el-icon>
+            <span>{{ item.fallbackTitle }}</span>
           </el-menu-item>
 
           <div v-if="!isCollapsed" class="nav-group-label">{{ t('nav.clusters') }}</div>

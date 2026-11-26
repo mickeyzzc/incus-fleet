@@ -43,6 +43,10 @@ Run VictoriaMetrics (default port 8428) or VictoriaLogs (default port 9428) your
 
    ![Installed plugins](images/plugins/02-installed.jpg)
 
+4. Each installed plugin adds a menu entry below the Plugins item in the sidebar.
+
+   ![Plugin menu entry](images/plugins/03-sidebar.jpg)
+
 After a restart the entries remain. Disabling makes the proxy return 404; uninstalling
 revokes the token and removes the entry.
 
