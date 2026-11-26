@@ -78,26 +78,27 @@ describe('HostMetricsPanel', () => {
     expect(wrapper.text()).toContain('2.00')
   })
 
-  it('explains disabled center telemetry and can switch to the external source', async () => {
+  it('automatically falls back to the external source when center telemetry is off', async () => {
     vi.mocked(api.hostMetrics).mockRejectedValueOnce(new Error('telemetry is not enabled'))
-    vi.mocked(api.metricQueryRange).mockResolvedValue([])
+    vi.mocked(api.metricQueryRange).mockResolvedValue([
+      {
+        name: 'fleet_host_load',
+        labels: { cluster: 'c1', member: 'node-a', window: '1' },
+        type: 'gauge',
+        points: [{ at: '2026-11-18T00:00:00Z', value: 2 }],
+      },
+    ])
     const wrapper = mount(HostMetricsPanel, {
       props: { cluster: 'c1', member: 'node-a' },
       global: { plugins: [ElementPlus], stubs: { Sparkline: true, ElProgress: true } },
     })
     await nextTick()
     await nextTick()
-
-    expect(wrapper.text()).toContain('Center telemetry is not enabled')
-    expect(wrapper.text()).toContain('Install and connect incus-fleet-agent')
-
-    const external = wrapper.findAll('button').find((button) => button.text().includes('Prometheus/VM'))
-    await external?.trigger('click')
-    await nextTick()
     await nextTick()
 
     expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('external')
     expect(api.metricQueryRange).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('2.00')
   })
 
   it('explains disabled external metrics and can switch back to the center', async () => {

@@ -113,7 +113,7 @@ export function applyDocumentTitle(to: RouteLocationNormalized): void {
 }
 
 /** Reloads once when a stale tab requests a chunk removed by a new deployment. */
-export function handleRouteError(error: unknown): void {
+export function handleRouteError(error: unknown, reload: () => void = () => window.location.reload()): void {
   const message = error instanceof Error ? error.message : String(error)
   if (!/Failed to fetch dynamically imported module|Importing a module script failed/i.test(message)) {
     return
@@ -125,7 +125,7 @@ export function handleRouteError(error: unknown): void {
   }
 
   sessionStorage.setItem(key, String(Date.now()))
-  window.location.reload()
+  reload()
 }
 
 /** Builds a fleet router. Tests pass a memory history. */

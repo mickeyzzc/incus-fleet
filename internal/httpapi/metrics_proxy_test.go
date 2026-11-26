@@ -1,12 +1,14 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/mickeyzzc/incus-fleet/internal/metricsquery"
+	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/testutil/incusfake"
 )
 
@@ -33,6 +35,31 @@ func TestMetricsQueryProxy(t *testing.T) {
 	missing := f.request(t, http.MethodGet, "/api/v1/metrics/query_range", nil, cookie, "")
 	if missing.Code != http.StatusBadRequest {
 		t.Fatalf("missing query = %d", missing.Code)
+	}
+}
+
+func TestMetricsQueryUsesInstalledVMPLugin(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// VictoriaMetrics answers PromQL under /prometheus/api/v1/query_range.
+		if r.URL.Path != "/prometheus/api/v1/query_range" {
+			t.Errorf("backend path = %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[]}}`))
+	}))
+	defer backend.Close()
+
+	f := newAPIFixture(t, &incusfake.Server{}, &incusfake.Server{})
+	if err := f.store.CreateInstalledPlugin(context.Background(), &store.InstalledPlugin{
+		ID: "vm", Name: "VictoriaMetrics", Upstream: backend.URL,
+		UIPath: "/plugin/vm", Role: "viewer", Enabled: true,
+	}); err != nil {
+		t.Fatalf("CreateInstalledPlugin() error = %v", err)
+	}
+	cookie := f.login(t)
+
+	rec := f.request(t, http.MethodGet, "/api/v1/metrics/query_range?query=fleet_host_load", nil, cookie, "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "success") {
+		t.Fatalf("query range via plugin = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
