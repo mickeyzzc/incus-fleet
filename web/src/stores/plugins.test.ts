@@ -9,7 +9,14 @@ vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api')>()
   return {
     ...actual,
-    api: { ...actual.api, listPlugins: vi.fn() },
+    api: {
+      ...actual.api,
+      listPlugins: vi.fn(),
+      listPluginCatalog: vi.fn().mockResolvedValue({ catalog: [] }),
+      installPlugin: vi.fn(),
+      togglePlugin: vi.fn(),
+      uninstallPlugin: vi.fn(),
+    },
   }
 })
 
@@ -31,6 +38,11 @@ describe('usePluginsStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.mocked(api.listPlugins).mockReset()
+    vi.mocked(api.listPluginCatalog).mockReset()
+    vi.mocked(api.listPluginCatalog).mockResolvedValue({ catalog: [] })
+    vi.mocked(api.installPlugin).mockReset()
+    vi.mocked(api.togglePlugin).mockReset()
+    vi.mocked(api.uninstallPlugin).mockReset()
   })
 
   it('caches results until a forced refresh', async () => {
@@ -139,5 +151,44 @@ describe('usePluginsStore', () => {
     expect(store.items).toEqual([])
     expect(store.enabled).toBe(false)
     expect(store.hasPlugins).toBe(false)
+  })
+
+  it('installs, toggles and uninstalls a catalog plugin', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.listPluginCatalog).mockResolvedValue({
+      catalog: [{
+        id: 'vm', name: 'VictoriaMetrics', description: 'metrics',
+        upstream_hint: 'http://127.0.0.1:8428', ui_path: '/plugin-ui/vm/', wiring: 'metrics.query_url',
+      }],
+    })
+    vi.mocked(api.installPlugin).mockResolvedValue({ plugin: samplePlugin(), token: 'one-time-token' })
+    vi.mocked(api.togglePlugin).mockResolvedValue(samplePlugin({ enabled: false }))
+    vi.mocked(api.uninstallPlugin).mockResolvedValue(undefined)
+
+    const store = usePluginsStore()
+    await store.fetch()
+    expect(store.catalog).toHaveLength(1)
+
+    const token = await store.install('vm', 'http://127.0.0.1:8428')
+    expect(token).toBe('one-time-token')
+    expect(api.installPlugin).toHaveBeenCalledWith({ id: 'vm', upstream: 'http://127.0.0.1:8428' })
+
+    await store.toggle('vm', false)
+    expect(api.togglePlugin).toHaveBeenCalledWith('vm', false)
+
+    await store.uninstall('vm')
+    expect(api.uninstallPlugin).toHaveBeenCalledWith('vm')
+    expect(store.error).toBe('')
+  })
+
+  it('reports install failures without throwing', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.installPlugin).mockRejectedValue(new Error('bad upstream'))
+    const store = usePluginsStore()
+
+    const token = await store.install('vm', 'invalid')
+
+    expect(token).toBe('')
+    expect(store.error).toContain('bad upstream')
   })
 })

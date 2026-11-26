@@ -12,7 +12,14 @@ vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api')>()
   return {
     ...actual,
-    api: { ...actual.api, listPlugins: vi.fn() },
+    api: {
+      ...actual.api,
+      listPlugins: vi.fn(),
+      listPluginCatalog: vi.fn().mockResolvedValue({ catalog: [] }),
+      installPlugin: vi.fn(),
+      togglePlugin: vi.fn(),
+      uninstallPlugin: vi.fn(),
+    },
   }
 })
 
@@ -40,6 +47,13 @@ describe('PluginsView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.mocked(api.listPlugins).mockReset()
+    vi.mocked(api.listPluginCatalog).mockReset()
+    vi.mocked(api.listPluginCatalog).mockResolvedValue({
+      catalog: [
+        { id: 'vm', name: 'VictoriaMetrics', description: 'metrics', upstream_hint: 'http://127.0.0.1:8428', ui_path: '/plugin-ui/vm/', wiring: 'metrics.query_url' },
+        { id: 'vmlogs', name: 'VictoriaLogs', description: 'logs', upstream_hint: 'http://127.0.0.1:9428', ui_path: '/plugin-ui/vmlogs/', wiring: 'logs.query_url' },
+      ],
+    })
   })
 
   it('shows the disabled state when the plugin manager is off', async () => {
@@ -193,7 +207,7 @@ describe('pluginStatus', () => {
     await browse!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('catalog')
+    expect(wrapper.text()).toContain('One-click install')
   })
 
   it('closes the detail drawer', async () => {
@@ -227,6 +241,7 @@ describe('pluginStatus', () => {
 
   it('does not offer a self-referential action in the catalog empty state', async () => {
     vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.listPluginCatalog).mockResolvedValue({ catalog: [] })
 
     const wrapper = mountView()
     await flushPromises()
@@ -243,6 +258,6 @@ describe('pluginStatus', () => {
     // again — that would be a no-op loop.
     browse = wrapper.findAll('button').filter((b) => b.text().includes('Browse catalog'))
     expect(browse).toHaveLength(0)
-    expect(wrapper.text()).toContain('The catalog is empty')
+    expect(wrapper.text()).toContain('No plugins are registered on this instance')
   })
 })

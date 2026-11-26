@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import { api } from '@/api'
-import type { PluginEntry } from '@/api/types'
+import type { PluginCatalogEntry, PluginEntry } from '@/api/types'
 import { errorMessage } from '@/utils/errors'
 
 /**
@@ -31,6 +31,7 @@ export function pluginStatus(entry: PluginEntry): PluginStatusView {
 
 export const usePluginsStore = defineStore('plugins', () => {
   const items = ref<PluginEntry[]>([])
+  const catalog = ref<PluginCatalogEntry[]>([])
   const enabled = ref(false)
   const loading = ref(false)
   const loaded = ref(false)
@@ -61,8 +62,12 @@ export const usePluginsStore = defineStore('plugins', () => {
     loading.value = true
     error.value = ''
     try {
-      const response = await api.listPlugins()
+      const [response, catalogResponse] = await Promise.all([
+        api.listPlugins(),
+        api.listPluginCatalog(),
+      ])
       items.value = response.plugins ?? []
+      catalog.value = catalogResponse.catalog ?? []
       enabled.value = response.enabled
       loaded.value = true
     } catch (err) {
@@ -76,6 +81,48 @@ export const usePluginsStore = defineStore('plugins', () => {
     return items.value.find((entry) => entry.id === id)
   }
 
+  /** Connects a catalog plugin to an already running upstream service. */
+  async function install(id: string, upstream: string): Promise<string> {
+    loading.value = true
+    error.value = ''
+    try {
+      const result = await api.installPlugin({ id, upstream })
+      await fetch(true)
+      return result.token
+    } catch (err) {
+      error.value = errorMessage(err)
+      return ''
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function toggle(id: string, nextEnabled: boolean): Promise<void> {
+    loading.value = true
+    error.value = ''
+    try {
+      await api.togglePlugin(id, nextEnabled)
+      await fetch(true)
+    } catch (err) {
+      error.value = errorMessage(err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function uninstall(id: string): Promise<void> {
+    loading.value = true
+    error.value = ''
+    try {
+      await api.uninstallPlugin(id)
+      await fetch(true)
+    } catch (err) {
+      error.value = errorMessage(err)
+    } finally {
+      loading.value = false
+    }
+  }
+
   /**
    * The same-origin URL a plugin's UI is proxied under. The declared `ui.path`
    * is the SPA route that hosts it; the proxied content is always served from
@@ -87,14 +134,15 @@ export const usePluginsStore = defineStore('plugins', () => {
 
   function reset(): void {
     items.value = []
+    catalog.value = []
     enabled.value = false
     loaded.value = false
     error.value = ''
   }
 
   return {
-    items, enabled, loading, loaded, error,
+    items, catalog, enabled, loading, loaded, error,
     installed, count, hasPlugins, navigation,
-    fetch, byId, uiURL, reset,
+    fetch, byId, uiURL, install, toggle, uninstall, reset,
   }
 })
