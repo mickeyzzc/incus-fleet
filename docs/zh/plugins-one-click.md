@@ -52,6 +52,10 @@ plugins:
 
    ![已安装插件](images/plugins/02-installed.jpg)
 
+4. 安装后侧边栏「插件」下方会出现对应菜单项。
+
+   ![侧边栏插件菜单](images/plugins/03-sidebar.jpg)
+
 ### 验证
 
 - 安装后侧边栏出现插件菜单，点击后通过同源代理打开上游页面。
