@@ -17,6 +17,7 @@ import IsoImportDialog from '@/components/IsoImportDialog.vue'
 import IsoLaunchDialog from '@/components/IsoLaunchDialog.vue'
 import MemberDialog from '@/components/MemberDialog.vue'
 import MigrateDialog from '@/components/MigrateDialog.vue'
+import ClusterResourceTrend from '@/components/ClusterResourceTrend.vue'
 import RenameClusterDialog from '@/components/RenameClusterDialog.vue'
 import RenameInstanceDialog from '@/components/RenameInstanceDialog.vue'
 import NetworkDialog from '@/components/NetworkDialog.vue'
@@ -731,6 +732,8 @@ function openNodeUpgrade(member: ClusterMember): void {
           </div>
         </div>
       </section>
+
+      <ClusterResourceTrend :cluster="cluster" />
 
       <section v-if="summary" class="panel">
         <div class="panel-body">

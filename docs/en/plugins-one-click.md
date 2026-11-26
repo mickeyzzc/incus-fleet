@@ -10,6 +10,19 @@ than only registering an existing upstream. Third-party manifests are covered by
 > Screenshots are sanitized: hosts appear as `x.x.x.x`, accounts as `<user>`, and
 > credential values as `<redacted>`. No password is stored in the repository.
 
+## Prerequisite: import the official OCI images
+
+Import each image once per cluster:
+
+```bash
+incus remote add quay https://quay.io --protocol=oci --public
+incus image copy quay:victoriametrics/victoria-metrics:latest local: --alias vm-oci
+incus image copy quay:victoriametrics/victoria-logs:latest local: --alias vmlogs-oci
+```
+
+The image keeps data on the instance root disk (20GiB by default); attach a data
+volume for production retention.
+
 ## What install does
 
 1. Pick a cluster; an empty member means the lightweight scheduler chooses the online
@@ -17,12 +30,27 @@ than only registering an existing upstream. Third-party manifests are covered by
 2. Create a container with the manifest defaults: `2 vCPU / 2GiB / 20GiB`, NIC
    `incusbr0`.
 3. Wait for an IPv4 address.
-4. Download and start VictoriaMetrics (port 8428) or VictoriaLogs (port 9428) inside
-   the instance; systemd is used when available, otherwise `nohup`.
+4. The OCI entrypoint starts VictoriaMetrics (8428) or VictoriaLogs (9428) automatically.
 5. Record `http://<ip>:8428` as the upstream and issue a plugin-scoped token.
 6. Add the sidebar entry; fleet's metrics query proxy switches to the new service.
 
 Any failed step deletes the freshly created instance and revokes the token.
+
+## Metrics takeover and charts
+
+Once `vm` is installed:
+
+- Fleet pushes cluster/member totals every 30 seconds into VictoriaMetrics
+  (`fleet_cluster_*`, `fleet_member_*`, `fleet_host_memory_bytes`), with no agent or
+  manual remote-write configuration;
+- the node metrics panel automatically falls back to VictoriaMetrics when center
+  telemetry is empty;
+- the cluster overview gains a one-hour memory/storage trend panel.
+
+![Cluster trend](images/plugins/04-trend.jpg)
+
+CPU usage and load still require the actual `incus-fleet-agent`; the built-in push
+only carries capacity and usage totals Fleet can read directly.
 
 ## Steps
 
