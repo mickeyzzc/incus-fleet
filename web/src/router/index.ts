@@ -112,6 +112,22 @@ export function applyDocumentTitle(to: RouteLocationNormalized): void {
   document.title = `${routeTitle(to)} · ${i18n.global.t('app.brand')}`
 }
 
+/** Reloads once when a stale tab requests a chunk removed by a new deployment. */
+export function handleRouteError(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error)
+  if (!/Failed to fetch dynamically imported module|Importing a module script failed/i.test(message)) {
+    return
+  }
+
+  const key = 'incus-fleet.chunk-reload'
+  if (sessionStorage.getItem(key)) {
+    return
+  }
+
+  sessionStorage.setItem(key, String(Date.now()))
+  window.location.reload()
+}
+
 /** Builds a fleet router. Tests pass a memory history. */
 export function createFleetRouter(history: RouterHistory = createWebHistory()): Router {
   const router = createRouter({
@@ -152,20 +168,7 @@ export function createFleetRouter(history: RouterHistory = createWebHistory()): 
   // A tab left open across a deployment keeps the old entry bundle and asks
   // for hashed chunks that no longer exist. Reload once so the user gets the
   // current build instead of a dead menu item.
-  router.onError((error) => {
-    const message = error instanceof Error ? error.message : String(error)
-    if (!/Failed to fetch dynamically imported module|Importing a module script failed/i.test(message)) {
-      return
-    }
-
-    const key = 'incus-fleet.chunk-reload'
-    if (sessionStorage.getItem(key)) {
-      return
-    }
-
-    sessionStorage.setItem(key, String(Date.now()))
-    window.location.reload()
-  })
+  router.onError(handleRouteError)
 
   router.afterEach((to) => {
     applyDocumentTitle(to)
