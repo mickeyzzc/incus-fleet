@@ -30,7 +30,7 @@ var builtinPluginCatalog = []pluginCatalogItem{
 		Name:         "VictoriaMetrics",
 		Description:  "Connects the existing VictoriaMetrics UI and query API into the plugin menu.",
 		UpstreamHint: "http://127.0.0.1:8428",
-		UIPath:       "/plugin-ui/vm/",
+		UIPath:       "/plugin/vm",
 		Wiring:       "metrics.query_url",
 	},
 	{
@@ -38,7 +38,7 @@ var builtinPluginCatalog = []pluginCatalogItem{
 		Name:         "VictoriaLogs",
 		Description:  "Connects the existing VictoriaLogs query UI into the plugin menu.",
 		UpstreamHint: "http://127.0.0.1:9428",
-		UIPath:       "/plugin-ui/vmlogs/",
+		UIPath:       "/plugin/vmlogs",
 		Wiring:       "logs.query_url",
 	},
 }
@@ -187,13 +187,20 @@ func findCatalogItem(id string) (pluginCatalogItem, bool) {
 
 func installedEntry(p *store.InstalledPlugin) config.PluginEntry {
 	item, _ := findCatalogItem(p.ID)
+	// The sidebar link is an in-app route that frames the same-origin proxy.
+	// Derive it from the id so entries installed by older builds keep working.
+	uiPath := "/plugin/" + p.ID
+	if uiPath == "/plugin/" {
+		uiPath = p.UIPath
+	}
+
 	return config.PluginEntry{
 		ID:       p.ID,
 		Enabled:  p.Enabled,
 		Upstream: p.Upstream,
 		Role:     p.Role,
 		UI: config.PluginUIManifest{
-			Path:         p.UIPath,
+			Path:         uiPath,
 			TitleKey:     item.Name,
 			RequiresRole: p.Role,
 		},

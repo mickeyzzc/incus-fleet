@@ -28,12 +28,6 @@ const clusters = useClustersStore()
 const plugins = usePluginsStore()
 const { t, locale } = useI18n()
 
-/** Plugin UIs are served by fleet's same-origin proxy, so they need a real
- * document load instead of a client-side router push. */
-function openPlugin(path: string): void {
-  window.location.assign(path)
-}
-
 const publicPage = computed(() => route.meta.public === true)
 const mobileQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
   ? window.matchMedia('(max-width: 960px)')
@@ -288,9 +282,8 @@ async function logout(): Promise<void> {
           <el-menu-item
             v-for="item in plugins.navigation"
             :key="item.id"
-            :index="`plugin-${item.id}`"
+            :index="item.path"
             :title="item.fallbackTitle"
-            @click="openPlugin(item.path)"
           >
             <el-icon><Grid /></el-icon>
             <span>{{ item.fallbackTitle }}</span>

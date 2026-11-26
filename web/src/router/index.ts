@@ -72,6 +72,14 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'titles.plugins' },
   },
   {
+    // The proxied plugin UI is framed inside fleet so the sidebar stays usable.
+    path: '/plugin/:id',
+    name: 'plugin-page',
+    component: () => import('@/views/PluginPage.vue'),
+    props: true,
+    meta: { titleKey: 'titles.plugins' },
+  },
+  {
     path: '/users',
     name: 'users',
     component: () => import('@/views/UsersView.vue'),
@@ -139,6 +147,24 @@ export function createFleetRouter(history: RouterHistory = createWebHistory()): 
     }
 
     return true
+  })
+
+  // A tab left open across a deployment keeps the old entry bundle and asks
+  // for hashed chunks that no longer exist. Reload once so the user gets the
+  // current build instead of a dead menu item.
+  router.onError((error) => {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!/Failed to fetch dynamically imported module|Importing a module script failed/i.test(message)) {
+      return
+    }
+
+    const key = 'incus-fleet.chunk-reload'
+    if (sessionStorage.getItem(key)) {
+      return
+    }
+
+    sessionStorage.setItem(key, String(Date.now()))
+    window.location.reload()
   })
 
   router.afterEach((to) => {
