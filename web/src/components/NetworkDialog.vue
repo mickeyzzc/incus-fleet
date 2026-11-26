@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import KeyValueEditor from '@/components/KeyValueEditor.vue'
-import type { NetworkResource } from '@/api/types'
+import type { ClusterMember, NetworkResource } from '@/api/types'
 import { useInstancesStore } from '@/stores/instances'
 import { errorMessage } from '@/utils/errors'
 
@@ -13,9 +13,11 @@ const props = withDefaults(
     modelValue: boolean
     cluster: string
     network?: NetworkResource | null
+    members?: ClusterMember[]
   }>(),
   {
     network: null,
+    members: () => [],
   },
 )
 
@@ -30,6 +32,7 @@ const { t } = useI18n()
 const form = reactive({
   name: '',
   type: '',
+  member: '',
   description: '',
   config: {} as Record<string, string>,
 })
@@ -61,6 +64,7 @@ watch(
 
     form.name = props.network?.name ?? ''
     form.type = props.network?.type ?? ''
+    form.member = ''
     form.description = props.network?.description ?? ''
     const config = { ...(props.network?.config ?? {}) }
     structured.ipv4 = config['ipv4.address'] ?? ''
@@ -96,7 +100,12 @@ function request(): { name?: string; type?: string; description?: string; config
     return payload
   }
 
-  return { ...payload, name: form.name.trim(), type: form.type }
+  return {
+    ...payload,
+    name: form.name.trim(),
+    type: form.type,
+    ...(form.member ? { member: form.member } : {}),
+  }
 }
 
 function validate(): string {
@@ -152,6 +161,14 @@ async function submit(): Promise<void> {
         >
           <el-option v-for="type in types" :key="type" :label="type" :value="type" />
         </el-select>
+      </el-form-item>
+
+      <el-form-item v-if="!isEdit" :label="t('cluster.members')">
+        <el-select v-model="form.member" clearable style="width: 100%">
+          <el-option :label="t('cluster.allMembers')" value="" />
+          <el-option v-for="member in members" :key="member.name" :label="member.name" :value="member.name" />
+        </el-select>
+        <p class="field-hint">{{ t('cluster.networkMemberHint') }}</p>
       </el-form-item>
 
       <el-form-item :label="t('admin.description')">

@@ -358,6 +358,7 @@ export default {
     networkType: 'Type',
     locations: 'Members',
     allMembers: 'All members',
+    networkMemberHint: 'Member-specific keys such as parent must be defined per member. Create once per member, then create again with this field empty to instantiate the network.',
     unknownMember: 'unknown member',
     managed: 'Managed',
     ipv4: 'IPv4',

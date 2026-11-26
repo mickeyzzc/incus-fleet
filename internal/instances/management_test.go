@@ -131,11 +131,14 @@ func TestCreateWithAdditionalDisks(t *testing.T) {
 
 	post := srv.CreateArgs()[0]
 	if disk := post.Devices["data0"]; disk["type"] != "disk" || disk["path"] != "/data" ||
-		disk["pool"] != "default" || disk["size"] != "50GiB" {
+		disk["pool"] != "default" || disk["source"] != "dev-vm-disks-data0" {
 		t.Fatalf("data0 = %#v", disk)
 	}
-	if disk := post.Devices["data1"]; disk["pool"] != "fast" || disk["size"] != "20GiB" {
+	if disk := post.Devices["data1"]; disk["pool"] != "fast" || disk["source"] != "dev-vm-disks-data1" {
 		t.Fatalf("data1 = %#v", disk)
+	}
+	if args := srv.CreateVolumeArgs(); len(args) != 2 {
+		t.Fatalf("volumes = %#v", args)
 	}
 
 	_, err = svc.Create(context.Background(), "c1", CreateRequest{
@@ -152,6 +155,54 @@ func TestCreateWithAdditionalDisks(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Create() accepted a relative disk path")
+	}
+}
+
+func TestCreateVMBakesSPICEAndBridgedNIC(t *testing.T) {
+	srv := &incusfake.Server{
+		Instance:  &api.Instance{Name: "vm-01"},
+		PoolNames: []string{"default"},
+		Networks: []api.Network{
+			{Name: "fleetbr0", Type: "bridge", Managed: false, Locations: []string{"n1", "n2"}},
+		},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	_, err := svc.Create(context.Background(), "c1", CreateRequest{
+		Name: "vm-01", Type: "virtual-machine", Image: "debian", Network: "fleetbr0",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	post := srv.CreateArgs()[0]
+	raw := post.Config["raw.qemu"]
+	if !strings.Contains(raw, "-spice ") || !strings.Contains(raw, "disable-ticketing=on") {
+		t.Fatalf("raw.qemu = %q", raw)
+	}
+	if port := spicePortFromConfig(raw); port <= 0 {
+		t.Fatalf("SPICE port = %d", port)
+	}
+	if !strings.Contains(post.Config["raw.qemu.conf"], `[mon "fleetmon"]`) {
+		t.Fatalf("monitor config = %q", post.Config["raw.qemu.conf"])
+	}
+	if !strings.Contains(post.Config["raw.apparmor"], "fleet-qmp-vm-01.sock") {
+		t.Fatalf("apparmor = %q", post.Config["raw.apparmor"])
+	}
+	nic := post.Devices["eth0"]
+	if nic["nictype"] != "bridged" || nic["parent"] != "fleetbr0" {
+		t.Fatalf("nic = %#v", nic)
+	}
+}
+
+func TestApplyNICNetworkUsesBridgeForUnmanagedBridge(t *testing.T) {
+	nic := map[string]string{"type": "nic"}
+	err := applyNICNetwork(nic, &api.Network{Type: "bridge", Managed: false}, "br0", "", "")
+	if err != nil {
+		t.Fatalf("applyNICNetwork() error = %v", err)
+	}
+	if nic["nictype"] != "bridged" || nic["parent"] != "br0" {
+		t.Fatalf("nic = %#v", nic)
 	}
 }
 

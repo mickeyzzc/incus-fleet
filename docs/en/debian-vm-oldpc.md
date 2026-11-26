@@ -62,18 +62,22 @@ is no default username/password. Use the web **Terminal** (exec) for a passwordl
 shell, set a root password with `passwd root` before using the remote-desktop console, or
 install `openssh-server` if you need SSH.
 
-Opening **Remote desktop** calls `POST .../spice/prepare` with `apply: true`. Because Incus
-refuses `raw.qemu` changes while a VM runs, Fleet force-stops the VM, writes the `-spice`
-listener, and starts it again. Seeing a boot sequence after clicking Remote desktop, even
-though the list already said "Running", is expected.
+VMs created through the current web UI are provisioned with the `-spice` listener,
+`raw.qemu.conf` QMP monitor and `raw.apparmor` rules at creation time. Opening **Remote
+desktop** only connects to those listeners and no longer power-cycles a running VM. Older
+instances without the baked-in config are still upgraded once on first open.
 
 ## Known web gaps
 
-| ID | Issue | Workaround |
+| ID | Issue | Fix |
 | --- | --- | --- |
-| BUG-01 | Create-form extra disks lack `source`; instance creation fails | Add the disk from the Devices tab instead |
-| BUG-02 | Unmanaged bridges are treated as macvlan parents, leaving NICs link-down | Recreate the NIC with `nictype=bridged` and the bridge as parent |
-| BUG-03 | The network dialog cannot set member-specific `parent` | Define per member and instantiate via CLI |
-| BUG-04 | `dir` pools do not enforce the recorded 100 GiB volume size | Use a pool with quota support |
+| BUG-018 | Create-form extra disks lack `source` | Create the volume first and backfill `source` |
+| BUG-019 | Unmanaged bridges are treated as macvlan parents | Choose `bridged` for bridge-type networks |
+| BUG-020 | Network dialog cannot set member-specific `parent` | Added member selector and two-step define/instantiate |
+| BUG-021 | Typing in the terminal did nothing | Wired xterm `onData` to the websocket |
+| BUG-022 | Opening remote desktop power-cycled a running VM | Bake SPICE/QMP/AppArmor config at creation |
+
+`dir` pools still do not enforce the recorded 100 GiB volume size; use a pool with quota
+support if a hard limit is required.
 
 See the [Chinese guide](../zh/debian-vm-oldpc.md) for detailed commands and verification.

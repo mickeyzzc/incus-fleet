@@ -356,6 +356,7 @@ export default {
     networkType: '类型',
     locations: '所属节点',
     allMembers: '全部节点',
+    networkMemberHint: '物理网卡等成员级配置需按节点定义；请为每个节点分别创建一次，最后留空节点再次创建以实例化网络。',
     unknownMember: '未知节点',
     managed: '受管',
     ipv4: 'IPv4',

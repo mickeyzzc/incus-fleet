@@ -17,6 +17,7 @@ import (
 	"github.com/lxc/incus/v7/shared/units"
 
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
+	"github.com/mickeyzzc/incus-fleet/internal/console"
 )
 
 // ErrInvalidRequest is returned when instance management input is invalid.
@@ -52,23 +53,23 @@ type DiskSpec struct {
 
 // CreateRequest describes a new instance.
 type CreateRequest struct {
-	Name         string     `json:"name"`
-	Type         string     `json:"type,omitempty"`
-	Image        string     `json:"image"`
-	Description  string     `json:"description,omitempty"`
-	Profiles     []string   `json:"profiles,omitempty"`
-	CPU          string     `json:"cpu,omitempty"`
-	Memory       string     `json:"memory,omitempty"`
-	RootDiskSize string     `json:"root_disk_size,omitempty"`
-	StoragePool  string     `json:"storage_pool,omitempty"`
-	Network      string     `json:"network,omitempty"`
-	IPv4         string     `json:"ipv4,omitempty"`
-	IPv6         string     `json:"ipv6,omitempty"`
+	Name         string   `json:"name"`
+	Type         string   `json:"type,omitempty"`
+	Image        string   `json:"image"`
+	Description  string   `json:"description,omitempty"`
+	Profiles     []string `json:"profiles,omitempty"`
+	CPU          string   `json:"cpu,omitempty"`
+	Memory       string   `json:"memory,omitempty"`
+	RootDiskSize string   `json:"root_disk_size,omitempty"`
+	StoragePool  string   `json:"storage_pool,omitempty"`
+	Network      string   `json:"network,omitempty"`
+	IPv4         string   `json:"ipv4,omitempty"`
+	IPv6         string   `json:"ipv6,omitempty"`
 	// Member pins creation to one cluster member. Physical NICs are member
 	// local; the UI supplies the owner so a macvlan device does not land on a
 	// member where the parent interface is missing.
-	Member string    `json:"member,omitempty"`
-	Start  *bool     `json:"start,omitempty"`
+	Member string     `json:"member,omitempty"`
+	Start  *bool      `json:"start,omitempty"`
 	Disks  []DiskSpec `json:"disks,omitempty"`
 }
 
@@ -156,6 +157,10 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 		instanceType = api.InstanceTypeVM
 	}
 
+	// Members are pinned early so volumes for additional disks are created on
+	// the same member as the instance (local storage pools are member-local).
+	targetMember := strings.TrimSpace(req.Member)
+
 	pool := strings.TrimSpace(req.StoragePool)
 	if pool == "" {
 		pool = "default"
@@ -171,7 +176,7 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 
 	network := strings.TrimSpace(req.Network)
 	var networkManaged bool
-	var targetMember string
+	var networkType string
 	if network != "" {
 		networks, err := client.GetNetworks()
 		if err != nil {
@@ -190,10 +195,11 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 		}
 
 		networkManaged = target.Managed
+		networkType = target.Type
 		// Physical NICs are member-local: an instance using one must be
 		// created on the member that owns the interface. Incus reports the
 		// owning member(s) in Locations for unmanaged NICs.
-		if !networkManaged && len(target.Locations) == 1 {
+		if !networkManaged && len(target.Locations) == 1 && targetMember == "" {
 			targetMember = target.Locations[0]
 		}
 		// Unmanaged parents are attached as macvlan and take addresses from
@@ -217,11 +223,29 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 		config["limits.memory"] = req.Memory
 	}
 
+	// Bake the SPICE listener into the VM at creation time. Opening the remote
+	// desktop then only connects to the listener; it no longer has to stop and
+	// restart the VM to write raw.qemu.
+	if instanceType == api.InstanceTypeVM {
+		if _, err := EnsureSPICEConfig(config, 0); err != nil {
+			return Detail{}, err
+		}
+		// Arm the QMP monitor at creation too: without this, the first desktop
+		// open has to stop and restart the VM to install raw.qemu.conf.
+		config["raw.qemu.conf"] = console.MonitorConfig(req.Name)
+		config["raw.apparmor"] = console.MonitorAppArmor(req.Name)
+	}
+
 	root := map[string]string{"type": "disk", "path": "/", "pool": pool}
 	if req.RootDiskSize != "" {
 		root["size"] = req.RootDiskSize
 	}
 	devices := api.DevicesMap{"root": root}
+
+	var volumeStore volumeCreator = client
+	if targetMember != "" {
+		volumeStore = client.UseTarget(targetMember)
+	}
 
 	for _, disk := range req.Disks {
 		diskPool := strings.TrimSpace(disk.Pool)
@@ -231,15 +255,22 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 			return Detail{}, fmt.Errorf("%w: storage pool %q does not exist on %s", ErrInvalidRequest, diskPool, clusterName)
 		}
 
+		name := strings.TrimSpace(disk.Name)
 		device := map[string]string{
 			"type": "disk",
 			"path": strings.TrimSpace(disk.Path),
 			"pool": diskPool,
 		}
 		if size := strings.TrimSpace(disk.Size); size != "" {
-			device["size"] = size
+			// A pool-backed disk needs a source volume; Incus rejects a bare
+			// pool+size device with "missing the required source or path".
+			volumeName, err := ensureVMDiskVolume(volumeStore, clusterName, req.Name, name, diskPool, size)
+			if err != nil {
+				return Detail{}, err
+			}
+			device["source"] = volumeName
 		}
-		devices[strings.TrimSpace(disk.Name)] = device
+		devices[name] = device
 	}
 
 	if network != "" {
@@ -253,11 +284,11 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 			if req.IPv6 != "" {
 				nic["ipv6.address"] = req.IPv6
 			}
-		case isOverlayBridge(network):
-			// A fleet-managed overlay bridge is a plain host bridge, so Incus
-			// does not list it as a managed network. Attach it as a bridged NIC
-			// so the guest keeps using DHCP from the overlay gateway instead of
-			// landing on the physical LAN the way macvlan would.
+		case networkType == "bridge" || isOverlayBridge(network):
+			// Unmanaged host bridges (including Fleet's overlay bridge) are
+			// plain Linux bridges, not physical uplinks. A macvlan NIC on top
+			// of such a bridge stays link-down when the bridge carries a host
+			// address, so attach it as a bridged NIC instead.
 			nic["nictype"] = "bridged"
 			nic["parent"] = network
 		default:
@@ -287,10 +318,6 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 
 	ctx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
-
-	if requested := strings.TrimSpace(req.Member); requested != "" {
-		targetMember = requested
-	}
 
 	var creator instanceCreator = client
 	if targetMember != "" {
@@ -800,7 +827,11 @@ func applyNICNetwork(nic map[string]string, target *api.Network, network, static
 	delete(nic, "network")
 	delete(nic, "ipv4.address")
 	delete(nic, "ipv6.address")
-	nic["nictype"] = "macvlan"
+	if target.Type == "bridge" {
+		nic["nictype"] = "bridged"
+	} else {
+		nic["nictype"] = "macvlan"
+	}
 	nic["parent"] = network
 
 	return nil

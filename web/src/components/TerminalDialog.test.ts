@@ -9,13 +9,21 @@ import TerminalDialog from './TerminalDialog.vue'
 // xterm cannot render inside jsdom; stub the terminal surface.
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
+    static instances: any[] = []
     cols = 80
     rows = 25
+    constructor() {
+      ;(this.constructor as any).instances.push(this)
+      ;(globalThis as any).__fleetTerminal = this
+    }
     loadAddon(): void {}
     open(): void {}
     clear(): void {}
     dispose(): void {}
     write(): void {}
+    onData(handler: (data: string) => void): void {
+      ;(this as any).dataHandler = handler
+    }
   },
 }))
 vi.mock('@xterm/addon-fit', () => ({
@@ -134,6 +142,37 @@ describe('TerminalDialog', () => {
 
     expect(socket.sent).toHaveLength(3)
     expect(new TextDecoder().decode(socket.sent[2] as ArrayBuffer)).toBe('ls\n')
+
+    wrapper.unmount()
+  })
+
+  it('forwards keystrokes typed directly into the terminal', async () => {
+    const wrapper = mountDialog()
+    await settle()
+
+    const radio = wrapper.findComponent({ name: 'ElRadioGroup' })
+    radio.vm.$emit('update:modelValue', 'exec')
+    await settle(200)
+
+    const socket = MockWebSocket.instances[1]
+    if (!socket) {
+      throw new Error('exec socket missing')
+    }
+    socket.onopen?.()
+    await flushPromises()
+
+    const terminal = (globalThis as any).__fleetTerminal
+    expect(terminal?.dataHandler).toBeTypeOf('function')
+    terminal.dataHandler('uname')
+    terminal.dataHandler('\r')
+
+    expect(JSON.parse(socket.sent[0] as string)).toEqual({
+      command: ['bash'],
+      width: 80,
+      height: 25,
+    })
+    expect(new TextDecoder().decode(socket.sent[1] as ArrayBuffer)).toBe('uname')
+    expect(new TextDecoder().decode(socket.sent[2] as ArrayBuffer)).toBe('\r')
 
     wrapper.unmount()
   })

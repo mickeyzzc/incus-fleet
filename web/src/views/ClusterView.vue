@@ -1353,6 +1353,7 @@ function openNodeUpgrade(member: ClusterMember): void {
       v-model="networkDialogOpen"
       :cluster="cluster"
       :network="networkEditing"
+      :members="summary?.members ?? []"
       @saved="instances.fetchResources(cluster, true)"
     />
     <ProfileDialog

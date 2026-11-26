@@ -36,6 +36,39 @@ describe('NetworkDialog', () => {
     vi.mocked(api.updateNetwork).mockResolvedValue(undefined)
   })
 
+  it('can define a member-specific network on one member', async () => {
+    const wrapper = mount(NetworkDialog, {
+      props: {
+        modelValue: true,
+        cluster: 'c1',
+        members: [
+          { name: 'n1', status: 'Online', database: true, roles: [] },
+          { name: 'n2', status: 'Online', database: true, roles: [] },
+        ],
+      },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    const inputs = wrapper.findAll('input')
+    await inputs[0]?.setValue('lan63')
+    const selects = wrapper.findAllComponents({ name: 'ElSelect' })
+    selects[0]?.vm.$emit('update:modelValue', 'physical')
+    selects[1]?.vm.$emit('update:modelValue', 'n2')
+    await flushPromises()
+
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(api.createNetwork).toHaveBeenCalledWith('c1', {
+      name: 'lan63',
+      type: 'physical',
+      member: 'n2',
+      description: '',
+      config: undefined,
+    })
+  })
+
   it('creates a managed network', async () => {
     const wrapper = mountDialog()
     await flushPromises()

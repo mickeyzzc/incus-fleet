@@ -18,6 +18,20 @@ import (
 	"strings"
 )
 
+// qmpProbeCode checks whether the monitor socket answers a QMP handshake. It
+// runs on the cluster member so no socket path crosses the network.
+const qmpProbeCode = `import socket,sys
+try:
+ s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+ s.settimeout(1)
+ s.connect(sys.argv[1])
+ s.recv(4096)
+ s.sendall(b'{"execute":"qmp_capabilities"}\n')
+ r=s.recv(4096)
+ print("ok" if b"return" in r else "bad")
+except Exception:
+ print("bad")`
+
 // ErrUnavailable reports that the guest has no graphical console to drive.
 var ErrUnavailable = errors.New("console: graphical console is unavailable")
 
@@ -85,11 +99,14 @@ func ScreenshotPath(instance string) string {
 //
 // A running VM is restarted when the monitor config changes, because QEMU only
 // reads raw.qemu.conf at start.
-func (m *Monitor) EnsureMonitor(ctx context.Context, guest Guest) (bool, error) {
+// MonitorConfig is the QEMU configuration that exposes the QMP monitor used by
+// the web desktop. It is installed when a VM is created so opening the desktop
+// does not have to restart the guest.
+func MonitorConfig(instance string) string {
 	// QEMU's config parser expects double-quoted strings; single quotes are
 	// taken literally and break both the path and the section keys.
 	// mode = "control" is the same wiring as -qmp: a QMP monitor.
-	conf := fmt.Sprintf(`[chardev "fleetmon"]
+	return fmt.Sprintf(`[chardev "fleetmon"]
 backend = "socket"
 path = "%s"
 server = "on"
@@ -98,11 +115,19 @@ wait = "off"
 [mon "fleetmon"]
 chardev = "fleetmon"
 mode = "control"
-`, qmpSocketPath(guest.Instance))
+`, qmpSocketPath(instance))
+}
 
-	// AppArmor rules are plain paths, not shell words: interposing quotes here
-	// makes apparmor_parser reject the generated profile.
-	apparmor := fmt.Sprintf("%s mrw,\n%s mrw,", qmpSocketPath(guest.Instance), ScreenshotPath(guest.Instance))
+// MonitorAppArmor grants QEMU access to the monitor socket and screenshot file.
+// AppArmor rules are plain paths, not shell words: interposing quotes here
+// makes apparmor_parser reject the generated profile.
+func MonitorAppArmor(instance string) string {
+	return fmt.Sprintf("%s mrw,\n%s mrw,", qmpSocketPath(instance), ScreenshotPath(instance))
+}
+
+func (m *Monitor) EnsureMonitor(ctx context.Context, guest Guest) (bool, error) {
+	conf := MonitorConfig(guest.Instance)
+	apparmor := MonitorAppArmor(guest.Instance)
 
 	script := fmt.Sprintf(`set -eu
 want_conf=%s
@@ -115,6 +140,13 @@ want_conf=$(printf '%%s' "$want_conf")
 want_apparmor=$(printf '%%s' "$want_apparmor")
 current_conf=$(incus config get %s raw.qemu.conf 2>/dev/null || true)
 current_apparmor=$(incus config get %s raw.apparmor 2>/dev/null || true)
+probe=$(python3 -c %s %s 2>/dev/null || true)
+if [ "$probe" = "ok" ]; then
+  # A live QMP monitor means the framebuffer is already available; rewriting
+  # config here would needlessly power cycle the guest on every desktop open.
+  echo "changed=0"
+  exit 0
+fi
 conf_diff=0
 aa_diff=0
 was_running=0
@@ -145,9 +177,10 @@ fi
 echo "changed=$changed"
 `,
 		shellQuote(conf), shellQuote(apparmor),
+		shellQuote(guest.Instance), shellQuote(guest.Instance),
+		shellQuote(qmpProbeCode), shellQuote(qmpSocketPath(guest.Instance)),
 		shellQuote(guest.Instance), shellQuote(guest.Instance), shellQuote(guest.Instance),
-		shellQuote(guest.Instance), shellQuote(guest.Instance), shellQuote(guest.Instance),
-		shellQuote(guest.Instance),
+		shellQuote(guest.Instance), shellQuote(guest.Instance),
 	)
 
 	out, err := m.host.Run(ctx, script)

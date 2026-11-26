@@ -102,6 +102,37 @@ func TestPrepareSPICE(t *testing.T) {
 	}
 }
 
+func TestPrepareSPICEKeepsRunningVMWithExistingListener(t *testing.T) {
+	srv := &incusfake.Server{
+		Instance: &api.Instance{
+			Name:       "vm-ready",
+			Type:       "virtual-machine",
+			Status:     "Running",
+			StatusCode: api.Running,
+			InstancePut: api.InstancePut{
+				Config: api.ConfigMap{
+					"raw.qemu": "-spice unix=off,port=5993,disable-ticketing=on,addr=127.0.0.1",
+				},
+			},
+		},
+	}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	result, err := svc.PrepareSPICE(context.Background(), "c1", "vm-ready", 0, true)
+	if err != nil {
+		t.Fatalf("PrepareSPICE() error = %v", err)
+	}
+	if result.Port != 5993 || !result.Applied || result.RestartRequired {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(srv.UpdateStateArgs()) != 0 {
+		t.Fatalf("running VM must not be power cycled: %#v", srv.UpdateStateArgs())
+	}
+	if len(srv.UpdateArgs()) != 0 {
+		t.Fatalf("raw.qemu must not be rewritten: %#v", srv.UpdateArgs())
+	}
+}
+
 func TestSPICEDial(t *testing.T) {
 	echo := func(conn net.Conn) {
 		defer conn.Close() //nolint:errcheck // test echo
