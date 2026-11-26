@@ -175,6 +175,21 @@ ClientIdentifier=mac
 
 ![最终设备清单](images/debian-vm-oldpc/07-final-devices.jpg)
 
+## 登录方式
+
+官方 Debian 镜像默认**只有 `root` 用户且密码被锁定**，也没有安装 sshd，因此没有可用的
+「账号 + 密码」。三种访问方式：
+
+1. **Web 终端**（实例详情 →「终端」）：直接以 root 打开 shell，无需密码。
+2. **远程桌面控制台**：需要先在终端里用 `passwd root` 设置 root 密码，然后在控制台以
+   `root` 登录。
+3. **SSH**：镜像未安装 sshd，需要自行 `apt install openssh-server` 并配置密码登录后才能使用。
+
+注意「远程桌面」按钮会调用 `POST .../spice/prepare` 并带 `apply: true`。实现上会先把
+`-spice ...` 写入 `raw.qemu`，而 Incus 不允许在虚拟机运行时修改 `raw.qemu`，因此它会
+**强制关机 → 写配置 → 再开机**。所以列表里状态已是「运行中」时，第一次打开远程桌面仍会
+看到一次重启，这是预期行为；不打开远程桌面时虚拟机没有 SPICE 监听端口，自然看不到桌面。
+
 ## 验证结果
 
 在客机内检查：
