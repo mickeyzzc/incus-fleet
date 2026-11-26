@@ -467,8 +467,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-const instancesTypeContainer = "container"
-
 func (a *API) uninstallPlugin(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	entry, err := a.store.GetInstalledPlugin(r.Context(), id)

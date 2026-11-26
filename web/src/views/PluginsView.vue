@@ -108,7 +108,10 @@ const detailTabs = [
 ] as const
 
 onMounted(async () => {
-  await Promise.all([plugins.fetch(true), clusters.fetchAll()])
+  // Cluster data only drives the placement selector; a failure there must not
+  // hide the catalog or the installed list.
+  void clusters.fetchAll()
+  await plugins.fetch(true)
 })
 
 function openDetail(entry: PluginEntry): void {
