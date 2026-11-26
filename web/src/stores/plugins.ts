@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import { api } from '@/api'
-import type { PluginCatalogEntry, PluginEntry } from '@/api/types'
+import type { PluginCatalogEntry, PluginEntry, PluginInstallRequest } from '@/api/types'
 import { errorMessage } from '@/utils/errors'
 
 /**
@@ -81,12 +81,12 @@ export const usePluginsStore = defineStore('plugins', () => {
     return items.value.find((entry) => entry.id === id)
   }
 
-  /** Connects a catalog plugin to an already running upstream service. */
-  async function install(id: string, upstream: string): Promise<string> {
+  /** Deploys (or connects) a catalog plugin from the install dialog. */
+  async function install(request: PluginInstallRequest): Promise<string> {
     loading.value = true
     error.value = ''
     try {
-      const result = await api.installPlugin({ id, upstream })
+      const result = await api.installPlugin(request)
       await fetch(true)
       return result.token
     } catch (err) {

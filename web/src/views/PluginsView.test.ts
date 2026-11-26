@@ -46,6 +46,7 @@ function samplePlugin(overrides: Partial<PluginEntry> = {}): PluginEntry {
 describe('PluginsView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.mocked(api.listClusters).mockResolvedValue([])
     vi.mocked(api.listPlugins).mockReset()
     vi.mocked(api.listPluginCatalog).mockReset()
     vi.mocked(api.listPluginCatalog).mockResolvedValue({

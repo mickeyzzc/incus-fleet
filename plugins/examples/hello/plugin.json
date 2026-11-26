@@ -1,0 +1,15 @@
+{
+  "id": "hello",
+  "name": "Hello service",
+  "description": "Minimal example plugin: deploys a tiny HTTP service on port 8080.",
+  "ui_path": "/plugin/hello",
+  "wiring": "example.hello_url",
+  "image": "debian/13",
+  "default_cpu": "1",
+  "default_memory": "512MiB",
+  "default_disk": "10GiB",
+  "default_network": "incusbr0",
+  "port": 8080,
+  "health_path": "/",
+  "install_script_file": "install.sh"
+}

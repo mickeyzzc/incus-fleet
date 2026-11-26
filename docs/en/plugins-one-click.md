@@ -1,78 +1,56 @@
-# One-click plugin connect and default unattended templates
+# One-click plugin install (official services)
 
 **English** | [中文](../zh/plugins-one-click.md)
 
-This guide covers (1) connecting VictoriaMetrics (`vm`) and VictoriaLogs (`vmlogs`) from the
-plugin catalog with one click, and (2) the four default unattended-install templates.
+The `vm` (VictoriaMetrics) and `vmlogs` (VictoriaLogs) catalog entries are official
+service plugins. One-click install now **creates and configures the service**, rather
+than only registering an existing upstream. Third-party manifests are covered by the
+[plugin specification](plugin-spec.md).
 
-> All screenshots are sanitized: host addresses appear as `x.x.x.x`, account names as
-> `<user>`, and credential-shaped values as `<redacted>`. No password is stored in this
-> repository or in the documentation.
+> Screenshots are sanitized: hosts appear as `x.x.x.x`, accounts as `<user>`, and
+> credential values as `<redacted>`. No password is stored in the repository.
 
-## Prerequisites
+## What install does
 
-The plugin manager must be enabled explicitly:
+1. Pick a cluster; an empty member means the lightweight scheduler chooses the online
+   member with the lowest `max(memory ratio, storage ratio)`.
+2. Create a container with the manifest defaults: `2 vCPU / 2GiB / 20GiB`, NIC
+   `incusbr0`.
+3. Wait for an IPv4 address.
+4. Download and start VictoriaMetrics (port 8428) or VictoriaLogs (port 9428) inside
+   the instance; systemd is used when available, otherwise `nohup`.
+5. Record `http://<ip>:8428` as the upstream and issue a plugin-scoped token.
+6. Add the sidebar entry; fleet's metrics query proxy switches to the new service.
 
-```yaml
-plugins:
-  enabled: true
-  entries: []
-```
+Any failed step deletes the freshly created instance and revokes the token.
 
-Restart `incus-fleet` afterwards. Installed plugins persist in the `installed_plugins`
-database table and survive a restart.
+## Steps
 
-## One-click connect
-
-This connects an **already running** service; it does not deploy one. Fleet registers the
-upstream, issues a scoped API token bound to the plugin id, adds a menu entry and a
-same-origin proxy under `/plugin-ui/<id>/`, and never forwards the Fleet session cookie to
-the upstream. Disable and uninstall are both available from the web UI; uninstall revokes the
-token but leaves the external service untouched. No VM/container is created, no binary is
-downloaded, and the Rust agent's log collection capability is unchanged.
-
-Run VictoriaMetrics (default port 8428) or VictoriaLogs (default port 9428) yourself, then:
-
-1. Open **Plugins → Catalog**. Two built-in entries are shown: `vm`
-   (`metrics.query_url`) and `vmlogs` (`logs.query_url`).
+1. Open **Plugins → Catalog** and pick VictoriaMetrics or VictoriaLogs.
 
    ![Catalog](images/plugins/01-catalog.jpg)
 
-2. Click **One-click install**, enter the real upstream address, and confirm.
-3. Open the **Installed** tab to see status, role, wiring, and Disable / Uninstall actions.
+2. Click **One-click install**. The dialog pre-fills resources, NIC and instance
+   name; keep the defaults or adjust them. Leave the member as **Auto** to schedule.
 
-   ![Installed plugins](images/plugins/02-installed.jpg)
+3. After install, the Installed tab shows the status and the sidebar gains a menu
+   entry. The plugin UI is framed inside the Fleet shell.
 
-4. Each installed plugin adds a menu entry below the Plugins item in the sidebar. Clicking it
-   keeps the Fleet shell and embeds the proxied UI in a same-origin iframe at `/plugin/<id>`;
-   an unreachable upstream only produces an error inside the frame, never a full-page detour.
+   ![Installed](images/plugins/02-installed.jpg)
 
-   ![Plugin menu entry](images/plugins/03-sidebar.jpg)
+   ![Sidebar](images/plugins/03-sidebar.jpg)
 
-After a restart the entries remain. Disabling makes the proxy return 404; uninstalling
-revokes the token and removes the entry.
+## Official vm integration
 
-## Default unattended templates
+- The PromQL query proxy automatically points at the deployed VictoriaMetrics; no
+  `metrics.query` config and no restart are needed.
+- Node pages fall back to VictoriaMetrics automatically when center telemetry is
+  absent, so operators no longer toggle the source manually.
+- The same data source is ready for cluster/node resource charts; the existing
+  metrics panels already read through it.
 
-Four templates are seeded into the Fleet database, one default per installer family:
+## Disable and uninstall
 
-| Template | Installer | Notes |
-| --- | --- | --- |
-| `default-debian-preseed` | Debian / d-i preseed | target disk `/dev/vda` |
-| `default-ubuntu-autoinstall` | Ubuntu autoinstall | disk chosen by installer |
-| `default-kickstart` | RHEL / Fedora kickstart | target disk `/dev/vda` |
-| `default-nocloud` | Generic cloud-init (NoCloud) | disk chosen by installer |
-
-They share timezone `Asia/Shanghai`, locale `zh_CN`, keyboard `us`, and the extra package
-`openssh-server`. The account and password follow the internal operator convention and are
-deliberately not reproduced here.
-
-![Templates](images/answer-profiles/01-default-templates.jpg)
-
-Select the matching default in the unattended-install dropdown when launching from an ISO;
-an empty hostname is filled with the VM name. Templates can be edited under **Images &
-automation → Unattended install**.
-
-Rotate the credentials there when needed. Never put the password in code, docs, screenshots,
-logs or tickets; share only sanitized captures. Deleting a template does not change accounts
-inside already installed systems.
+Disable only hides the proxy and menu entry. Uninstall deletes the service instance
+created by Fleet, revokes the token and removes the entry. Connect-only plugins never
+modify an external service.

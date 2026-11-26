@@ -17,6 +17,8 @@ type InstalledPlugin struct {
 	Upstream  string    `json:"upstream"`
 	UIPath    string    `json:"ui_path"`
 	Role      string    `json:"role"`
+	Cluster   string    `json:"cluster,omitempty"`
+	Instance  string    `json:"instance,omitempty"`
 	Enabled   bool      `json:"enabled"`
 	TokenID   string    `json:"token_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -37,10 +39,10 @@ func (s *SQLStore) CreateInstalledPlugin(ctx context.Context, p *InstalledPlugin
 	}
 
 	const query = `INSERT INTO installed_plugins
-		(id, name, version, upstream, ui_path, role, enabled, token_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		(id, name, version, upstream, ui_path, role, cluster, instance, enabled, token_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if _, err := s.db.ExecContext(ctx, s.rebind(query),
-		p.ID, p.Name, p.Version, p.Upstream, p.UIPath, p.Role,
+		p.ID, p.Name, p.Version, p.Upstream, p.UIPath, p.Role, p.Cluster, p.Instance,
 		boolToInt(p.Enabled), p.TokenID, p.CreatedAt.UnixNano(), p.UpdatedAt.UnixNano()); err != nil {
 		return fmt.Errorf("store: create installed plugin: %w", err)
 	}
@@ -50,7 +52,7 @@ func (s *SQLStore) CreateInstalledPlugin(ctx context.Context, p *InstalledPlugin
 
 // ListInstalledPlugins returns every plugin installed through the web UI.
 func (s *SQLStore) ListInstalledPlugins(ctx context.Context) ([]*InstalledPlugin, error) {
-	const query = `SELECT id, name, version, upstream, ui_path, role, enabled, token_id, created_at, updated_at
+	const query = `SELECT id, name, version, upstream, ui_path, role, cluster, instance, enabled, token_id, created_at, updated_at
 		FROM installed_plugins ORDER BY id`
 	rows, err := s.db.QueryContext(ctx, s.rebind(query))
 	if err != nil {
@@ -64,7 +66,7 @@ func (s *SQLStore) ListInstalledPlugins(ctx context.Context) ([]*InstalledPlugin
 		var enabled int
 		var created, updated int64
 		if err := rows.Scan(&p.ID, &p.Name, &p.Version, &p.Upstream, &p.UIPath, &p.Role,
-			&enabled, &p.TokenID, &created, &updated); err != nil {
+			&p.Cluster, &p.Instance, &enabled, &p.TokenID, &created, &updated); err != nil {
 			return nil, fmt.Errorf("store: scan installed plugin: %w", err)
 		}
 		p.Enabled = enabled != 0
@@ -78,13 +80,13 @@ func (s *SQLStore) ListInstalledPlugins(ctx context.Context) ([]*InstalledPlugin
 
 // GetInstalledPlugin returns one installed plugin by id.
 func (s *SQLStore) GetInstalledPlugin(ctx context.Context, id string) (*InstalledPlugin, error) {
-	const query = `SELECT id, name, version, upstream, ui_path, role, enabled, token_id, created_at, updated_at
+	const query = `SELECT id, name, version, upstream, ui_path, role, cluster, instance, enabled, token_id, created_at, updated_at
 		FROM installed_plugins WHERE id = ?`
 	var p InstalledPlugin
 	var enabled int
 	var created, updated int64
 	err := s.db.QueryRowContext(ctx, s.rebind(query), id).Scan(&p.ID, &p.Name, &p.Version,
-		&p.Upstream, &p.UIPath, &p.Role, &enabled, &p.TokenID, &created, &updated)
+		&p.Upstream, &p.UIPath, &p.Role, &p.Cluster, &p.Instance, &enabled, &p.TokenID, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -102,9 +104,10 @@ func (s *SQLStore) GetInstalledPlugin(ctx context.Context, id string) (*Installe
 func (s *SQLStore) UpdateInstalledPlugin(ctx context.Context, p *InstalledPlugin) error {
 	p.UpdatedAt = time.Now().UTC()
 	const query = `UPDATE installed_plugins SET name = ?, upstream = ?, enabled = ?,
-		token_id = ?, updated_at = ? WHERE id = ?`
+		token_id = ?, cluster = ?, instance = ?, updated_at = ? WHERE id = ?`
 	result, err := s.db.ExecContext(ctx, s.rebind(query),
-		p.Name, p.Upstream, boolToInt(p.Enabled), p.TokenID, p.UpdatedAt.UnixNano(), p.ID)
+		p.Name, p.Upstream, boolToInt(p.Enabled), p.TokenID, p.Cluster, p.Instance,
+		p.UpdatedAt.UnixNano(), p.ID)
 	if err != nil {
 		return fmt.Errorf("store: update installed plugin: %w", err)
 	}

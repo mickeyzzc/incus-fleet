@@ -169,7 +169,7 @@ describe('usePluginsStore', () => {
     await store.fetch()
     expect(store.catalog).toHaveLength(1)
 
-    const token = await store.install('vm', 'http://127.0.0.1:8428')
+    const token = await store.install({ id: 'vm', upstream: 'http://127.0.0.1:8428' })
     expect(token).toBe('one-time-token')
     expect(api.installPlugin).toHaveBeenCalledWith({ id: 'vm', upstream: 'http://127.0.0.1:8428' })
 
@@ -186,7 +186,7 @@ describe('usePluginsStore', () => {
     vi.mocked(api.installPlugin).mockRejectedValue(new Error('bad upstream'))
     const store = usePluginsStore()
 
-    const token = await store.install('vm', 'invalid')
+    const token = await store.install({ id: 'vm', upstream: 'invalid' })
 
     expect(token).toBe('')
     expect(store.error).toContain('bad upstream')

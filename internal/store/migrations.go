@@ -147,6 +147,15 @@ var schemaMigrations = []schemaMigration{
 		version:    13,
 		statements: []string{installedPluginSchema},
 	},
+	{
+		// Plugin installs that deploy an instance need to remember where it
+		// lives so uninstall can remove exactly that service.
+		version: 14,
+		addColumns: []addColumn{
+			{table: "installed_plugins", column: "cluster", definition: `TEXT NOT NULL DEFAULT ''`},
+			{table: "installed_plugins", column: "instance", definition: `TEXT NOT NULL DEFAULT ''`},
+		},
+	},
 }
 
 const installedPluginSchema = `
