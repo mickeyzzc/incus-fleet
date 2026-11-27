@@ -22,6 +22,13 @@
   示例包。
 - 数据驱动插件 UI：`router.addRoute` 页面、通用插件页、图标与 i18n 映射、侧栏单入口与
   徽标、商店/已安装双视图、三步安装向导、任务面板、五标签详情页与统一状态词。
+- 插件详情接口：`PUT /api/v1/plugins/{id}/config`、按 key 恢复接线默认值
+  （`DELETE /api/v1/plugins/{id}/wiring/{key}`），以及包含 config、wiring、events、
+  health_history 的描述符字段（迁移 16）。已安装的社区插件在中心重启后会重新注册，
+  其接线与事件订阅者不再丢失。
+- 新增接线消费方：`bootstrap.answer_file_url`（无人值守应答文件）、
+  `notifications.sink_url`（签名通知 sink）与 `metrics.remote_write_url`（运行时
+  remote-write 目标）。出站 webhook 可使用独立的 `plugins.events.webhook_secret_file`。
 - 中英文文档补充插件 P0–P5 状态、任务接口、接线键、事件端点与当前限制。
 
 ### 变更
@@ -30,11 +37,18 @@
 - `manifest.yaml` 成为首选插件格式，旧版 `plugin.json` 目录项仍可用。旧的同步安装接口
   `POST /api/v1/plugins/install` 与任务接口并存。
 - 插件 UI 与描述符使用 `/plugin-ui/<id>/…` 命名空间；插件管理页仍在 `/plugins`。
-- agent 遥测与日志上报默认关闭；安装 `vmlogs` 会启用日志检索，remote-write 仍需静态配置。
+- 配置任务安装器后，旧版 `POST /api/v1/plugins/install` 改为提交任务（返回 `202` 与任务
+  id）；返回一次性 token 的同步路径仅作为回退保留。浏览器向导与任务面板改为使用任务
+  接口并轮询真实进度。
+- agent 遥测与日志上报默认关闭；安装 `vmlogs` 会启用日志检索；安装 `vm` 并批准
+  `metrics.remote_write_url` 后会在运行时切换 remote-write 目标。
 
 ### 修复
 
-- 仅文档修正：插件文档不再将 P2–P5 标为「仅规范」；用户手册不再把一键安装描述为
+- 申请数据盘的插件安装现在必须给出明确的 `instance` 名称，不再对空名称执行格式化/挂载；
+  本地缺失的镜像别名会从其他在线 fleet 集群导入。
+- 卸载插件会注销其描述符与事件订阅者并清理配置与接线；社区插件在中心重启后也会加载持久化接线。
+- 文档修正：插件文档不再将 P2–P5 标为「仅规范」；用户手册不再把一键安装描述为
   仅接入已有服务。
 
 ## 0.2.0 - 2026-11-24

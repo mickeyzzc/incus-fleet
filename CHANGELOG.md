@@ -25,6 +25,15 @@ All notable changes to this project are documented here. The format follows
   and i18n mappings, one sidebar entry with a badge, Catalog/Installed views,
   a three-step install wizard, a task panel, a five-tab detail page, and one
   status vocabulary.
+- Plugin detail APIs: `PUT /api/v1/plugins/{id}/config`, per-key wiring restore
+  via `DELETE /api/v1/plugins/{id}/wiring/{key}`, and descriptor fields for
+  config, wiring, events and health history (migration 16). Installed community
+  plugins are re-registered on restart so their wiring and event subscribers
+  survive a center restart.
+- Wiring consumers for `bootstrap.answer_file_url` (unattended answer files),
+  `notifications.sink_url` (signed notification sink) and
+  `metrics.remote_write_url` (runtime remote-write target). Outbound webhooks
+  can use an independent `plugins.events.webhook_secret_file`.
 - Documentation now describes plugin phases P0–P5, the task API, wiring keys,
   event endpoints and the remaining limitations in English and Chinese.
 
@@ -37,12 +46,23 @@ All notable changes to this project are documented here. The format follows
   `POST /api/v1/plugins/install` endpoint is retained alongside the task API.
 - Plugin UIs and descriptors use the `/plugin-ui/<id>/…` namespace; the plugin
   manager itself stays at `/plugins`.
+- The legacy `POST /api/v1/plugins/install` now submits a task (`202` with a
+  task id) when the installer is configured; the synchronous token-returning
+  path remains only as a fallback. The browser wizard and task panel use the
+  task API and poll real task progress.
 - Agent telemetry and log shipping stay off by default. Installing `vmlogs`
-  enables log search, while remote write still requires static configuration.
+  enables log search; installing `vm` and approving `metrics.remote_write_url`
+  switches the remote-write target at runtime.
 
 ### Fixed
 
-- Documentation corrections only: the plugin docs no longer label P2–P5 as
+- Plugin installs that request a data disk now require an explicit `instance`
+  name instead of running the format/mount step against an empty name, and a
+  missing image alias is imported from another online fleet cluster.
+- Uninstalling a plugin unregisters its descriptor and event subscribers and
+  clears its config and wiring; community plugins also load their persisted
+  wiring after a center restart.
+- Documentation corrections: the plugin docs no longer label P2–P5 as
   "specified", and the user guides no longer describe one-click install as
   connecting an existing upstream only.
 

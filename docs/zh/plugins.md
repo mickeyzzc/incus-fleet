@@ -153,7 +153,7 @@ host task。十个步骤顺序执行；每步成功后把检查点写入 `HostTa
    带 `approvals`。
 2. **placement** —— 使用请求的 `cluster`/`member`，否则选第一个在线集群与成员。
 3. **image** —— 把 `artifact.image.reference` 解析为目标集群上已有镜像的指纹；
-   任务本身不导入镜像。
+   若本地缺失，则按别名从其他在线 fleet 集群导入。不支持直接从 OCI 仓库拉取。
 4. **data_disk** —— 当 `data_disk_gb`（或 manifest 中必需数据盘的默认值）大于 0 时，
    在 `storage_pool`（默认 `default`）上创建自定义卷 `plugin-<id>-data`，创建实例时
    挂到 `mount_point`。
@@ -259,9 +259,10 @@ PUT /api/v1/plugins/{id}/wiring          # manage:plugins；修改已批准接�
 | **MiBeeHive** | `hive` | 8080 | `bootstrap.answer_file_url` |
 | **MiBeeBell** | `bell` | 9090 | `notifications.sink_url` |
 
-安装 `vm` 会把 PromQL 代理切到 VictoriaMetrics；安装 `vmlogs` 会启用日志检索代理。
-这两个 manifest 都不会打开 remote-write 或 Rust agent 日志上报（见 §11）。另外两个键
-只是声明，便于安装页展示将接管的能力，fleet 尚未消费。
+安装 `vm` 会把 PromQL 代理切到 VictoriaMetrics，并在批准后通过
+`metrics.remote_write_url` 切换 remote-write 目标；安装 `vmlogs` 会启用日志检索代理。
+`hive` 的 `bootstrap.answer_file_url` 已接入无人值守安装的应答文件分发，`bell` 的
+`notifications.sink_url` 由签名通知 sink 消费。Rust agent 自身的日志上报仍未实现（见 §11）。
 
 能力互补：fleet 继续管实例/ISO/无人值守安装；hive 补网络启动（DHCP/TFTP）与应答文件分发。
 hive 可经 fleet 的 batch scripts/ops 原语可选地向选定节点分发 kite-agent，但绝不自行开 SSH 通道。
@@ -296,7 +297,7 @@ token 鉴权。令牌管理由 `read:own-tokens` 保护，
 | `GET` | `/api/v1/plugins` | `read:plugins` | 插件列表及管理器是否启用 |
 | `GET` | `/api/v1/plugins/catalog` | `read:plugins` | 目录项（内置 + `plugins.dir` 下的包） |
 | `GET` | `/api/v1/plugins/{id}` | `read:plugins` | 单个插件描述 |
-| `POST` | `/api/v1/plugins/install` | `manage:plugins` | 旧版同步安装；`201` 返回一次性 token |
+| `POST` | `/api/v1/plugins/install` | `manage:plugins` | 旧版入口；配置任务安装器时返回 `202` 与任务 id（仅同步回退路径返回 `201` 与一次性 token） |
 | `POST` | `/api/v1/plugins/{id}/toggle` | `manage:plugins` | 启用/停用已安装插件 |
 | `GET`、`PUT` | `/api/v1/plugins/{id}/wiring` | `read:plugins`、`manage:plugins` | 查看/修改已批准接线 |
 | `POST` | `/api/v1/plugin-installs` | `manage:plugins` | 入队任务安装 |
@@ -312,6 +313,7 @@ token 鉴权。令牌管理由 `read:own-tokens` 保护，
 `health_interval`（默认 `15s`）、`signing_key_file`（或环境变量
 `INCUS_FLEET_PLUGINS_SIGNING_KEY`），以及 `events.enabled`（默认 false）、
 `events.path`（默认 `/api/v1/plugins/events`）、`events.secret_file`（启用事件时必填）、
+`events.webhook_secret_file`（出站 webhook 优先使用，依次回退到 `secret_file` 和签名密钥派生值）、
 `events.bearer_token_file`（可选）。`plugins.entries` 可声明 `id`、`enabled`、
 `upstream` 和/或 `upstream_port`、`bearer_token_file`、`role`、`ui`（`path` 必须位于
 `/plugin-ui/` 下）。
@@ -376,7 +378,7 @@ token 鉴权。令牌管理由 `read:own-tokens` 保护，
 
 **状态（P3）：**侧栏单入口与徽标、商店/已安装双视图、三步安装向导、任务面板、固定
 五标签详情页，以及统一状态词（`installing`、`healthy`、`degraded`、`stopped`、
-`failed`）均已实现。尚未由服务端支撑的界面部分见 §11。
+`failed`）均已实现，并由任务、描述符、配置与接线接口提供数据。剩余限制见 §11。
 
 ## 9. 商店（社区插件）
 
@@ -401,22 +403,16 @@ token 鉴权。令牌管理由 `read:own-tokens` 保护，
 
 ## 11. 已知限制
 
-- Web 向导仍调用旧版同步接口 `POST /api/v1/plugins/install`。§4 的任务接口已提供，
-  但浏览器端尚未接入；任务面板目前展示向导的本地进度，而非轮询任务 id。
-- 详情页的「配置保存」（`PUT /api/v1/plugins/{id}/config`）与「按 key 恢复默认」
-  （`DELETE /api/v1/plugins/{id}/wiring/{key}`）调用的服务端路由并不存在。当前请用
-  `PUT /api/v1/plugins/{id}/wiring` 并传 `"enabled": false` 恢复默认值。
-  `GET /api/v1/plugins/{id}` 返回的描述符也没有接线、事件、健康历史与 config 字段，
-  因此这三个标签只显示空状态。
-- 接线行与批准记录会持久化，但重启时只重新注册内置描述符。已安装的社区插件需要
-  重新注册描述符，其接线才会加载、接线接口才会响应；动态注册的事件订阅者也只在
-  内存中存在。
-- `hive` 与 `bell` 的接线键仅是声明：fleet 尚无子系统消费
-  `bootstrap.answer_file_url` 或 `notifications.sink_url`。内置 manifest 均未声明
-  `metrics.remote_write_url`，remote-write 仍需静态配置。
-- 需要数据盘的插件应在请求中给出明确的 `instance` 名称：格式化/挂载步骤在创建实例
-  之前对该名称执行。任务会解析镜像别名，但不导入镜像。
-- agent 日志上报尚未实现：Rust agent 仍只上报指标，没有日志 envelope 或发送端可供修改。
+- 任务化安装返回 `202` 与任务 id，不返回一次性 API token；一次性 token 仅在保留的
+  旧版同步回退路径中展示。
+- 配置保存只接受 manifest 中 `install.templates` 声明的键并校验类型，任意自定义键会被拒绝。
+- 刷新页面不会自动恢复对进行中任务的轮询；任务列表接口已提供，但浏览器仅追踪本次会话创建的任务。
+- agent 日志上报尚未实现：Rust agent 仍只上报指标。P4 启用的是通过 `logs.query_url`
+  进行的日志*检索*，并不是让 agent 变为日志发送端。
+- 先安装、后批准接线的顺序下，通知 sink 与插件自身 webhook 可能短暂重复投递。镜像导入
+  仅支持从其他 fleet 集群按别名复制，不支持外部 OCI 仓库。
+- 健康样本与事件在安装、配置保存和健康探测时尽力记录，没有持续后台健康轮询。若未配置
+  `plugins.events.webhook_secret_file`（或签名密钥），webhook 密钥为进程内随机值，重启后需重新配置。
 - 只有在未配置签名密钥时社区目录包才允许无签名；在生产环境接收第三方包前，请先配置
   `plugins.signing_key_file`（或环境变量覆盖）。
 
