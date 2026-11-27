@@ -6,6 +6,37 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## Unreleased
+
+### 新增
+
+- 插件安装编排器：带进度事件、协作取消、续装、逆序回滚的 `plugin.install` host task，
+  支持 manifest 模板、数据盘准备、配置注入与健康检查通过后才激活接线；已批准的覆盖
+  值持久化到新增的 `plugin_wiring` 表（迁移 15），由
+  `GET`/`PUT /api/v1/plugins/{id}/wiring` 管理。
+- 事件链路：面向 agent、host task、迁移与实例状态事件的签名出站 webhook；按需启用的
+  入站接口 `POST /api/v1/plugins/events`；以及通过已接线后端检索日志的
+  `GET /api/v1/logs/query` 代理。
+- 社区包支持签名：`scripts/pack-plugin.sh` 生成 `manifest.yaml.sig` 旁车文件，服务端用
+  `plugins.signing_key_file`（或 `INCUS_FLEET_PLUGINS_SIGNING_KEY`）校验；附带 MiBeeNVR
+  示例包。
+- 数据驱动插件 UI：`router.addRoute` 页面、通用插件页、图标与 i18n 映射、侧栏单入口与
+  徽标、商店/已安装双视图、三步安装向导、任务面板、五标签详情页与统一状态词。
+- 中英文文档补充插件 P0–P5 状态、任务接口、接线键、事件端点与当前限制。
+
+### 变更
+
+- 已安装插件仅在健康检查通过后激活接线；卸载会恢复捕获的静态默认值并撤销插件 token。
+- `manifest.yaml` 成为首选插件格式，旧版 `plugin.json` 目录项仍可用。旧的同步安装接口
+  `POST /api/v1/plugins/install` 与任务接口并存。
+- 插件 UI 与描述符使用 `/plugin-ui/<id>/…` 命名空间；插件管理页仍在 `/plugins`。
+- agent 遥测与日志上报默认关闭；安装 `vmlogs` 会启用日志检索，remote-write 仍需静态配置。
+
+### 修复
+
+- 仅文档修正：插件文档不再将 P2–P5 标为「仅规范」；用户手册不再把一键安装描述为
+  仅接入已有服务。
+
 ## 0.2.0 - 2026-11-24
 
 ### 新增

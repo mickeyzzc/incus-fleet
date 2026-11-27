@@ -806,15 +806,19 @@ settings control which backend is allowed; see
 
 Administrators see **Plugins** in the sidebar. The page has two top-level tabs: **Installed**
 (status, version, role and wiring summary, with Disable / Uninstall actions) and **Catalog**
-(built-in `vm` / `vmlogs` entries). Click **One-click install** and enter the upstream address
-of an already running service to connect it; Fleet issues a plugin-bound scoped token and adds
-a menu entry. Selecting a plugin opens a detail drawer with five tabs in a fixed order:
-**Overview**, **Configuration**, **Wiring**, **Events**, and **Danger zone**.
+(built-in `vm`, `vmlogs`, `hive` and `bell` descriptors plus community packages). The three-step
+**Install plugin** wizard covers placement, resources, and permissions/wiring; the current UI
+uses the synchronous install endpoint and shows its progress in a task panel. Fleet deploys the
+service instance, issues a plugin-bound scoped token, and adds a menu entry after its health
+check passes. Selecting a plugin opens a detail page with five tabs in a fixed order:
+**Overview**, **Configuration**, **Wiring**, **Events**, and **Danger zone**. The resumable
+task API (`POST /api/v1/plugin-installs`) is available for API-driven installs.
 
 Installed plugin UIs are served through the same-origin **`/plugin-ui/<id>/…`** proxy, which
 never forwards the Fleet session cookie to the upstream. See
-[one-click plugin connect](plugins-one-click.md) for the guided walkthrough and sanitized
-screenshots, and [the plugin specification](plugins.md) for the manifest format and roadmap.
+[one-click plugin install](plugins-one-click.md) for the guided walkthrough and sanitized
+screenshots, and [the plugin system](plugins.md) for the manifest format, endpoints and
+current limits.
 
 ### API tokens (scoped)
 

@@ -186,8 +186,26 @@ Returns `204 No Content` and expires the cookie. Logout is idempotent.
 | POST | `/batch/keys` | yes | Inject stored keys into many instances |
 | POST | `/batch/scripts` | yes | Run one stored script on many instances |
 | POST | `/batch/power` | yes | Start, stop, or restart many instances |
+| GET | `/plugins` | `read:plugins` | Plugins visible to fleet and whether the manager is enabled |
+| GET | `/plugins/catalog` | `read:plugins` | First-party and community catalog entries |
+| GET | `/plugins/{id}` | `read:plugins` | One plugin descriptor |
+| POST | `/plugins/install` | `manage:plugins` | Legacy synchronous install; returns `201` with a one-time token |
+| POST | `/plugins/{id}/toggle` | `manage:plugins` | Enable or disable an installed plugin |
+| GET | `/plugins/{id}/wiring` | `read:plugins` | Approved wiring entries with defaults and effects |
+| PUT | `/plugins/{id}/wiring` | `manage:plugins` | Set or disable approved wiring values |
+| POST | `/plugin-installs` | `manage:plugins` | Enqueue a task install; returns `202` with a task |
+| GET | `/plugin-installs` | `read:plugins` | List plugin install tasks |
+| GET | `/plugin-installs/{id}` | `read:plugins` | One install task and its events |
+| POST | `/plugin-installs/{id}/cancel` | `manage:plugins` | Request cooperative cancel; returns `204` |
+| POST | `/plugin-installs/{id}/resume` | `manage:plugins` | Re-queue a failed or canceled install |
+| DELETE | `/plugins/{id}` | `manage:plugins` | Uninstall and restore wiring defaults |
+| POST | `/plugins/events` | HMAC/bearer | Inbound plugin events; registered only when events are enabled |
+| GET | `/logs/query` | yes | Log search through the wired backend |
+| GET | `/plugin-ui/{id}/…` | `read:plugins` | Same-origin proxy to a plugin UI |
 
-`type` accepts `any` (default), `container`, or `virtual-machine`.
+`type` accepts `any` (default), `container`, or `virtual-machine`. Plugin routes
+are mounted only when `plugins.enabled` is true; see
+[the plugin system](plugins.md) for request bodies, wiring keys and limits.
 
 ## Health and version
 
@@ -1068,6 +1086,30 @@ Each call returns `{"items": [...]}` where an item is
 `{"cluster", "instance", "ok", "exit_code", "stdout", "stderr", "error"}`. Instances run
 independently: one failure does not stop the rest. The response is `200 OK` when every item
 succeeds and `207 Multi-Status` when any item reports an error.
+
+## Plugin install tasks and wiring
+
+`POST /api/v1/plugin-installs` accepts a JSON body with a required catalog `id`
+plus optional `name`, `cluster`, `member`, `instance`, `upstream`, `cpu`,
+`memory`, `disk`, `network`, `values`, `data_disk_gb`, `filesystem`,
+`mount_point`, `storage_pool`, `approvals`, `defaults`, `health_delay_ms`,
+`health_interval_ms`, `health_failure_threshold` and `signature`. The response
+is `202` with a `task` object (`id`, `plugin_id`, `state`, `progress`, `attempt`,
+`error`, `created_at`, `updated_at`); the detail route adds `events`. States are
+`queued`, `dispatched`, `running`, `succeeded`, `failed` and `canceled`. One
+queued/running task may own a plugin id; cancel is cooperative at the next
+checkpoint and resume only accepts failed or canceled tasks.
+
+`PUT /api/v1/plugins/{id}/wiring` accepts
+`{"values":[{"key":"metrics.query_url","value":"http://192.0.2.10:8428","enabled":true}]}`.
+Keys must be declared by the manifest and approved at install time, values must
+be absolute http(s) URLs, and `enabled: false` restores the captured default.
+Inbound events at `POST /api/v1/plugins/events` are capped at 1 MiB and require
+an `X-Fleet-Signature` HMAC header (plus `Authorization: Bearer …` when
+`plugins.events.bearer_token_file` is set); an optional
+`X-Fleet-Plugin-ID` header must name a registered plugin. Log queries accept
+`query`, RFC3339 `from`/`to` and `limit` (1–1000, default 100).
+See [the plugin system](plugins.md) for the full behavior.
 
 ## Errors
 
