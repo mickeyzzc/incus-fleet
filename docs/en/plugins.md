@@ -176,8 +176,9 @@ writes a checkpoint into `HostTask.Progress` and appends a `HostTaskEvent`:
    verify the signature when a signing key is configured.
 2. **placement** — use the requested `cluster`/`member`, otherwise choose the
    first online cluster and member.
-3. **image** — resolve `artifact.image.reference` to a fingerprint already
-   present on the target cluster; the task does not import images.
+3. **image** — resolve `artifact.image.reference` to a fingerprint present on
+   the target cluster; when absent, import it from another online fleet cluster
+   by alias. Pulling directly from an OCI registry is not supported.
 4. **data_disk** — when `data_disk_gb` (or the required manifest default) is
    positive, create custom volume `plugin-<id>-data` on `storage_pool` (default
    `default`) and attach it at `mount_point` during instance creation.
@@ -341,7 +342,7 @@ own credentials; only administrators may act on another account's tokens.
 | `GET` | `/api/v1/plugins` | `read:plugins` | Plugins visible to fleet plus whether the manager is enabled |
 | `GET` | `/api/v1/plugins/catalog` | `read:plugins` | Catalog entries (built-ins plus packages under `plugins.dir`) |
 | `GET` | `/api/v1/plugins/{id}` | `read:plugins` | One plugin descriptor |
-| `POST` | `/api/v1/plugins/install` | `manage:plugins` | Legacy synchronous install; `201` with a one-time token |
+| `POST` | `/api/v1/plugins/install` | `manage:plugins` | Legacy entry point; `202` with a task id when the installer is configured (`201` plus a one-time token only in the synchronous fallback) |
 | `POST` | `/api/v1/plugins/{id}/toggle` | `manage:plugins` | Enable/disable an installed plugin |
 | `GET`, `PUT` | `/api/v1/plugins/{id}/wiring` | `read:plugins`, `manage:plugins` | Inspect/change approved wiring |
 | `POST` | `/api/v1/plugin-installs` | `manage:plugins` | Enqueue a task install |
@@ -357,7 +358,9 @@ Configuration keys (all under `plugins:`): `enabled` (default false), `dir`
 (default `data/plugins`), `health_interval` (default `15s`),
 `signing_key_file` (or `INCUS_FLEET_PLUGINS_SIGNING_KEY`), and `events.enabled`
 (default false), `events.path` (default `/api/v1/plugins/events`),
-`events.secret_file` (required when events are enabled) and
+`events.secret_file` (required when events are enabled),
+`events.webhook_secret_file` (preferred for outbound webhooks, falls back to
+`secret_file` and then to a key derived from the signing key) and
 `events.bearer_token_file` (optional). Entries under `plugins.entries` declare
 `id`, `enabled`, `upstream` and/or `upstream_port`, `bearer_token_file`, `role`
 and `ui` (`path` must be under `/plugin-ui/`).
@@ -446,7 +449,8 @@ adds another button or another table is rejected in review.
 **Status (P3):** the single sidebar entry with one badge, Catalog/Installed
 views, three-step wizard, task panel, fixed five-tab detail page and the five
 status words (`installing`, `healthy`, `degraded`, `stopped`, `failed`) are
-implemented. See §11 for parts of the UI that are not yet backed by the server.
+implemented and backed by the task, descriptor, config and wiring APIs. See §11
+for the remaining limitations.
 
 ## 9. Catalog (community plugins)
 
@@ -499,29 +503,25 @@ The catalog merges built-in descriptors with community packages unpacked under
 
 ## 11. Known limitations
 
-- The web wizard still calls the legacy synchronous `POST /api/v1/plugins/install`.
-  The task API in §4 is available but not yet driven from the browser, and the
-  task panel currently reflects the wizard's local progress rather than polling
-  a task id.
-- The detail view's Configuration save (`PUT /api/v1/plugins/{id}/config`) and
-  per-key restore (`DELETE /api/v1/plugins/{id}/wiring/{key}`) call routes that
-  do not exist on the server. Use `PUT /api/v1/plugins/{id}/wiring` with
-  `"enabled": false` to restore a default today. The descriptor returned by
-  `GET /api/v1/plugins/{id}` also has no wiring, event, health-history or config
-  fields, so those three tabs render empty states.
-- Wiring rows and approvals persist, but only built-in descriptors are
-  re-registered on restart. An installed community plugin needs its descriptor
-  registered again before its wiring loads or its wiring endpoint responds;
-  dynamically registered event subscribers are also in-memory only.
-- The `hive` and `bell` wiring keys are declarations only: no fleet subsystem
-  consumes `bootstrap.answer_file_url` or `notifications.sink_url` yet. No
-  built-in manifest declares `metrics.remote_write_url`, so remote write still
-  requires static configuration.
-- Installed plugins that allocate a data disk should supply an explicit
-  `instance` name: the format/mount step runs on that name before instance
-  creation. The task resolves image aliases but does not import images.
+- Task installs return `202` with a task id and do not return a one-time API
+  token; the token is only shown by the legacy synchronous fallback, which is
+  kept for deployments without the task installer.
+- Configuration saves only accept keys declared by the manifest's
+  `install.templates` and validate their types; arbitrary custom keys are
+  rejected.
+- Refreshing the page does not automatically resume polling an in-flight task.
+  The task list endpoint exists, but the browser only tracks tasks created in
+  the current session.
 - Agent log shipping is not implemented: the Rust agent still reports metrics
-  only, and there is no agent log envelope or sender to change.
+  only. P4 enables log *query* through `logs.query_url`; it does not turn the
+  agent into a log shipper.
+- The notification sink and a plugin's own webhook can briefly double-deliver
+  when a plugin is installed before its wiring is approved. Image import copies
+  aliases from other fleet clusters only, not from an external OCI registry.
+- Health samples and events are recorded on install, config save and health
+  probes; there is no continuous background health poller. Without
+  `plugins.events.webhook_secret_file` (or a signing key), the webhook secret is
+  a process-local random value and must be reconfigured after a restart.
 - Community catalog entries are unsigned only while no signing key is
   configured; configure `plugins.signing_key_file` (or the environment
   override) before accepting third-party packages in production.
