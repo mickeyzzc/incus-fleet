@@ -18,6 +18,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/clusters"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
+	"github.com/mickeyzzc/incus-fleet/internal/plugin"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 )
 
@@ -76,6 +77,34 @@ var builtinPluginCatalog = []pluginCatalogItem{
 		Port:        9428,
 		HealthPath:  "/health",
 	},
+	{
+		ID:          "hive",
+		Name:        "MiBeeHive",
+		Description: "Deploys hive for network boot, DNS, and unattended answer-file distribution.",
+		UIPath:      "/plugin/hive",
+		Wiring:      "bootstrap.answer_file_url",
+		Image:       "hive-oci",
+		DefaultCPU:  "2",
+		DefaultMem:  "2GiB",
+		DefaultDisk: "20GiB",
+		Network:     "incusbr0",
+		Port:        8080,
+		HealthPath:  "/health",
+	},
+	{
+		ID:          "bell",
+		Name:        "MiBeeBell",
+		Description: "Deploys bell and delivers fleet, hive, and VM events to its webhook.",
+		UIPath:      "/plugin/bell",
+		Wiring:      "notifications.sink_url",
+		Image:       "bell-oci",
+		DefaultCPU:  "1",
+		DefaultMem:  "1GiB",
+		DefaultDisk: "10GiB",
+		Network:     "incusbr0",
+		Port:        9090,
+		HealthPath:  "/health",
+	},
 }
 
 type pluginInstallRequest struct {
@@ -116,7 +145,36 @@ func (a *API) pluginCatalog() []pluginCatalogItem {
 		seen[item.ID] = struct{}{}
 	}
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+		// Signed manifest.yaml packages are the canonical format; plugin.json
+		// remains supported for the earlier connect-only catalog entries.
+		if entry.IsDir() {
+			raw, sigErr := os.ReadFile(filepath.Join(dir, entry.Name(), "manifest.yaml")) //nolint:gosec // operator-provided plugin dir
+			if sigErr != nil {
+				continue
+			}
+			m, parseErr := plugin.ParseManifest(raw)
+			if parseErr != nil || m.ID != entry.Name() {
+				continue
+			}
+			if _, exists := seen[m.ID]; exists {
+				continue
+			}
+			if !a.manifestSignatureValid(m, filepath.Join(dir, entry.Name()), raw) {
+				continue
+			}
+			item := catalogItemFromManifest(m)
+			if m.Capabilities.DeployInstance {
+				scriptPath := filepath.Join(dir, entry.Name(), "install.sh")
+				if script, err := os.ReadFile(scriptPath); err == nil { //nolint:gosec // constrained to plugin directory
+					item.InstallHook = string(script)
+				}
+			}
+			seen[m.ID] = struct{}{}
+			items = append(items, item)
+
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
@@ -144,6 +202,52 @@ func (a *API) pluginCatalog() []pluginCatalogItem {
 	}
 
 	return items
+}
+
+func (a *API) manifestSignatureValid(m *plugin.Manifest, dir string, raw []byte) bool {
+	key := a.signingKey()
+	if len(key) == 0 {
+		// Without a configured key there is no trust anchor: community
+		// packages are still admitted for local development, but official
+		// wiring declarations are validated by the manifest parser.
+		return true
+	}
+	if m.Tier == plugin.TierOfficial {
+		return true
+	}
+	sig, err := os.ReadFile(filepath.Join(dir, "manifest.yaml.sig")) //nolint:gosec // operator-provided plugin dir
+	if err != nil {
+		return false
+	}
+
+	return plugin.VerifySignature(raw, string(sig), key)
+}
+
+func catalogItemFromManifest(m *plugin.Manifest) pluginCatalogItem {
+	item := pluginCatalogItem{
+		ID: m.ID, Name: m.Name, Description: m.Description,
+		UIPath: "/plugin/" + m.ID, HealthPath: m.Health.Endpoint,
+	}
+	for _, wiring := range m.Capabilities.Wiring {
+		item.Wiring = wiring.Key
+		break
+	}
+	if m.Artifact.Image.Reference != "" {
+		item.Image = m.Artifact.Image.Reference
+		item.DefaultCPU = fmt.Sprintf("%d", m.Install.Defaults.CPU)
+		item.DefaultMem = fmt.Sprintf("%dMiB", m.Install.Defaults.MemoryMB)
+		item.DefaultDisk = fmt.Sprintf("%dGiB", m.Install.Defaults.RootDiskGB)
+		item.Network = m.Install.Defaults.Network
+		item.Port = m.Capabilities.ProxyUI.UpstreamPort
+		if item.Port == 0 {
+			item.Port = m.Capabilities.ProxyAPI.UpstreamPort
+		}
+		if m.Capabilities.ProxyUI.PathPrefix != "" {
+			item.UIPath = strings.TrimSuffix(m.Capabilities.ProxyUI.PathPrefix, "/")
+		}
+	}
+
+	return item
 }
 
 // installPlugin deploys a catalog service on the least-loaded member (unless a
@@ -486,6 +590,13 @@ func (a *API) uninstallPlugin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Uninstall must restore static configuration defaults before the plugin
+	// disappears; otherwise the fleet subsystem keeps calling a dead target.
+	if a.registry != nil {
+		if err := a.registry.ClearWiring(id); err != nil {
+			a.logger.Warn("clear plugin wiring failed", "plugin", id, "error", err)
+		}
+	}
 	if err := a.store.DeleteInstalledPlugin(r.Context(), id); err != nil {
 		a.serviceError(w, r, err)
 		return

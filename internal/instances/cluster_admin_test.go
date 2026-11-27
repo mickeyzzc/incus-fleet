@@ -12,6 +12,38 @@ import (
 
 func strPtr(value string) *string { return &value }
 
+func TestRemoveMember(t *testing.T) {
+	srv := &incusfake.Server{Members: []api.ClusterMember{{ServerName: "node-a"}}}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+
+	if err := svc.RemoveMember("c1", "", false); err == nil {
+		t.Fatal("empty member name accepted")
+	}
+	if err := svc.RemoveMember("c1", "Bad Name", false); err == nil {
+		t.Fatal("invalid member name accepted")
+	}
+	if err := svc.RemoveMember("c1", "node-a", true); err != nil {
+		t.Fatalf("RemoveMember() error = %v", err)
+	}
+	if args := srv.DeletedMembers(); len(args) != 1 || args[0].Name != "node-a" || !args[0].Force {
+		t.Fatalf("deleted members = %#v", args)
+	}
+
+	srv.DeleteMemberErr = errors.New("member still has the following instances: web-1")
+	if err := svc.RemoveMember("c1", "node-a", false); err == nil {
+		t.Fatal("occupied member removal accepted")
+	}
+	srv.DeleteMemberErr = errors.New("example removal failure")
+	if err := svc.RemoveMember("c1", "node-a", false); err == nil {
+		t.Fatal("delete failure accepted")
+	}
+	srv.DeleteMemberErr = nil
+	srv.MemberErr = errors.New("example lookup failure")
+	if err := svc.RemoveMember("c1", "node-a", false); err == nil {
+		t.Fatal("lookup failure accepted")
+	}
+}
+
 func TestCreateStoragePool(t *testing.T) {
 	srv := &incusfake.Server{}
 	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})

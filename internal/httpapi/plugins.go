@@ -39,6 +39,13 @@ func (a *API) registerPluginRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/plugins/{id}", a.requireScope(auth.ScopeReadPlugins, http.HandlerFunc(a.getPlugin)))
 	mux.Handle("POST /api/v1/plugins/install", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.installPlugin)))
 	mux.Handle("POST /api/v1/plugins/{id}/toggle", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.togglePlugin)))
+	mux.Handle("GET /api/v1/plugins/{id}/wiring", a.requireScope(auth.ScopeReadPlugins, http.HandlerFunc(a.getPluginWiring)))
+	mux.Handle("PUT /api/v1/plugins/{id}/wiring", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.putPluginWiring)))
+	mux.Handle("POST /api/v1/plugin-installs", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.submitPluginInstallTask)))
+	mux.Handle("GET /api/v1/plugin-installs", a.requireScope(auth.ScopeReadPlugins, http.HandlerFunc(a.listPluginInstallTasks)))
+	mux.Handle("GET /api/v1/plugin-installs/{id}", a.requireScope(auth.ScopeReadPlugins, http.HandlerFunc(a.getPluginInstallTask)))
+	mux.Handle("POST /api/v1/plugin-installs/{id}/cancel", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.cancelPluginInstallTask)))
+	mux.Handle("POST /api/v1/plugin-installs/{id}/resume", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.resumePluginInstallTask)))
 	mux.Handle("DELETE /api/v1/plugins/{id}", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.uninstallPlugin)))
 
 	// Proxy mount. Plugin UIs live under their own prefix, never under

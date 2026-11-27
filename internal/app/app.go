@@ -27,6 +27,7 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/guestagent"
 	"github.com/mickeyzzc/incus-fleet/internal/httpapi"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
+	"github.com/mickeyzzc/incus-fleet/internal/logsquery"
 	"github.com/mickeyzzc/incus-fleet/internal/mesh"
 	"github.com/mickeyzzc/incus-fleet/internal/metricsquery"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
@@ -34,6 +35,8 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
 	"github.com/mickeyzzc/incus-fleet/internal/nodenet"
 	"github.com/mickeyzzc/incus-fleet/internal/overlay"
+	"github.com/mickeyzzc/incus-fleet/internal/plugin"
+	"github.com/mickeyzzc/incus-fleet/internal/plugininstall"
 	"github.com/mickeyzzc/incus-fleet/internal/remotewrite"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/taskrunner"
@@ -72,6 +75,9 @@ type App struct {
 	agentServer  *http.Server
 	remoteWrite  *remotewrite.Writer
 	metricsQuery *metricsquery.Proxy
+	logsQuery    *logsquery.Proxy
+	registry     *plugin.Registry
+	installer    *plugininstall.Installer
 	taskRunner   *taskrunner.Runner
 	mesh         *mesh.Mesh
 	auth         *auth.Authenticator
@@ -124,6 +130,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		return nil, err
 	}
 
+	var registry *plugin.Registry
 	var manager *clusters.Manager
 	if o.dialer != nil {
 		manager, err = clusters.NewWithDialer(ctx, cfg.Clusters, o.dialer, logger)
@@ -155,9 +162,13 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		}),
 		logger,
 	)
+	publishEvent := func(ctx context.Context, typ, subject string) {
+		registry.Publish(ctx, plugin.Event{Type: typ, Subject: subject})
+	}
 	migrationsService := migrations.New(manager, st, logger,
 		migrations.WithOwner(instanceOwner),
 		migrations.WithNetworkFixer(networkFixer),
+		migrations.WithEventSink(publishEvent),
 	)
 	assetsService := assets.New(st, instancesService)
 	answerProfilesService := answerprofiles.New(st)
@@ -204,11 +215,79 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		return nil, err
 	}
 
+	// The wiring registry is instantiated in production code, not just in
+	// tests. Static configuration provides defaults; approved plugin values
+	// override them at runtime and revert when the plugin is uninstalled.
 	var telemetryStore *telemetry.Store
 	var remoteWriter *remotewrite.Writer
+	var queryProxy *metricsquery.Proxy
+	logsProxy := logsquery.New(logsquery.Config{})
+	applyWiring := func() {
+		if remoteWriter != nil {
+			if target, ok := registry.WiringValue("metrics.remote_write_url"); ok && target != "" {
+				remoteWriter.SetTarget(target, remoteToken)
+			} else {
+				static := ""
+				if cfg.Metrics.RemoteWrite.Enabled {
+					static = cfg.Metrics.RemoteWrite.URL
+				}
+				remoteWriter.SetTarget(static, remoteToken)
+			}
+		}
+		if queryProxy != nil {
+			if target, ok := registry.WiringValue("metrics.query_url"); ok && target != "" {
+				backendType := "victoriametrics"
+				if wired, found := registry.WiringValue("metrics.query_type"); found && wired != "" {
+					backendType = wired
+				}
+				queryProxy.SetBackend(target, backendType)
+			}
+		}
+		if target, ok := registry.WiringValue("logs.query_url"); ok {
+			logsProxy.SetURL(target)
+		}
+	}
+	registry = plugin.New(
+		plugin.WithWiringStore(st),
+		plugin.WithWiringListener(applyWiring),
+		plugin.WithLogger(logger),
+	)
+	for _, p := range plugin.BuiltinPlugins() {
+		if err := registry.Register(p); err != nil {
+			manager.Close()
+			_ = st.Close()
+			return nil, err
+		}
+	}
+	if err := registry.Start(ctx); err != nil {
+		manager.Close()
+		_ = st.Close()
+		return nil, err
+	}
+	applyWiring()
+
+	signingKey, err := readSecret(cfg.Plugins.SigningKey, cfg.Plugins.SigningKeyFile)
+	if err != nil {
+		manager.Close()
+		_ = st.Close()
+		return nil, err
+	}
+	installer := plugininstall.New(plugininstall.Config{
+		Store: st, Instances: instancesService, Clusters: manager,
+		Images: plugininstall.ClusterImageResolver{Manager: manager},
+		Auth:   authenticator, Registry: registry, SigningKey: []byte(signingKey), Logger: logger,
+	})
+	applyWiring()
+
 	if cfg.Metrics.Enabled {
 		telemetryStore = telemetry.New(telemetry.DefaultMaxSeries)
-		if cfg.Metrics.RemoteWrite.Enabled {
+		// Remote write stays off unless static config explicitly enables it or
+		// an installed plugin activated the metrics.remote_write_url wiring.
+		remoteURL := cfg.Metrics.RemoteWrite.URL
+		if wired, ok := registry.WiringValue("metrics.remote_write_url"); ok && wired != "" {
+			remoteURL = wired
+		}
+		if cfg.Metrics.RemoteWrite.Enabled || remoteURL != "" {
 			spoolDir := strings.TrimSpace(cfg.Metrics.RemoteWrite.SpoolDir)
 			if spoolDir == "" {
 				spoolDir = filepath.Join(os.TempDir(), "incus-fleet-remote-write")
@@ -221,7 +300,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 				partition = defaultSpoolPartition()
 			}
 			remoteWriter, err = remotewrite.New(remotewrite.Config{
-				URL:            cfg.Metrics.RemoteWrite.URL,
+				URL:            remoteURL,
 				BearerToken:    remoteToken,
 				Timeout:        parseDuration(cfg.Metrics.RemoteWrite.Timeout, 10*time.Second),
 				QueueSize:      cfg.Metrics.RemoteWrite.QueueSize,
@@ -239,7 +318,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 			telemetryStore.SetSink(func(series []telemetry.Series) { remoteWriter.Enqueue(series) })
 		}
 	}
-	var queryProxy *metricsquery.Proxy
+	applyWiring()
 	if cfg.Metrics.Query.Enabled {
 		queryProxy = metricsquery.New(metricsquery.Config{
 			URL: cfg.Metrics.Query.URL, Type: cfg.Metrics.Query.Type,
@@ -294,6 +373,9 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 			parseDuration(cfg.HA.Lease, 30*time.Second),
 			parseDuration(cfg.HA.Interval, 2*time.Second), logger)
 	}
+	if taskRunner != nil {
+		taskRunner.Register(plugininstall.TaskType, installer.Handler())
+	}
 
 	if cfg.Agent.Enabled {
 		ca, err := agentgw.LoadCA(cfg.Agent.ClientCA, cfg.Agent.CAKey)
@@ -331,6 +413,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 				}),
 			)
 		}
+		options = append(options, agentgw.WithEventPublisher(publishEvent))
 		agentGW = agentgw.New(st, ca, logger, options...)
 		agentTLS = agentGW.TLSConfig(serverCert)
 		agentDispatcher = agentGW
@@ -414,6 +497,9 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		CertIssuer:     agentGW,
 		Telemetry:      telemetryStore,
 		MetricsQuery:   queryProxy,
+		LogsQuery:      logsProxy,
+		Registry:       registry,
+		Installer:      installer,
 		RateLimit:      true,
 		MetricsSD: httpapi.MetricsSDConfig{
 			Enabled: cfg.Metrics.HTTPSD.Enabled, Token: cfg.Metrics.HTTPSD.Token,
@@ -455,6 +541,9 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 		agentTLS:     agentTLS,
 		remoteWrite:  remoteWriter,
 		metricsQuery: queryProxy,
+		logsQuery:    logsProxy,
+		registry:     registry,
+		installer:    installer,
 		taskRunner:   taskRunner,
 		mesh:         centerMesh,
 		auth:         authenticator,

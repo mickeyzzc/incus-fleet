@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mickeyzzc/incus-fleet/internal/hostops"
+	"github.com/mickeyzzc/incus-fleet/internal/plugin"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 )
 
@@ -135,6 +136,12 @@ func (a *API) finishHostTask(r *http.Request, task *store.HostTask, backend host
 		Result:   result,
 		Detail:   plan,
 	})
+	if a.registry != nil {
+		a.registry.Publish(context.Background(), plugin.Event{
+			Type: plugin.EventHostTaskCompleted, Subject: task.ID,
+			Payload: map[string]string{"cluster": task.Cluster, "member": task.Member, "result": result},
+		})
+	}
 }
 
 func planHash(plan string) string {

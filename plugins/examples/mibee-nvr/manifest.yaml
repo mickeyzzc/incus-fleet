@@ -1,0 +1,62 @@
+# Example community plugin: no fleet core wiring is declared or permitted.
+# All references use RFC 5737 / example.com documentation values.
+schema: fleet-plugin/v1
+id: mibee-nvr
+name: MiBeeNVR
+version: 1.0.0
+publisher: community-example
+tier: community
+description: Records and reviews camera streams through the fleet plugin proxy
+homepage: https://example.com/plugins/mibee-nvr
+
+artifact:
+  image:
+    source: registry
+    reference: example.com/plugins/mibee-nvr:1.0.0
+    architectures: [amd64, arm64]
+
+install:
+  defaults:
+    cpu: 2
+    memory_mb: 2048
+    root_disk_gb: 20
+    network: managed
+  data_disk:
+    required: true
+    default_gb: 100
+    filesystem: ext4
+    mount_point: /recordings
+    storage_pool_selector: true
+  templates:
+    - name: retention
+      label: Recording retention
+      type: choice
+      options: [7d, 30d, 90d]
+      default: 30d
+    - name: listen_port
+      label: Listen port
+      type: port
+      default: 8080
+    - name: motion_detection
+      label: Motion detection
+      type: bool
+      default: "true"
+
+capabilities:
+  deploy_instance: true
+  proxy_ui:
+    path_prefix: /plugin-ui/mibee-nvr/
+    upstream_port: 8080
+  event_webhook:
+    path: /events
+    events: [agent.connected, agent.disconnected]
+
+health:
+  endpoint: /health
+  initial_delay_seconds: 10
+  interval_seconds: 15
+  failure_threshold: 5
+
+permissions:
+  host: [api_proxy, event_delivery]
+  fleet: [read:instances, read:agents]

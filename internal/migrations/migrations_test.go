@@ -753,3 +753,16 @@ func TestExecuteFailureBranches(t *testing.T) {
 		}
 	})
 }
+
+func TestEventSinkOnTerminalStatus(t *testing.T) {
+	f := newFixture(t, &incusfake.Server{Instance: runningContainer("web")}, &incusfake.Server{})
+	var events []string
+	f.service = New(f.manager, f.store, nil, WithEventSink(func(_ context.Context, typ, subject string) {
+		events = append(events, typ+":"+subject)
+	}))
+	f.service.setStatus(context.Background(), "m1", StatusDone, "", "")
+	f.service.setStatus(context.Background(), "m1", StatusPreflight, "", "")
+	if len(events) != 1 || events[0] != "migration.completed:m1" {
+		t.Fatalf("events = %v", events)
+	}
+}

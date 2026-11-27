@@ -280,6 +280,36 @@ func TestLogoutRemovesSession(t *testing.T) {
 	}
 }
 
+func TestRevokeUserSessions(t *testing.T) {
+	ctx := context.Background()
+	a, _ := newTestAuth(t)
+	first, err := a.createSession(ctx, Session{
+		UserID: "u1", Username: "alice", Role: RoleAdmin, ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := a.createSession(ctx, Session{
+		UserID: "u1", Username: "alice", Role: RoleAdmin, ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revoked, err := a.RevokeUserSessions(ctx, "u1", first.ID)
+	if err != nil || revoked != 1 {
+		t.Fatalf("RevokeUserSessions() = %d err=%v", revoked, err)
+	}
+	if !a.ValidateSession(first.ID) {
+		t.Fatal("kept session was revoked")
+	}
+	if a.ValidateSession(second.ID) {
+		t.Fatal("revoked session survived")
+	}
+	if _, err := a.RevokeUserSessions(ctx, "u1", first.ID); err != nil {
+		t.Fatalf("second RevokeUserSessions() error = %v", err)
+	}
+}
+
 func TestRolePermissions(t *testing.T) {
 	cases := []struct {
 		role      Role

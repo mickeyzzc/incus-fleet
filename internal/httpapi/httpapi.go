@@ -17,11 +17,14 @@ import (
 	"github.com/mickeyzzc/incus-fleet/internal/console"
 	"github.com/mickeyzzc/incus-fleet/internal/guestagent"
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
+	"github.com/mickeyzzc/incus-fleet/internal/logsquery"
 	"github.com/mickeyzzc/incus-fleet/internal/mesh"
 	"github.com/mickeyzzc/incus-fleet/internal/metricsquery"
 	"github.com/mickeyzzc/incus-fleet/internal/migrations"
 	"github.com/mickeyzzc/incus-fleet/internal/nodeaccess"
 	"github.com/mickeyzzc/incus-fleet/internal/nodejoin"
+	"github.com/mickeyzzc/incus-fleet/internal/plugin"
+	"github.com/mickeyzzc/incus-fleet/internal/plugininstall"
 	"github.com/mickeyzzc/incus-fleet/internal/store"
 	"github.com/mickeyzzc/incus-fleet/internal/telemetry"
 )
@@ -50,6 +53,9 @@ type Deps struct {
 	Telemetry      *telemetry.Store
 	MetricsSD      MetricsSDConfig
 	MetricsQuery   *metricsquery.Proxy
+	LogsQuery      *logsquery.Proxy
+	Registry       *plugin.Registry
+	Installer      *plugininstall.Installer
 	CertIssuer     CertificateIssuer
 	Auth           *auth.Authenticator
 	Plugins        config.PluginsConfig
@@ -91,6 +97,9 @@ type API struct {
 	telemetry      *telemetry.Store
 	metricsSD      MetricsSDConfig
 	metricsQuery   *metricsquery.Proxy
+	logsQuery      *logsquery.Proxy
+	registry       *plugin.Registry
+	installer      *plugininstall.Installer
 	certIssuer     CertificateIssuer
 	auth           *auth.Authenticator
 	pluginsConfig  config.PluginsConfig
@@ -128,6 +137,9 @@ func New(deps Deps) *API {
 		telemetry:      deps.Telemetry,
 		metricsSD:      deps.MetricsSD,
 		metricsQuery:   deps.MetricsQuery,
+		logsQuery:      deps.LogsQuery,
+		registry:       deps.Registry,
+		installer:      deps.Installer,
 		certIssuer:     deps.CertIssuer,
 		auth:           deps.Auth,
 		pluginsConfig:  deps.Plugins,
@@ -185,6 +197,14 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/tokens/{id}", a.requireScope(auth.ScopeReadOwnTokens, http.HandlerFunc(a.revokeAPIToken)))
 	mux.Handle("GET /api/v1/tokens/scopes", a.requireScope(auth.ScopeReadOwnTokens, http.HandlerFunc(a.availableScopes)))
 	a.registerPluginRoutes(mux)
+	if a.pluginsEnabled && a.pluginsConfig.Events.Enabled {
+		path := strings.TrimSpace(a.pluginsConfig.Events.Path)
+		if path == "" {
+			path = "/api/v1/plugins/events"
+		}
+		mux.Handle("POST "+path, http.HandlerFunc(a.ingestPluginEvent))
+	}
+	mux.Handle("GET /api/v1/logs/query", a.requireAuth(http.HandlerFunc(a.queryLogs)))
 	mux.Handle("GET /api/v1/clusters", a.requireAuth(http.HandlerFunc(a.listClusters)))
 	mux.Handle("GET /api/v1/clusters/{cluster}", a.requireAuth(http.HandlerFunc(a.getCluster)))
 	mux.Handle("POST /api/v1/clusters/{cluster}/reconnect", a.requireWriter(http.HandlerFunc(a.reconnectCluster)))

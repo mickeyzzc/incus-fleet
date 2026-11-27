@@ -365,6 +365,36 @@ func TestEnableThreeAndFiveMembersCreateFullMesh(t *testing.T) {
 	}
 }
 
+func TestUpdateOverlay(t *testing.T) {
+	service, nodes, _ := newTestService(twoMembers())
+	ctx := context.Background()
+	if _, err := service.Enable(ctx, "c62", Request{
+		Name: "c62", VNI: 6200, Subnet: "198.51.100.0/24", GatewayMember: "node-a",
+	}); err != nil {
+		t.Fatalf("Enable() error = %v", err)
+	}
+
+	status, err := service.Update(ctx, "c62", "c62", Request{
+		VNI: 6201, Subnet: "203.0.113.0/24", GatewayMember: "node-b",
+		DHCPStart: "203.0.113.10", DHCPEnd: "203.0.113.244",
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if !status.Enabled || status.VNI != 6201 || status.Subnet != "203.0.113.0/24" {
+		t.Fatalf("status = %#v", status)
+	}
+	if nodes.operators["node-b"].dhcp[0].Gateway != "203.0.113.2" {
+		t.Fatalf("gateway did not move: %#v", nodes.operators["node-b"].dhcp)
+	}
+	if _, err := service.Update(ctx, "c62", "missing", Request{VNI: 1}); err == nil {
+		t.Fatal("expected missing overlay error")
+	}
+	if _, err := service.Update(ctx, "c62", "c62", Request{UnderlayIPs: map[string]string{"node-a": "not-an-ip"}}); err == nil {
+		t.Fatal("expected invalid update error")
+	}
+}
+
 func TestEnableRejectsBadInputs(t *testing.T) {
 	service, _, _ := newTestService(twoMembers())
 	ctx := context.Background()

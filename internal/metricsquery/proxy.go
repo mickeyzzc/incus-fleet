@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,7 @@ type Config struct {
 
 // Proxy forwards PromQL queries.
 type Proxy struct {
+	mu     sync.RWMutex
 	cfg    Config
 	client *http.Client
 }
@@ -37,6 +39,19 @@ func New(cfg Config) *Proxy {
 	return &Proxy{cfg: cfg, client: &http.Client{Timeout: cfg.Timeout}}
 }
 
+// SetBackend replaces the query backend and type at runtime. Wiring activation
+// calls it so no process restart is needed after a plugin install.
+func (p *Proxy) SetBackend(rawURL, backendType string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if strings.TrimSpace(rawURL) != "" {
+		p.cfg.URL = strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	}
+	if strings.TrimSpace(backendType) != "" {
+		p.cfg.Type = strings.TrimSpace(backendType)
+	}
+}
+
 // QueryRange forwards a range query and returns the upstream JSON.
 func (p *Proxy) QueryRange(ctx context.Context, query string, start, end time.Time, step time.Duration) ([]byte, error) {
 	if strings.TrimSpace(query) == "" {
@@ -45,11 +60,14 @@ func (p *Proxy) QueryRange(ctx context.Context, query string, start, end time.Ti
 	if step <= 0 {
 		step = time.Minute
 	}
-	base, err := url.Parse(p.cfg.URL)
+	p.mu.RLock()
+	cfg := p.cfg
+	p.mu.RUnlock()
+	base, err := url.Parse(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("metricsquery: invalid backend URL")
 	}
-	switch p.cfg.Type {
+	switch cfg.Type {
 	case "victoriametrics":
 		base.Path = strings.TrimRight(base.Path, "/") + "/prometheus/api/v1/query_range"
 	default:
@@ -66,8 +84,8 @@ func (p *Proxy) QueryRange(ctx context.Context, query string, start, end time.Ti
 	if err != nil {
 		return nil, err
 	}
-	if p.cfg.BearerToken != "" {
-		req.Header.Set("Authorization", "Bearer "+p.cfg.BearerToken)
+	if cfg.BearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.BearerToken)
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
