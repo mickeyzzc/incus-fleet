@@ -22,6 +22,7 @@ type pluginInstallTaskRequest struct {
 	Cluster                string            `json:"cluster,omitempty"`
 	Member                 string            `json:"member,omitempty"`
 	Instance               string            `json:"instance,omitempty"`
+	ConnectOnly            bool              `json:"connect_only,omitempty"`
 	Upstream               string            `json:"upstream,omitempty"`
 	CPU                    string            `json:"cpu,omitempty"`
 	Memory                 string            `json:"memory,omitempty"`
@@ -50,6 +51,13 @@ func (a *API) submitPluginInstallTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	a.submitInstallTask(w, r, req)
+}
+
+// submitInstallTask enqueues a validated install plan and runs it inline when
+// this instance has no task dispatcher. Both the modern and legacy install
+// endpoints use it so there is a single task path.
+func (a *API) submitInstallTask(w http.ResponseWriter, r *http.Request, req pluginInstallTaskRequest) {
 	manifest, raw, err := a.pluginInstallManifest(strings.TrimSpace(req.ID))
 	if err != nil {
 		a.serviceError(w, r, err)
@@ -72,7 +80,8 @@ func (a *API) submitPluginInstallTask(w http.ResponseWriter, r *http.Request) {
 	task, err := a.installer.Enqueue(r.Context(), plugininstall.Request{
 		PluginID: manifest.ID, Name: firstNonEmpty(req.Name, manifest.Name),
 		Manifest: *manifest, Cluster: req.Cluster, Member: req.Member, Instance: req.Instance,
-		Image: manifest.Artifact.Image.Reference, Network: req.Network,
+		ConnectOnly: req.ConnectOnly,
+		Image:       manifest.Artifact.Image.Reference, Network: req.Network,
 		CPU: req.CPU, Memory: req.Memory, Disk: req.Disk, Upstream: req.Upstream,
 		TemplateValues: req.Values, DataDiskGB: req.DataDiskGB,
 		Filesystem: req.Filesystem, MountPoint: req.MountPoint, StoragePool: req.StoragePool,

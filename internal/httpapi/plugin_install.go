@@ -263,6 +263,14 @@ func (a *API) installPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The compatibility endpoint submits the same durable task as the modern
+	// API when an installer is configured. The synchronous path below remains
+	// only for deployments that have no task worker at all.
+	if a.installer != nil {
+		a.installPluginAsTask(w, r, req)
+		return
+	}
+
 	item, ok := a.findCatalogItem(strings.TrimSpace(req.ID))
 	if !ok {
 		writeError(w, http.StatusBadRequest, "unknown_plugin", "plugin is not in the catalog")
@@ -321,6 +329,33 @@ func (a *API) installPlugin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"plugin": toPluginView(installedEntry(entry)),
 		"token":  secret,
+	})
+}
+
+// installPluginAsTask converts the legacy synchronous request into the same
+// durable install task the modern API uses. The caller receives a task id it
+// can poll instead of a one-time token that only existed in the old response.
+func (a *API) installPluginAsTask(w http.ResponseWriter, r *http.Request, req pluginInstallRequest) {
+	item, ok := a.findCatalogItem(strings.TrimSpace(req.ID))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown_plugin", "plugin is not in the catalog")
+		return
+	}
+	if _, err := a.store.GetInstalledPlugin(r.Context(), item.ID); err == nil {
+		writeError(w, http.StatusConflict, "already_installed", "plugin is already installed")
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		a.serviceError(w, r, err)
+		return
+	}
+
+	connectOnly := strings.TrimSpace(req.Upstream) != "" || item.Image == ""
+	a.submitInstallTask(w, r, pluginInstallTaskRequest{
+		ID: item.ID, Name: firstNonEmpty(req.Name, item.Name),
+		Cluster: req.Cluster, Member: req.Member,
+		Instance: req.Name, ConnectOnly: connectOnly,
+		CPU: req.CPU, Memory: req.Memory, Disk: req.Disk,
+		Network: req.Network, Upstream: req.Upstream,
 	})
 }
 
@@ -600,6 +635,18 @@ func (a *API) uninstallPlugin(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.DeleteInstalledPlugin(r.Context(), id); err != nil {
 		a.serviceError(w, r, err)
 		return
+	}
+	if a.registry != nil {
+		// Community descriptors are restored from the package directory at
+		// startup; removing them here keeps wiring rows from resurrecting a
+		// deleted plugin and stops its event subscriber immediately.
+		_ = a.registry.UnregisterSubscriber(id)
+		if _, builtin := plugin.BuiltinManifest(id); !builtin {
+			_ = a.registry.Unregister(id)
+		}
+	}
+	if err := a.store.DeletePluginConfig(r.Context(), id); err != nil {
+		a.logger.Warn("delete plugin config failed", "plugin", id, "error", err)
 	}
 	if err := a.auth.RevokePluginTokens(r.Context(), id); err != nil {
 		a.logger.Warn("revoke plugin token failed", "plugin", id, "error", err)

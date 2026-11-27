@@ -6,12 +6,14 @@ package plugininstall
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +62,17 @@ type ImageResolver interface {
 	Resolve(ctx context.Context, cluster, ref string) (string, error)
 }
 
+// ImageImporter is an optional capability of an ImageResolver: when an alias
+// is missing locally it can be copied in from another fleet cluster.
+type ImageImporter interface {
+	Import(ctx context.Context, cluster, ref string) (string, error)
+}
+
+// ImageCopier distributes an image from one fleet cluster to another.
+type ImageCopier interface {
+	CopyImageTo(ctx context.Context, clusterName, fingerprint, targetCluster, alias string) error
+}
+
 // TokenCreator issues the scoped plugin credential on publish.
 type TokenCreator interface {
 	CreateAPIToken(ctx context.Context, req auth.CreateTokenRequest) (*auth.APIToken, string, error)
@@ -74,6 +87,7 @@ type Request struct {
 	Cluster                string            `json:"cluster,omitempty"`
 	Member                 string            `json:"member,omitempty"`
 	Instance               string            `json:"instance,omitempty"`
+	ConnectOnly            bool              `json:"connect_only,omitempty"`
 	Image                  string            `json:"image,omitempty"`
 	Network                string            `json:"network,omitempty"`
 	CPU                    string            `json:"cpu,omitempty"`
@@ -117,6 +131,10 @@ type Config struct {
 	Auth       TokenCreator
 	Registry   *plugin.Registry
 	SigningKey []byte
+	// WebhookSecret signs fleet-to-plugin event deliveries. It is independent
+	// of the manifest signing key; an ephemeral random value is generated when
+	// the operator has not configured one.
+	WebhookSecret []byte
 	// Sleep is injectable so tests do not depend on wall-clock delays.
 	Sleep      func(context.Context, time.Duration) error
 	HTTPClient *http.Client
@@ -219,8 +237,23 @@ func validateRequest(req Request, signingKey []byte) error {
 	if err := req.Manifest.Validate(); err != nil {
 		return err
 	}
+	// The format/mount step runs against the instance name before instance
+	// creation. An empty name would silently format a phantom instance, so
+	// require an explicit name whenever a data disk is requested.
+	if req.DataDiskGB > 0 || (req.Manifest.Install.DataDisk.Required && req.Manifest.Install.DataDisk.DefaultGB > 0) {
+		if strings.TrimSpace(req.Instance) == "" {
+			return fmt.Errorf("%w: instance is required when a data disk is requested", ErrInvalidRequest)
+		}
+	}
 	if req.Manifest.Tier == plugin.TierCommunity && len(req.Approvals) > 0 {
 		return fmt.Errorf("%w: community plugins cannot declare wiring", ErrInvalidRequest)
+	}
+	if req.ConnectOnly {
+		target, err := url.Parse(strings.TrimSpace(req.Upstream))
+		if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
+			return fmt.Errorf("%w: connect-only installs require an absolute http(s) upstream", ErrInvalidRequest)
+		}
+		req.Upstream = strings.TrimRight(strings.TrimSpace(req.Upstream), "/")
 	}
 	if req.ManifestSignature != "" && !plugin.VerifySignature([]byte(req.ManifestRaw()), req.ManifestSignature, signingKey) {
 		return fmt.Errorf("%w: manifest signature is invalid", ErrInvalidRequest)
@@ -443,6 +476,9 @@ func (i *Installer) runStep(ctx context.Context, req *Request, cp *checkpoint, s
 	case 0: // validate
 		return req.Manifest.Validate()
 	case 1: // placement
+		if req.ConnectOnly {
+			return nil
+		}
 		if req.Cluster != "" {
 			cp.Cluster = req.Cluster
 		} else if i.cfg.Clusters != nil {
@@ -471,12 +507,22 @@ func (i *Installer) runStep(ctx context.Context, req *Request, cp *checkpoint, s
 			}
 		}
 	case 2: // image
+		if req.ConnectOnly {
+			return nil
+		}
 		if i.cfg.Images == nil {
 			return errors.New("image resolver is not configured")
 		}
 		fingerprint, err := i.cfg.Images.Resolve(ctx, cp.Cluster, req.Image)
 		if err != nil {
-			return err
+			importer, ok := i.cfg.Images.(ImageImporter)
+			if !ok {
+				return err
+			}
+			fingerprint, err = importer.Import(ctx, cp.Cluster, req.Image)
+			if err != nil {
+				return fmt.Errorf("import image %q: %w", req.Image, err)
+			}
 		}
 		cp.Image = fingerprint
 	case 3: // data disk
@@ -499,9 +545,15 @@ func (i *Installer) runStep(ctx context.Context, req *Request, cp *checkpoint, s
 		}
 		cp.Volume = volume
 		cp.StoragePool = pool
+		// The format step runs before instance creation, so the name must be
+		// known here rather than only at step 5.
+		cp.Instance = firstNonEmpty(req.Instance, "fleet-"+req.PluginID)
 	case 4: // format and mount
 		if cp.Volume == "" {
 			return nil
+		}
+		if strings.TrimSpace(cp.Instance) == "" {
+			return fmt.Errorf("%w: instance is required to format a data disk", ErrInvalidRequest)
 		}
 		result, err := i.cfg.Instances.RunOps(ctx, cp.Cluster, cp.Instance, instances.OpsRequest{
 			Action: "run-script", Script: plugin.DataDiskScript(req.Manifest, req.DataDiskGB),
@@ -513,6 +565,9 @@ func (i *Installer) runStep(ctx context.Context, req *Request, cp *checkpoint, s
 			return fmt.Errorf("format script exited %d: %s", result.ExitCode, result.Stderr)
 		}
 	case 5: // create instance
+		if req.ConnectOnly {
+			return nil
+		}
 		if i.cfg.Instances == nil {
 			return errors.New("instance service is not configured")
 		}
@@ -534,6 +589,9 @@ func (i *Installer) runStep(ctx context.Context, req *Request, cp *checkpoint, s
 			return err
 		}
 	case 6: // inject rendered configuration
+		if req.ConnectOnly {
+			return nil
+		}
 		values, err := plugin.RenderTemplates(req.Manifest, req.TemplateValues)
 		if err != nil {
 			return err
@@ -554,7 +612,17 @@ func (i *Installer) runStep(ctx context.Context, req *Request, cp *checkpoint, s
 	case 7: // health check gates wiring activation
 		upstream, err := i.waitHealthy(ctx, req, cp)
 		if err != nil {
+			if i.cfg.Store != nil {
+				_ = i.cfg.Store.RecordPluginHealth(ctx, &store.PluginHealthSample{
+					PluginID: req.PluginID, Status: "failed", Detail: err.Error(),
+				})
+			}
 			return err
+		}
+		if i.cfg.Store != nil && !req.ConnectOnly {
+			_ = i.cfg.Store.RecordPluginHealth(ctx, &store.PluginHealthSample{
+				PluginID: req.PluginID, Status: "healthy", Detail: "health probe succeeded",
+			})
 		}
 		cp.Upstream = upstream
 	case 8: // activate approved wiring
@@ -601,11 +669,12 @@ func (i *Installer) runStep(ctx context.Context, req *Request, cp *checkpoint, s
 		if err := i.cfg.Store.CreateInstalledPlugin(ctx, entry); err != nil {
 			return fmt.Errorf("publish installed plugin: %w", err)
 		}
-		if len(req.Manifest.Capabilities.EventWebhook.Events) > 0 && i.cfg.Registry != nil {
+		if len(req.Manifest.Capabilities.EventWebhook.Events) > 0 && i.cfg.Registry != nil &&
+			!plugin.SinkOwnsWebhook(i.cfg.Registry, req.Manifest) {
 			sub, err := plugin.NewWebhookSubscriber(plugin.WebhookConfig{
 				ID: req.PluginID, BaseURL: cp.Upstream, Path: req.Manifest.Capabilities.EventWebhook.Path,
 				Events: req.Manifest.Capabilities.EventWebhook.Events,
-				Secret: plugin.SignPayload(i.cfg.SigningKey, []byte("webhook:"+req.PluginID)),
+				Secret: string(i.webhookSecret()),
 			})
 			if err != nil {
 				return err
@@ -613,6 +682,11 @@ func (i *Installer) runStep(ctx context.Context, req *Request, cp *checkpoint, s
 			if err := i.cfg.Registry.RegisterSubscriber(req.PluginID, sub); err != nil {
 				return err
 			}
+		}
+		if i.cfg.Store != nil {
+			_ = i.cfg.Store.RecordPluginEvent(ctx, &store.PluginEvent{
+				PluginID: req.PluginID, Kind: "delivery", Message: "plugin installed and published",
+			})
 		}
 	}
 
@@ -667,6 +741,12 @@ func (i *Installer) rollback(_ context.Context, task *store.HostTask, completed 
 }
 
 func (i *Installer) waitHealthy(ctx context.Context, req *Request, cp *checkpoint) (string, error) {
+	// A connect-only plugin points at a service fleet did not create. The
+	// operator supplied the URL, so do not gate the install on a probe of a
+	// service that may not be running yet.
+	if req.ConnectOnly {
+		return strings.TrimRight(req.Upstream, "/"), nil
+	}
 	upstream := req.Upstream
 	if upstream == "" && i.cfg.Instances != nil {
 		detail, err := i.cfg.Instances.Get(cp.Cluster, cp.Instance)
@@ -765,6 +845,26 @@ func firstNonEmpty(values ...string) string {
 	}
 
 	return ""
+}
+
+// webhookSecret returns the configured independent webhook secret. When none
+// was configured it generates a random per-process secret rather than deriving
+// one from the manifest signing key, and warns so operators can fix the config.
+func (i *Installer) webhookSecret() []byte {
+	if len(i.cfg.WebhookSecret) > 0 {
+		return i.cfg.WebhookSecret
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		// crypto/rand failing means the runtime has no entropy; a derived value
+		// is better than an empty signature but is explicitly not a secret.
+		i.cfg.Logger.Warn("plugin webhook secret unavailable, falling back to derived value", "error", err)
+		return []byte("insecure-ephemeral-webhook-secret")
+	}
+	i.cfg.Logger.Warn("plugin webhook secret is not configured; using an ephemeral random secret (set plugins.events.secret_file)")
+	i.cfg.WebhookSecret = secret
+
+	return secret
 }
 
 func boolPtr(value bool) *bool { return &value }

@@ -162,7 +162,45 @@ var schemaMigrations = []schemaMigration{
 		version:    15,
 		statements: []string{pluginWiringSchema},
 	},
+	{
+		// Operator-editable plugin configuration and the detail view's event /
+		// health feeds are stored next to the wiring rows so a restart keeps
+		// the complete plugin descriptor.
+		version: 16,
+		statements: []string{
+			pluginConfigSchema,
+			pluginEventSchema,
+			pluginHealthSchema,
+		},
+	},
 }
+
+const pluginConfigSchema = `
+CREATE TABLE IF NOT EXISTS plugin_config (
+	plugin_id TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value TEXT NOT NULL DEFAULT '',
+	updated_at BIGINT NOT NULL,
+	PRIMARY KEY (plugin_id, key)
+)`
+
+const pluginEventSchema = `
+CREATE TABLE IF NOT EXISTS plugin_events (
+	id TEXT PRIMARY KEY,
+	plugin_id TEXT NOT NULL,
+	at BIGINT NOT NULL,
+	kind TEXT NOT NULL,
+	message TEXT NOT NULL
+)`
+
+const pluginHealthSchema = `
+CREATE TABLE IF NOT EXISTS plugin_health (
+	id TEXT PRIMARY KEY,
+	plugin_id TEXT NOT NULL,
+	at BIGINT NOT NULL,
+	status TEXT NOT NULL,
+	detail TEXT NOT NULL DEFAULT ''
+)`
 
 const pluginWiringSchema = `
 CREATE TABLE IF NOT EXISTS plugin_wiring (

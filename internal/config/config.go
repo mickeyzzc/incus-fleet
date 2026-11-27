@@ -64,10 +64,15 @@ type PluginsConfig struct {
 
 // PluginEventsConfig configures plugin-to-fleet webhook delivery.
 type PluginEventsConfig struct {
-	Enabled         bool   `yaml:"enabled"`
-	Path            string `yaml:"path"`
-	SecretFile      string `yaml:"secret_file"`
-	BearerTokenFile string `yaml:"bearer_token_file"`
+	Enabled bool   `yaml:"enabled"`
+	Path    string `yaml:"path"`
+	// SecretFile authenticates inbound plugin events. It is also preferred as
+	// the independent secret for outbound fleet-to-plugin webhooks.
+	SecretFile string `yaml:"secret_file"`
+	// WebhookSecretFile, when set, overrides SecretFile for outbound webhooks
+	// so inbound and outbound credentials can be rotated separately.
+	WebhookSecretFile string `yaml:"webhook_secret_file"`
+	BearerTokenFile   string `yaml:"bearer_token_file"`
 }
 
 // PluginEntry declares one externally hosted plugin.
@@ -370,6 +375,9 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("INCUS_FLEET_PLUGINS_EVENTS_SECRET_FILE"); v != "" {
 		c.Plugins.Events.SecretFile = v
+	}
+	if v := os.Getenv("INCUS_FLEET_PLUGINS_EVENTS_WEBHOOK_SECRET_FILE"); v != "" {
+		c.Plugins.Events.WebhookSecretFile = v
 	}
 	if v := os.Getenv("INCUS_FLEET_METRICS_QUERY_URL"); v != "" {
 		c.Metrics.Query.URL = v
@@ -728,6 +736,7 @@ func (c *Config) ValidateFiles() error {
 		{"metrics.query.bearer_token_file", c.Metrics.Query.BearerTokenFile},
 		{"plugins.signing_key_file", c.Plugins.SigningKeyFile},
 		{"plugins.events.secret_file", c.Plugins.Events.SecretFile},
+		{"plugins.events.webhook_secret_file", c.Plugins.Events.WebhookSecretFile},
 		{"plugins.events.bearer_token_file", c.Plugins.Events.BearerTokenFile},
 	} {
 		if p.path == "" {

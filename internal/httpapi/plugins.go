@@ -5,6 +5,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/mickeyzzc/incus-fleet/internal/auth"
 	"github.com/mickeyzzc/incus-fleet/internal/config"
@@ -21,6 +22,31 @@ type pluginView struct {
 	UI         pluginUIView `json:"ui"`
 	HealthPath string       `json:"health_path,omitempty"`
 	Kind       string       `json:"kind"`
+	// The detail view's tabs are populated only by GET /plugins/{id}; the
+	// list endpoint stays cheap by omitting them.
+	Config        map[string]string  `json:"config,omitempty"`
+	Wiring        []pluginWiringView `json:"wiring,omitempty"`
+	Events        []pluginEventView  `json:"events,omitempty"`
+	HealthHistory []pluginHealthView `json:"health_history,omitempty"`
+}
+
+type pluginWiringView struct {
+	Capability    string `json:"capability"`
+	Target        string `json:"target"`
+	DefaultTarget string `json:"default_target"`
+	Key           string `json:"key,omitempty"`
+}
+
+type pluginEventView struct {
+	At      string `json:"at"`
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+}
+
+type pluginHealthView struct {
+	At     string `json:"at"`
+	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type pluginUIView struct {
@@ -41,6 +67,8 @@ func (a *API) registerPluginRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/plugins/{id}/toggle", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.togglePlugin)))
 	mux.Handle("GET /api/v1/plugins/{id}/wiring", a.requireScope(auth.ScopeReadPlugins, http.HandlerFunc(a.getPluginWiring)))
 	mux.Handle("PUT /api/v1/plugins/{id}/wiring", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.putPluginWiring)))
+	mux.Handle("DELETE /api/v1/plugins/{id}/wiring/{key}", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.deletePluginWiring)))
+	mux.Handle("PUT /api/v1/plugins/{id}/config", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.putPluginConfig)))
 	mux.Handle("POST /api/v1/plugin-installs", a.requireScope(auth.ScopeManagePlugins, http.HandlerFunc(a.submitPluginInstallTask)))
 	mux.Handle("GET /api/v1/plugin-installs", a.requireScope(auth.ScopeReadPlugins, http.HandlerFunc(a.listPluginInstallTasks)))
 	mux.Handle("GET /api/v1/plugin-installs/{id}", a.requireScope(auth.ScopeReadPlugins, http.HandlerFunc(a.getPluginInstallTask)))
@@ -68,18 +96,76 @@ func (a *API) listPlugins(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// getPlugin returns one plugin descriptor.
+// getPlugin returns one plugin descriptor, including the data behind the
+// detail view's configuration, wiring, events and health-history tabs.
 func (a *API) getPlugin(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	for _, entry := range a.pluginEntries() {
 		if entry.ID == id {
-			writeJSON(w, http.StatusOK, toPluginView(entry))
+			view := toPluginView(entry)
+			if err := a.decoratePluginView(r, &view); err != nil {
+				a.serviceError(w, r, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, view)
 
 			return
 		}
 	}
 
 	writeError(w, http.StatusNotFound, "not_found", "plugin not found")
+}
+
+func (a *API) decoratePluginView(r *http.Request, view *pluginView) error {
+	if a.store == nil {
+		return nil
+	}
+	ctx := r.Context()
+	values, err := a.store.ListPluginConfig(ctx, view.ID)
+	if err != nil {
+		return err
+	}
+	if len(values) > 0 {
+		view.Config = values
+	}
+	if a.registry != nil {
+		if _, ok := a.registry.Get(view.ID); ok {
+			entries, err := a.pluginWiringEntries(view.ID)
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				capability := entry.Effect
+				if capability == "" {
+					capability = entry.Key
+				}
+				view.Wiring = append(view.Wiring, pluginWiringView{
+					Capability: capability, Target: entry.Value,
+					DefaultTarget: entry.DefaultValue, Key: entry.Key,
+				})
+			}
+		}
+	}
+	events, err := a.store.ListPluginEvents(ctx, view.ID, 20)
+	if err != nil {
+		return err
+	}
+	for _, event := range events {
+		view.Events = append(view.Events, pluginEventView{
+			At: event.At.Format(time.RFC3339), Kind: event.Kind, Message: event.Message,
+		})
+	}
+	health, err := a.store.ListPluginHealth(ctx, view.ID, 20)
+	if err != nil {
+		return err
+	}
+	for _, sample := range health {
+		view.HealthHistory = append(view.HealthHistory, pluginHealthView{
+			At: sample.At.Format(time.RFC3339), Status: sample.Status, Detail: sample.Detail,
+		})
+	}
+
+	return nil
 }
 
 func (a *API) pluginEntries() []config.PluginEntry {
@@ -89,8 +175,39 @@ func (a *API) pluginEntries() []config.PluginEntry {
 
 	entries := append([]config.PluginEntry{}, a.pluginsConfig.Entries...)
 	entries = append(entries, a.installedPluginEntries()...)
+	entries = append(entries, a.registryPluginEntries(entries)...)
 
 	return entries
+}
+
+// registryPluginEntries exposes descriptors that are registered but have no
+// static YAML entry — first-party catalog plugins and restored community
+// packages. Without this the manager cannot open their detail pages at all.
+func (a *API) registryPluginEntries(existing []config.PluginEntry) []config.PluginEntry {
+	if a.registry == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(existing))
+	for _, entry := range existing {
+		seen[entry.ID] = struct{}{}
+	}
+	out := make([]config.PluginEntry, 0)
+	for _, manifest := range a.registry.Manifests() {
+		if _, ok := seen[manifest.ID]; ok {
+			continue
+		}
+		entry := config.PluginEntry{
+			ID: manifest.ID, Enabled: true,
+			Role: "viewer",
+			UI: config.PluginUIManifest{
+				Path: strings.TrimSuffix(manifest.Capabilities.ProxyUI.PathPrefix, "/"),
+				Icon: manifest.ID, TitleKey: manifest.Name, RequiresRole: "viewer",
+			},
+		}
+		out = append(out, entry)
+	}
+
+	return out
 }
 
 func toPluginView(entry config.PluginEntry) pluginView {
