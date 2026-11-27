@@ -49,6 +49,9 @@ type DiskSpec struct {
 	Path string `json:"path"`
 	Size string `json:"size,omitempty"`
 	Pool string `json:"pool,omitempty"`
+	// Source attaches an existing custom volume instead of allocating a new
+	// pool-backed disk. Plugin installs pre-allocate and format data volumes.
+	Source string `json:"source,omitempty"`
 }
 
 // CreateRequest describes a new instance.
@@ -261,7 +264,10 @@ func (s *Service) Create(ctx context.Context, clusterName string, req CreateRequ
 			"path": strings.TrimSpace(disk.Path),
 			"pool": diskPool,
 		}
-		if size := strings.TrimSpace(disk.Size); size != "" {
+		if source := strings.TrimSpace(disk.Source); source != "" {
+			// An already allocated (and possibly formatted) custom volume.
+			device["source"] = source
+		} else if size := strings.TrimSpace(disk.Size); size != "" {
 			// A pool-backed disk needs a source volume; Incus rejects a bare
 			// pool+size device with "missing the required source or path".
 			volumeName, err := ensureVMDiskVolume(volumeStore, clusterName, req.Name, name, diskPool, size)

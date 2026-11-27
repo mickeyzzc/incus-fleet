@@ -78,6 +78,12 @@ func WithHeartbeatHook(fn func(string)) Option {
 	return func(g *Gateway) { g.onHeartbeat = fn }
 }
 
+// WithEventPublisher attaches plugin event fan-out for connection lifecycle
+// changes. The callback is fire-and-forget from the gateway's perspective.
+func WithEventPublisher(fn func(context.Context, string, string)) Option {
+	return func(g *Gateway) { g.onEvent = fn }
+}
+
 // Gateway serves enrollment and mTLS WebSocket connections.
 type Gateway struct {
 	store             *store.SQLStore
@@ -89,6 +95,7 @@ type Gateway struct {
 	onConnect         func(string)
 	onDisconnect      func(string)
 	onHeartbeat       func(string)
+	onEvent           func(context.Context, string, string)
 
 	mu      sync.Mutex
 	conns   map[string]*agentConn
@@ -371,10 +378,16 @@ func (g *Gateway) connect(w http.ResponseWriter, r *http.Request) {
 	if g.onConnect != nil {
 		g.onConnect(agentID)
 	}
+	if g.onEvent != nil {
+		g.onEvent(r.Context(), "agent.connected", agentID)
+	}
 	defer func() {
 		g.unregister(conn)
 		if g.onDisconnect != nil {
 			g.onDisconnect(agentID)
+		}
+		if g.onEvent != nil {
+			g.onEvent(context.Background(), "agent.disconnected", agentID)
 		}
 	}()
 	defer conn.close()
@@ -439,7 +452,7 @@ func (c *agentConn) enqueue(env *agentpb.Envelope) bool {
 	}
 }
 
-func (g *Gateway) handleEnvelope(_ context.Context, c *agentConn, agent *store.Agent, env *agentpb.Envelope) {
+func (g *Gateway) handleEnvelope(ctx context.Context, c *agentConn, agent *store.Agent, env *agentpb.Envelope) {
 	switch body := env.Body.(type) {
 	case *agentpb.Envelope_Hello:
 		if body.Hello.AgentId != "" && body.Hello.AgentId != agent.ID {
@@ -472,6 +485,9 @@ func (g *Gateway) handleEnvelope(_ context.Context, c *agentConn, agent *store.A
 		}
 		if g.onHeartbeat != nil {
 			g.onHeartbeat(agent.ID)
+		}
+		if g.onEvent != nil {
+			g.onEvent(ctx, "agent.heartbeat", agent.ID)
 		}
 		g.send(agent.ID, &agentpb.Envelope{Body: &agentpb.Envelope_HeartbeatAck{HeartbeatAck: &agentpb.HeartbeatAck{
 			ServerTimeMs: time.Now().UTC().UnixMilli(),

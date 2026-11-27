@@ -36,6 +36,7 @@ type Config struct {
 const (
 	defaultPluginDir            = "data/plugins"
 	defaultPluginHealthInterval = "15s"
+	defaultPluginEventsPath     = "/api/v1/plugins/events"
 )
 
 // PluginsConfig registers plugins that fleet surfaces in its UI and proxies to.
@@ -50,6 +51,23 @@ type PluginsConfig struct {
 	HealthInterval string `yaml:"health_interval"`
 	// Entries are the statically declared plugins.
 	Entries []PluginEntry `yaml:"entries"`
+	// SigningKeyFile holds the HMAC key used to verify signed community
+	// packages and plugin catalog signatures. Unsigned community packages are
+	// rejected when it is configured.
+	SigningKeyFile string `yaml:"signing_key_file"`
+	// SigningKey is populated from INCUS_FLEET_PLUGINS_SIGNING_KEY so the
+	// secret never has to appear in a YAML file.
+	SigningKey string `yaml:"-"`
+	// Events is the opt-in inbound webhook endpoint for plugin-originated events.
+	Events PluginEventsConfig `yaml:"events"`
+}
+
+// PluginEventsConfig configures plugin-to-fleet webhook delivery.
+type PluginEventsConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	Path            string `yaml:"path"`
+	SecretFile      string `yaml:"secret_file"`
+	BearerTokenFile string `yaml:"bearer_token_file"`
 }
 
 // PluginEntry declares one externally hosted plugin.
@@ -344,6 +362,15 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("INCUS_FLEET_MESH_SECRET"); v != "" {
 		c.Mesh.Secret = v
 	}
+	if v := os.Getenv("INCUS_FLEET_PLUGINS_SIGNING_KEY"); v != "" {
+		c.Plugins.SigningKey = v
+	}
+	if v := os.Getenv("INCUS_FLEET_PLUGINS_EVENTS_ENABLED"); v != "" {
+		c.Plugins.Events.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("INCUS_FLEET_PLUGINS_EVENTS_SECRET_FILE"); v != "" {
+		c.Plugins.Events.SecretFile = v
+	}
 	if v := os.Getenv("INCUS_FLEET_METRICS_QUERY_URL"); v != "" {
 		c.Metrics.Query.URL = v
 	}
@@ -430,6 +457,9 @@ func (c *Config) applyDefaults() {
 	}
 	if strings.TrimSpace(c.Plugins.HealthInterval) == "" {
 		c.Plugins.HealthInterval = defaultPluginHealthInterval
+	}
+	if strings.TrimSpace(c.Plugins.Events.Path) == "" {
+		c.Plugins.Events.Path = defaultPluginEventsPath
 	}
 	for i := range c.Plugins.Entries {
 		c.Plugins.Entries[i].Upstream = strings.TrimRight(strings.TrimSpace(c.Plugins.Entries[i].Upstream), "/")
@@ -568,6 +598,14 @@ func (p *PluginsConfig) validate() error {
 	if _, err := time.ParseDuration(p.HealthInterval); err != nil {
 		return fmt.Errorf("config: plugins.health_interval %q is not a duration", p.HealthInterval)
 	}
+	if p.Events.Enabled {
+		if !strings.HasPrefix(p.Events.Path, "/") {
+			return fmt.Errorf("config: plugins.events.path %q must be absolute", p.Events.Path)
+		}
+		if strings.TrimSpace(p.Events.SecretFile) == "" {
+			return errors.New("config: plugins.events.secret_file is required when events are enabled")
+		}
+	}
 
 	seen := make(map[string]struct{}, len(p.Entries))
 	seenPath := make(map[string]struct{}, len(p.Entries))
@@ -688,6 +726,9 @@ func (c *Config) ValidateFiles() error {
 	}{
 		{"metrics.remote_write.bearer_token_file", c.Metrics.RemoteWrite.BearerTokenFile},
 		{"metrics.query.bearer_token_file", c.Metrics.Query.BearerTokenFile},
+		{"plugins.signing_key_file", c.Plugins.SigningKeyFile},
+		{"plugins.events.secret_file", c.Plugins.Events.SecretFile},
+		{"plugins.events.bearer_token_file", c.Plugins.Events.BearerTokenFile},
 	} {
 		if p.path == "" {
 			continue

@@ -377,6 +377,62 @@ func TestNewWithExternalMetrics(t *testing.T) {
 	}
 }
 
+func TestNewAppliesPersistedWiring(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(context.Background(), cfg.Database.Driver, cfg.Database.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []*store.PluginWiring{
+		{PluginID: "vm", Key: "metrics.query_url", Value: "http://192.0.2.20:8428", Enabled: true, Approved: true},
+		{PluginID: "vm", Key: "metrics.remote_write_url", Value: "http://192.0.2.21:8428/api/v1/write", Enabled: true, Approved: true},
+		{PluginID: "vmlogs", Key: "logs.query_url", Value: "http://192.0.2.22:9428", Enabled: true, Approved: true},
+	} {
+		if err := st.UpsertPluginWiring(context.Background(), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.Metrics = config.MetricsConfig{Enabled: true, RemoteWrite: config.RemoteWriteConfig{SpoolDir: t.TempDir()}}
+	application, err := New(context.Background(), cfg, testLogger(),
+		WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{})),
+		WithStaticFS(staticFS()),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.Close() })
+	if application.logsQuery == nil || application.logsQuery.URL() != "http://192.0.2.22:9428" {
+		t.Fatalf("logs wiring not applied: %#v", application.logsQuery)
+	}
+	if application.remoteWrite == nil || application.remoteWrite.Target() != "http://192.0.2.21:8428/api/v1/write" {
+		t.Fatal("remote write was not enabled by wiring")
+	}
+	if got, ok := application.registry.WiringValue("metrics.query_url"); !ok || got != "http://192.0.2.20:8428" {
+		t.Fatalf("query wiring = %q %v", got, ok)
+	}
+}
+
+func TestNewRejectsInvalidPluginAndAgentSecrets(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Plugins = config.PluginsConfig{Enabled: true, SigningKeyFile: filepath.Join(t.TempDir(), "missing-key")}
+	if _, err := New(context.Background(), cfg, testLogger(), WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{}))); err == nil {
+		t.Fatal("expected missing signing key error")
+	}
+
+	cfg = testConfig(t)
+	cfg.Agent = config.AgentConfig{
+		Enabled: true, Listen: "127.0.0.1:0", TLSCert: filepath.Join(t.TempDir(), "missing-cert"),
+		TLSKey: "x", ClientCA: "y", CAKey: "z",
+	}
+	if _, err := New(context.Background(), cfg, testLogger(), WithDialer(testDialer(&incusfake.Server{}, &incusfake.Server{}))); err == nil {
+		t.Fatal("expected invalid agent certificate error")
+	}
+}
+
 func TestNewWithHADispatcher(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.HA = config.HAConfig{Enabled: true, WorkerID: "test-worker", Lease: "30s", Interval: "1s"}

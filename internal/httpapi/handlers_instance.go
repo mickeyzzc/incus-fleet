@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/mickeyzzc/incus-fleet/internal/instances"
+	"github.com/mickeyzzc/incus-fleet/internal/plugin"
 )
 
 func (a *API) listClusterInstances(w http.ResponseWriter, r *http.Request) {
@@ -109,9 +110,16 @@ func (a *API) instanceAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.instances.Action(r.Context(), r.PathValue("cluster"), r.PathValue("instance"), req); err != nil {
+	cluster, instance := r.PathValue("cluster"), r.PathValue("instance")
+	if err := a.instances.Action(r.Context(), cluster, instance, req); err != nil {
 		a.serviceError(w, r, err)
 		return
+	}
+	if a.registry != nil {
+		a.registry.Publish(r.Context(), plugin.Event{
+			Type: plugin.EventInstanceStateChange, Subject: cluster + "/" + instance,
+			Payload: map[string]string{"action": req.Action},
+		})
 	}
 
 	w.WriteHeader(http.StatusNoContent)

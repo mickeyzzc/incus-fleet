@@ -156,7 +156,25 @@ var schemaMigrations = []schemaMigration{
 			{table: "installed_plugins", column: "instance", definition: `TEXT NOT NULL DEFAULT ''`},
 		},
 	},
+	{
+		// Approved wiring overrides are durable: a restart must not silently
+		// fall back to static configuration while a plugin is still installed.
+		version:    15,
+		statements: []string{pluginWiringSchema},
+	},
 }
+
+const pluginWiringSchema = `
+CREATE TABLE IF NOT EXISTS plugin_wiring (
+	plugin_id TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value TEXT NOT NULL DEFAULT '',
+	default_value TEXT NOT NULL DEFAULT '',
+	enabled INTEGER NOT NULL DEFAULT 1,
+	approved INTEGER NOT NULL DEFAULT 1,
+	updated_at BIGINT NOT NULL,
+	PRIMARY KEY (plugin_id, key)
+)`
 
 const installedPluginSchema = `
 CREATE TABLE IF NOT EXISTS installed_plugins (

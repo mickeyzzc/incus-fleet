@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -245,6 +246,38 @@ func TestPluginsValidateUpstreamPortOnly(t *testing.T) {
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v, want upstream_port alone to be valid", err)
+	}
+}
+
+func TestPluginEventsAndSigningConfig(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Plugins = PluginsConfig{Enabled: true, Dir: "data/plugins"}
+	cfg.applyDefaults()
+	if cfg.Plugins.Events.Path != defaultPluginEventsPath {
+		t.Fatalf("events.path = %q, want %q", cfg.Plugins.Events.Path, defaultPluginEventsPath)
+	}
+	if cfg.Plugins.Events.Enabled {
+		t.Fatal("events must be opt-in")
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	cfg.Plugins.Events = PluginEventsConfig{
+		Enabled: true, Path: "/api/v1/plugins/events",
+		SecretFile: filepath.Join(t.TempDir(), "events-secret"),
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate(events) error = %v", err)
+	}
+	cfg.Plugins.Events.Path = "relative"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "events.path") {
+		t.Fatalf("Validate(relative path) = %v", err)
+	}
+	cfg.Plugins.Events.Path = "/api/v1/plugins/events"
+	cfg.Plugins.Events.SecretFile = ""
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "events.secret_file") {
+		t.Fatalf("Validate(missing secret) = %v", err)
 	}
 }
 

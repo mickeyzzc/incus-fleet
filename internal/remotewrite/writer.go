@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,11 @@ type Writer struct {
 	spool  *spool
 	once   sync.Once
 	wg     sync.WaitGroup
+	// targetMu guards the dynamically wired remote-write destination. Static
+	// config remains the default until a plugin install activates wiring.
+	targetMu    sync.RWMutex
+	targetURL   string
+	targetToken string
 }
 
 // New builds a writer and replays any files left by a previous process.
@@ -64,11 +70,13 @@ func New(cfg Config) (*Writer, error) {
 		return nil, err
 	}
 	w := &Writer{
-		cfg:    cfg,
-		client: &http.Client{Timeout: cfg.Timeout},
-		queue:  make(chan spoolEntry, cfg.QueueSize),
-		stop:   make(chan struct{}),
-		spool:  sp,
+		cfg:         cfg,
+		client:      &http.Client{Timeout: cfg.Timeout},
+		queue:       make(chan spoolEntry, cfg.QueueSize),
+		stop:        make(chan struct{}),
+		spool:       sp,
+		targetURL:   cfg.URL,
+		targetToken: cfg.BearerToken,
 	}
 	for _, entry := range entries {
 		select {
@@ -88,6 +96,23 @@ func (w *Writer) Start(ctx context.Context) {
 		defer w.wg.Done()
 		w.run(ctx)
 	}()
+}
+
+// SetTarget replaces the remote-write destination and credential at runtime.
+// Wiring activation calls it so telemetry starts flowing to an installed
+// plugin without a restart. An empty URL disables sending but keeps spooling.
+func (w *Writer) SetTarget(rawURL, token string) {
+	w.targetMu.Lock()
+	defer w.targetMu.Unlock()
+	w.targetURL = strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	w.targetToken = strings.TrimSpace(token)
+}
+
+// Target returns the active destination. An empty string means disabled.
+func (w *Writer) Target() string {
+	w.targetMu.RLock()
+	defer w.targetMu.RUnlock()
+	return w.targetURL
 }
 
 // Enqueue persists series before queueing them. The oldest spool file is
@@ -218,7 +243,10 @@ func (w *Writer) flush(ctx context.Context, batch []spoolEntry) (bool, bool) {
 	if len(batch) == 0 {
 		return true, false
 	}
-	if w.cfg.URL == "" {
+	w.targetMu.RLock()
+	targetURL, token := w.targetURL, w.targetToken
+	w.targetMu.RUnlock()
+	if targetURL == "" {
 		return true, false
 	}
 	request := &prompb.WriteRequest{}
@@ -251,7 +279,7 @@ func (w *Writer) flush(ctx context.Context, batch []spoolEntry) (bool, bool) {
 	body := snappy.Encode(nil, payload)
 
 	for attempt := 0; attempt < 3; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.cfg.URL, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 		if err != nil {
 			return false, true
 		}
@@ -259,8 +287,8 @@ func (w *Writer) flush(ctx context.Context, batch []spoolEntry) (bool, bool) {
 		req.Header.Set("Content-Type", "application/x-protobuf")
 		req.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
 		req.Header.Set("User-Agent", "incus-fleet-remote-write")
-		if w.cfg.BearerToken != "" {
-			req.Header.Set("Authorization", "Bearer "+w.cfg.BearerToken)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
 		}
 		resp, err := w.client.Do(req)
 		if err == nil {

@@ -48,7 +48,9 @@ func TestPluginOneClickInstall(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &catalog); err != nil {
 		t.Fatalf("decode catalog: %v", err)
 	}
-	if len(catalog.Catalog) != 2 || catalog.Catalog[0].ID != "vm" || catalog.Catalog[1].ID != "vmlogs" {
+	if len(catalog.Catalog) != len(builtinPluginCatalog) ||
+		catalog.Catalog[0].ID != "vm" || catalog.Catalog[1].ID != "vmlogs" ||
+		catalog.Catalog[2].ID != "hive" || catalog.Catalog[3].ID != "bell" {
 		t.Fatalf("catalog = %#v", catalog.Catalog)
 	}
 

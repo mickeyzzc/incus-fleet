@@ -66,6 +66,24 @@ func TestQueryRangeDefaultsAndBadURL(t *testing.T) {
 	}
 }
 
+func TestSetBackendFromWiring(t *testing.T) {
+	var path string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer backend.Close()
+
+	proxy := New(Config{URL: "http://192.0.2.1:8428", Type: "prometheus"})
+	proxy.SetBackend(backend.URL, "victoriametrics")
+	if _, err := proxy.QueryRange(context.Background(), "x", time.Unix(0, 0), time.Unix(60, 0), time.Minute); err != nil {
+		t.Fatalf("QueryRange() error = %v", err)
+	}
+	if path != "/prometheus/api/v1/query_range" {
+		t.Fatalf("path = %q", path)
+	}
+}
+
 func TestNewDefaults(t *testing.T) {
 	proxy := New(Config{})
 	if proxy.cfg.Timeout != 15*time.Second || proxy.cfg.Type != "prometheus" {

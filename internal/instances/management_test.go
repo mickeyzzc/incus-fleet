@@ -108,6 +108,42 @@ func TestCreate(t *testing.T) {
 	}
 }
 
+func TestRenameInstanceBranches(t *testing.T) {
+	stopped := manageInstance("web-old")
+	stopped.Status = "Stopped"
+	stopped.StatusCode = api.Stopped
+	srv := &incusfake.Server{Instance: stopped}
+	svc := newTestService(t, map[string]*incusfake.Server{"c1": srv})
+	ctx := context.Background()
+
+	if _, err := svc.Rename(ctx, "c1", "web-old", "Bad Name"); err == nil {
+		t.Fatal("expected invalid name error")
+	}
+	if _, err := svc.Rename(ctx, "c1", "web-old", "web-old"); err == nil {
+		t.Fatal("expected same name error")
+	}
+	srv.Instance.Status = "Running"
+	srv.Instance.StatusCode = api.Running
+	if _, err := svc.Rename(ctx, "c1", "web-old", "web-new"); err == nil || !strings.Contains(err.Error(), "stop") {
+		t.Fatalf("running rename error = %v", err)
+	}
+	srv.Instance.Status = "Stopped"
+	srv.Instance.StatusCode = api.Stopped
+	srv.Instance.Name = "web-new"
+	srv.State = &api.InstanceState{Status: "Stopped", StatusCode: api.Stopped}
+	if _, err := svc.Rename(ctx, "c1", "web-old", "web-new"); err != nil {
+		t.Fatalf("Rename() error = %v", err)
+	}
+	if args := srv.RenameArgs(); len(args) != 1 || args[0].Post.Name != "web-new" {
+		t.Fatalf("rename args = %#v", args)
+	}
+
+	srv.RenameInstanceErr = errors.New("example rename failure")
+	if _, err := svc.Rename(ctx, "c1", "web-old", "web-new2"); err == nil {
+		t.Fatal("expected rename failure")
+	}
+}
+
 func TestCreateWithAdditionalDisks(t *testing.T) {
 	srv := &incusfake.Server{
 		Instance:  &api.Instance{Name: "vm-disks"},
@@ -139,6 +175,23 @@ func TestCreateWithAdditionalDisks(t *testing.T) {
 	}
 	if args := srv.CreateVolumeArgs(); len(args) != 2 {
 		t.Fatalf("volumes = %#v", args)
+	}
+
+	// A pre-allocated custom volume is attached by source and is not created
+	// again by the instance service.
+	_, err = svc.Create(context.Background(), "c1", CreateRequest{
+		Name: "vm-disks", Type: "container", Image: "debian", StoragePool: "default",
+		Disks: []DiskSpec{{Name: "data", Path: "/data", Pool: "default", Source: "plugin-vm-data"}},
+	})
+	if err != nil {
+		t.Fatalf("Create() with source error = %v", err)
+	}
+	post = srv.CreateArgs()[1]
+	if disk := post.Devices["data"]; disk["source"] != "plugin-vm-data" {
+		t.Fatalf("attached disk = %#v", disk)
+	}
+	if args := srv.CreateVolumeArgs(); len(args) != 2 {
+		t.Fatalf("source disk allocated a new volume: %#v", args)
 	}
 
 	_, err = svc.Create(context.Background(), "c1", CreateRequest{

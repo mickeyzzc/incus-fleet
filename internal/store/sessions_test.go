@@ -62,3 +62,30 @@ func TestSessions(t *testing.T) {
 		t.Fatalf("DeleteSession(missing) = %v", err)
 	}
 }
+
+func TestListSessionsByUser(t *testing.T) {
+	ctx := context.Background()
+	st := openSQLite(t)
+	expires := time.Now().UTC().Add(time.Hour)
+	for _, session := range []*Session{
+		{ID: "s1", UserID: "user-1", Username: "alice", Role: "admin", ExpiresAt: expires},
+		{ID: "s2", UserID: "user-1", Username: "alice", Role: "admin", ExpiresAt: expires},
+		{ID: "s3", UserID: "user-2", Username: "bob", Role: "viewer", ExpiresAt: expires},
+	} {
+		if err := st.CreateSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessions, err := st.ListSessionsByUser(ctx, "user-1")
+	if err != nil || len(sessions) != 2 {
+		t.Fatalf("sessions = %#v err=%v", sessions, err)
+	}
+	for _, session := range sessions {
+		if session.UserID != "user-1" {
+			t.Fatalf("session = %#v", session)
+		}
+	}
+	if sessions, err := st.ListSessionsByUser(ctx, "nobody"); err != nil || len(sessions) != 0 {
+		t.Fatalf("unknown user sessions = %#v err=%v", sessions, err)
+	}
+}

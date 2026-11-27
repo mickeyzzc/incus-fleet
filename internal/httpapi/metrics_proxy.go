@@ -12,6 +12,18 @@ import (
 // metricsQueryProxy resolves the external PromQL backend. Installing the `vm`
 // plugin is enough to enable it: no static config or restart is required.
 func (a *API) metricsQueryProxy() *metricsquery.Proxy {
+	if a.registry != nil {
+		if raw, ok := a.registry.WiringValue("metrics.query_url"); ok && raw != "" {
+			backendType := "victoriametrics"
+			if wired, found := a.registry.WiringValue("metrics.query_type"); found && wired != "" {
+				backendType = wired
+			}
+			proxy := metricsquery.New(metricsquery.Config{URL: raw, Type: backendType})
+			proxy.SetBackend(raw, backendType)
+
+			return proxy
+		}
+	}
 	if a.metricsQuery != nil {
 		return a.metricsQuery
 	}

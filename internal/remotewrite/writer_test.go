@@ -103,6 +103,42 @@ func TestWriterSendsSnappyProtobuf(t *testing.T) {
 	}
 }
 
+func TestSetTargetFromWiring(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	// Static config is deliberately empty: only wiring enables remote write.
+	writer := newWriter(t, Config{BatchSize: 10, QueueSize: 10})
+	if writer.Target() != "" {
+		t.Fatalf("initial target = %q", writer.Target())
+	}
+	writer.SetTarget(server.URL, "example-token-test")
+	if writer.Target() != server.URL {
+		t.Fatalf("target = %q", writer.Target())
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer.Start(ctx)
+	writer.Enqueue([]telemetry.Series{{
+		Name: "fleet_host_load", Type: "gauge", Points: []telemetry.Sample{{At: time.Now().UTC(), Value: 1}},
+	}})
+	waitFor(t, func() bool { return gotAuth != "" })
+	writer.Close()
+	if gotAuth != "Bearer example-token-test" {
+		t.Fatalf("authorization = %q", gotAuth)
+	}
+
+	writer.SetTarget("", "")
+	if writer.Target() != "" {
+		t.Fatal("empty target did not disable remote write")
+	}
+}
+
 func TestWriterRetriesServerErrors(t *testing.T) {
 	var calls int
 	var mu sync.Mutex

@@ -93,6 +93,11 @@ func WithNetworkFixer(fixer *NetworkFixer) Option {
 	}
 }
 
+// WithEventSink attaches plugin event fan-out for terminal migration states.
+func WithEventSink(fn func(context.Context, string, string)) Option {
+	return func(s *Service) { s.onEvent = fn }
+}
+
 // Service schedules and executes migrations.
 type Service struct {
 	clusters   *clusters.Manager
@@ -103,6 +108,7 @@ type Service struct {
 	// network restores a guest's DHCP lease after a cross-cluster move. It is
 	// optional so tests and single-cluster setups can run without it.
 	network *NetworkFixer
+	onEvent func(context.Context, string, string)
 
 	mu      sync.Mutex
 	active  map[string]struct{}
@@ -615,6 +621,9 @@ func (s *Service) setStatus(ctx context.Context, id, status, progress, errText s
 	}
 	if err := s.store.UpdateMigration(ctx, migration); err != nil {
 		s.logger.Warn("failed to update migration status", "migration", id, "status", status, "error", err)
+	}
+	if s.onEvent != nil && (status == StatusDone || status == StatusFailed || status == StatusCanceled) {
+		s.onEvent(ctx, "migration.completed", id)
 	}
 }
 

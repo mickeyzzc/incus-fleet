@@ -740,6 +740,33 @@ func TestGatewayHooks(t *testing.T) {
 	}
 }
 
+func TestGatewayEventPublisher(t *testing.T) {
+	st, err := store.Open(context.Background(), "sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	now := time.Now().UTC()
+	if err := st.UpsertAgent(context.Background(), &store.Agent{
+		ID: "agent-1", Cluster: "c1", Member: "node-a", Status: store.AgentOnline,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var events []string
+	gw := New(st, nil, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WithEventPublisher(func(_ context.Context, typ, subject string) {
+			events = append(events, typ+":"+subject)
+		}),
+	)
+	conn := &agentConn{id: "agent-1", send: make(chan *agentpb.Envelope, 4), done: make(chan struct{})}
+	gw.handleEnvelope(context.Background(), conn, &store.Agent{ID: "agent-1"},
+		&agentpb.Envelope{Body: &agentpb.Envelope_Heartbeat{Heartbeat: &agentpb.Heartbeat{}}})
+	if len(events) != 1 || events[0] != "agent.heartbeat:agent-1" {
+		t.Fatalf("events = %v", events)
+	}
+}
+
 func TestAgentConnEnqueue(t *testing.T) {
 	conn := &agentConn{id: "a", send: make(chan *agentpb.Envelope, 1), done: make(chan struct{})}
 
