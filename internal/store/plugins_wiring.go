@@ -138,6 +138,23 @@ func (s *SQLStore) RestorePluginWiringDefaults(ctx context.Context, pluginID str
 	return nil
 }
 
+// RestorePluginWiringDefault puts one approved key back to its captured static
+// default but keeps the approval row for a later reinstall.
+func (s *SQLStore) RestorePluginWiringDefault(ctx context.Context, pluginID, key string) error {
+	const query = `UPDATE plugin_wiring SET value = default_value, enabled = 0, updated_at = ?
+		WHERE plugin_id = ? AND key = ?`
+	result, err := s.db.ExecContext(ctx, s.rebind(query),
+		time.Now().UTC().UnixNano(), pluginID, key)
+	if err != nil {
+		return fmt.Errorf("store: restore plugin wiring default: %w", err)
+	}
+	if n, err := result.RowsAffected(); err == nil && n == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
 // DeletePluginWiring removes one wiring row.
 func (s *SQLStore) DeletePluginWiring(ctx context.Context, pluginID, key string) error {
 	const query = `DELETE FROM plugin_wiring WHERE plugin_id = ? AND key = ?`

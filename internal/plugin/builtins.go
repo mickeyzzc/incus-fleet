@@ -69,12 +69,19 @@ permissions:
 type builtinSpec struct {
 	id, name, description, key, effect string
 	port                               int
+	// extraWiring declares additional fleet behaviors this plugin may take
+	// over. The shared YAML skeleton carries the primary key; these are added
+	// after parsing so the catalog table stays a single source of truth.
+	extraWiring []Wiring
 }
 
 var builtinSpecs = []builtinSpec{
 	{
 		id: "vm", name: "VictoriaMetrics", description: "Time-series storage for cluster and agent telemetry",
 		key: "metrics.query_url", effect: "fleet PromQL proxy queries this plugin", port: 8428,
+		extraWiring: []Wiring{{
+			Key: "metrics.remote_write_url", Effect: "fleet telemetry remote-write destination",
+		}},
 	},
 	{
 		id: "vmlogs", name: "VictoriaLogs", description: "Log storage and search for fleet and agents",
@@ -142,5 +149,16 @@ func buildBuiltinManifest(spec builtinSpec) (*Manifest, error) {
 	raw := fmt.Sprintf(builtinManifestYAML, spec.id, spec.name, spec.description, spec.id,
 		spec.id, spec.port, spec.id, spec.port, spec.key, spec.effect)
 
-	return ParseManifest([]byte(raw))
+	m, err := ParseManifest([]byte(raw))
+	if err != nil {
+		return nil, err
+	}
+	if len(spec.extraWiring) > 0 {
+		m.Capabilities.Wiring = append(m.Capabilities.Wiring, spec.extraWiring...)
+		if err := m.Validate(); err != nil {
+			return nil, err
+		}
+	}
+
+	return m, nil
 }

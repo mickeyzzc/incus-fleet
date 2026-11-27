@@ -318,6 +318,42 @@ func (r *Registry) RegisterSubscriber(id string, sub EventSubscriber) error {
 	return nil
 }
 
+// UnregisterSubscriber removes a dynamic event subscriber. Uninstall calls it
+// so a deleted plugin stops receiving fleet events immediately.
+func (r *Registry) UnregisterSubscriber(id string) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("%w: event subscriber requires id", ErrInvalidManifest)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.subscribers, id)
+
+	return nil
+}
+
+// Unregister removes a descriptor, its active overrides, and its dynamic
+// subscriber. Uninstall uses it so a removed community plugin cannot be
+// resurrected from persisted wiring after a restart. Built-in descriptors are
+// never unregistered by fleet.
+func (r *Registry) Unregister(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.plugins[id]; !ok {
+		return fmt.Errorf("%w: %s", ErrUnknownPlugin, id)
+	}
+	delete(r.plugins, id)
+	delete(r.wiring, id)
+	delete(r.subscribers, id)
+	for idx, existing := range r.order {
+		if existing == id {
+			r.order = append(r.order[:idx], r.order[idx+1:]...)
+			break
+		}
+	}
+
+	return nil
+}
+
 func containsEvent(events []string, want string) bool {
 	for _, event := range events {
 		if event == want {

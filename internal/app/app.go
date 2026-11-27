@@ -247,6 +247,14 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 			logsProxy.SetURL(target)
 		}
 	}
+	signingKey, err := readSecret(cfg.Plugins.SigningKey, cfg.Plugins.SigningKeyFile)
+	if err != nil {
+		manager.Close()
+		_ = st.Close()
+		return nil, err
+	}
+	webhookSecret := pluginWebhookSecret(cfg.Plugins, []byte(signingKey), logger)
+
 	registry = plugin.New(
 		plugin.WithWiringStore(st),
 		plugin.WithWiringListener(applyWiring),
@@ -259,6 +267,24 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 			return nil, err
 		}
 	}
+	if err := restoreInstalledPlugins(ctx, st, registry, cfg.Plugins, []byte(signingKey), webhookSecret, logger); err != nil {
+		manager.Close()
+		_ = st.Close()
+		return nil, err
+	}
+	// The notification sink is the real consumer of notifications.sink_url.
+	// It stays dormant until an operator wires that key to a target.
+	if err := registry.RegisterSubscriber("fleet-notification-sink", plugin.NewNotificationSink(
+		func() string {
+			if target, ok := registry.WiringValue("notifications.sink_url"); ok {
+				return target
+			}
+			return ""
+		}, webhookSecret, nil)); err != nil {
+		manager.Close()
+		_ = st.Close()
+		return nil, err
+	}
 	if err := registry.Start(ctx); err != nil {
 		manager.Close()
 		_ = st.Close()
@@ -266,16 +292,11 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts ...O
 	}
 	applyWiring()
 
-	signingKey, err := readSecret(cfg.Plugins.SigningKey, cfg.Plugins.SigningKeyFile)
-	if err != nil {
-		manager.Close()
-		_ = st.Close()
-		return nil, err
-	}
 	installer := plugininstall.New(plugininstall.Config{
 		Store: st, Instances: instancesService, Clusters: manager,
-		Images: plugininstall.ClusterImageResolver{Manager: manager},
-		Auth:   authenticator, Registry: registry, SigningKey: []byte(signingKey), Logger: logger,
+		Images: plugininstall.ClusterImageResolver{Manager: manager, Copier: instancesService},
+		Auth:   authenticator, Registry: registry, SigningKey: []byte(signingKey),
+		WebhookSecret: webhookSecret, Logger: logger,
 	})
 	applyWiring()
 

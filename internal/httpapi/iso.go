@@ -34,7 +34,7 @@ func (a *API) applyAnswerProfile(r *http.Request, req *instances.UnattendedReque
 			if explicit {
 				return fmt.Errorf("%w: answer profile not found", instances.ErrInvalidRequest)
 			}
-			return nil // no default configured: built-in template
+			return a.applyWiredAnswerFile(r.Context(), req)
 		}
 		return err
 	}
@@ -51,7 +51,8 @@ func (a *API) applyAnswerProfile(r *http.Request, req *instances.UnattendedReque
 	if strings.TrimSpace(req.AnswerFile) == "" && strings.TrimSpace(req.Spec.Hostname) == "" {
 		req.Spec.Hostname = strings.TrimSpace(req.Name)
 	}
-	return nil
+
+	return a.applyWiredAnswerFile(r.Context(), req)
 }
 
 func answerSpecProvided(spec unattended.AnswerSpec) bool {
