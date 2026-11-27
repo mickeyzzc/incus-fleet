@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 
 import PluginStateBlock from '@/components/PluginStateBlock.vue'
 import PluginTaskPanel from '@/components/PluginTaskPanel.vue'
+import { useVisiblePolling } from '@/composables/useInstanceActions'
 import { pluginIcon } from '@/plugins/icons'
 import { pluginDot, pluginStatus } from '@/plugins/model'
 import { useAuthStore } from '@/stores/auth'
@@ -20,9 +21,16 @@ const plugins = usePluginsStore()
 const detailTab = ref('overview')
 const configValues = reactive<Record<string, string>>({})
 const typedName = ref('')
+const configError = ref('')
+const wiringError = ref('')
 
 const entry = computed(() => plugins.byId(props.id))
 const status = computed(() => entry.value ? pluginStatus(entry.value) : null)
+/** Older descriptors omit these fields; the list entry is still shown. */
+const partialDescriptor = computed(() => Boolean(entry.value) && (
+  !entry.value?.config || !entry.value?.wiring
+  || !entry.value?.events || !entry.value?.health_history
+))
 const icon = computed(() => pluginIcon(entry.value?.ui.icon))
 const navPath = computed(() => entry.value?.ui.path ?? '')
 const canUninstall = computed(() => Boolean(entry.value) && typedName.value === entry.value?.name)
@@ -37,7 +45,9 @@ const tabs = [
 function state(): 'forbidden' | 'loading' | 'error' | 'empty' | 'ready' {
   if (!auth.canAdmin) return 'forbidden'
   if (plugins.loading && !plugins.loaded) return 'loading'
-  if (plugins.error) return 'error'
+  // An action failure is shown next to its tab; only a load failure that
+  // leaves no descriptor replaces the whole page.
+  if ((plugins.error || plugins.detailError) && !entry.value) return 'error'
   if (!entry.value) return 'empty'
   return 'ready'
 }
@@ -50,6 +60,8 @@ const stateBlock = computed<'loading' | 'error' | 'empty' | 'forbidden'>(() => {
 
 watch(entry, (value) => {
   typedName.value = ''
+  configError.value = ''
+  wiringError.value = ''
   for (const key of Object.keys(configValues)) {
     delete configValues[key]
   }
@@ -58,9 +70,19 @@ watch(entry, (value) => {
   }
 }, { immediate: true })
 
-onMounted(() => {
-  void plugins.fetch()
+watch(() => props.id, (id) => {
+  void plugins.fetchDetail(id)
 })
+
+onMounted(async () => {
+  await plugins.fetch()
+  if (!plugins.error) {
+    await plugins.fetchDetail(props.id)
+  }
+})
+
+// Poll the active install task by id while this page is visible.
+useVisiblePolling(() => plugins.refreshTask(), 3000)
 
 function toggle(): void {
   if (entry.value) {
@@ -82,6 +104,28 @@ async function uninstall(): Promise<void> {
   await plugins.uninstall(entry.value.id)
   if (!plugins.error) {
     await router.push({ name: 'plugins' })
+  }
+}
+
+async function saveConfig(): Promise<void> {
+  if (!entry.value) return
+  configError.value = ''
+  const ok = await plugins.saveConfig(entry.value.id, { ...configValues })
+  if (!ok) {
+    configError.value = `${t('plugins.detail.configError')} · ${plugins.error}`
+  } else {
+    await plugins.fetchDetail(entry.value.id)
+  }
+}
+
+async function restoreWiring(key: string): Promise<void> {
+  if (!entry.value) return
+  wiringError.value = ''
+  const ok = await plugins.restoreWiring(entry.value.id, key)
+  if (!ok) {
+    wiringError.value = `${t('plugins.detail.wiringError')} · ${plugins.error}`
+  } else {
+    await plugins.fetchDetail(entry.value.id)
   }
 }
 
@@ -110,7 +154,7 @@ function statusText(value: string): string {
     <PluginStateBlock
       v-if="blockState !== 'ready'"
       :state="stateBlock"
-      :message="blockState === 'error' ? plugins.error : blockState === 'empty' ? t('plugins.detail.notFound') : ''"
+      :message="blockState === 'error' ? (plugins.error || plugins.detailError) : blockState === 'empty' ? t('plugins.detail.notFound') : ''"
       :action-label="blockState === 'error' ? t('plugins.state.retry') : blockState === 'empty' ? t('plugins.detail.backToList') : ''"
       @action="blockState === 'error' ? plugins.fetch(true) : router.push({ name: 'plugins' })"
     />
@@ -123,6 +167,9 @@ function statusText(value: string): string {
         </span>
         <span class="muted">— {{ status.detail }}</span>
       </div>
+      <p v-if="partialDescriptor" class="muted descriptor-note" role="status">
+        {{ t('plugins.detail.partialDescriptor') }}
+      </p>
 
       <el-tabs v-model="detailTab" class="detail-tabs">
         <el-tab-pane
@@ -176,18 +223,20 @@ function statusText(value: string): string {
               :task="plugins.task"
               class="detail-task"
               @retry="plugins.retryInstall()"
+              @cancel="plugins.cancelTask()"
               @dismiss="plugins.dismissTask()"
             />
           </div>
 
           <div v-else-if="tab.key === 'configuration'" class="detail-block detail-config">
             <p class="muted">{{ t('plugins.configurationHint') }}</p>
+            <p v-if="configError" class="action-error" role="alert">{{ configError }}</p>
             <template v-if="Object.keys(configValues).length > 0">
               <label v-for="key in Object.keys(configValues)" :key="key" class="config-field">
                 <span>{{ key }}</span>
                 <el-input v-model="configValues[key]" />
               </label>
-              <el-button type="primary" :loading="plugins.loading" @click="plugins.saveConfig(entry.id, { ...configValues })">
+              <el-button type="primary" :loading="plugins.loading" @click="saveConfig">
                 {{ t('plugins.detail.save') }}
               </el-button>
             </template>
@@ -196,6 +245,7 @@ function statusText(value: string): string {
 
           <div v-else-if="tab.key === 'wiring'" class="detail-block">
             <p class="muted">{{ t('plugins.wiringHint') }}</p>
+            <p v-if="wiringError" class="action-error" role="alert">{{ wiringError }}</p>
             <table v-if="entry.wiring?.length" class="wiring-table">
               <thead>
                 <tr>
@@ -214,7 +264,7 @@ function statusText(value: string): string {
                   <td>{{ wire.target }}</td>
                   <td class="muted">{{ wire.default_target }}</td>
                   <td>
-                    <el-button link type="primary" @click="plugins.restoreWiring(entry.id, wire.key ?? wire.capability)">
+                    <el-button link type="primary" @click="restoreWiring(wire.key ?? wire.capability)">
                       {{ t('plugins.detail.restoreDefault') }}
                     </el-button>
                   </td>
@@ -275,6 +325,8 @@ function statusText(value: string): string {
 .overview-list dt { color: var(--el-text-color-secondary); }
 .overview-list dd { margin: 0; }
 .detail-block h4 { margin: 12px 0 8px; font-size: 14px; }
+.descriptor-note { margin: 0; }
+.action-error { margin: 8px 0; color: var(--el-color-danger); font-size: 13px; }
 .health-list, .event-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
 .health-list li, .event-list li { display: flex; align-items: center; gap: 8px; }
 .overview-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }

@@ -56,6 +56,23 @@ describe('i18n', () => {
     expect(currentLocale()).toBe('zh-CN')
     expect(localStorage.getItem('incus-fleet.locale')).toBe('zh-CN')
   })
+
+  it('keeps every plugin key translated in both locales', () => {
+    const keys = (value: unknown, prefix = ''): string[] => {
+      if (typeof value !== 'object' || value === null) return [prefix]
+      return Object.entries(value as Record<string, unknown>).flatMap(([key, child]) =>
+        keys(child, prefix ? `${prefix}.${key}` : key))
+    }
+    const messages = i18n.global.messages.value
+    const en = keys(messages.en?.plugins).sort()
+    const zh = keys(messages['zh-CN']?.plugins).sort()
+
+    expect(en).toEqual(zh)
+    setLocale('zh-CN')
+    for (const key of en) {
+      expect(i18n.global.t(`plugins.${key}`)).not.toBe(`plugins.${key}`)
+    }
+  })
 })
 
 describe('i18n degraded environments', () => {

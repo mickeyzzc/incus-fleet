@@ -98,6 +98,8 @@ function confirm(): void {
       memory: form.memory,
       disk: form.disk,
       network: form.network,
+      filesystem: form.filesystem.trim() || undefined,
+      mount_point: form.mountPoint.trim() || undefined,
     })
     return
   }

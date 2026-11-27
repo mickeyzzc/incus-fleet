@@ -8,6 +8,7 @@ import type { PluginInstallRequest } from '@/api/types'
 import PluginInstallWizard from '@/components/PluginInstallWizard.vue'
 import PluginStateBlock from '@/components/PluginStateBlock.vue'
 import PluginTaskPanel from '@/components/PluginTaskPanel.vue'
+import { useVisiblePolling } from '@/composables/useInstanceActions'
 import { pluginDot, pluginStatus } from '@/plugins/model'
 import { useAuthStore } from '@/stores/auth'
 import { useClustersStore } from '@/stores/clusters'
@@ -66,6 +67,10 @@ onMounted(async () => {
   void clusters.fetchAll()
   await plugins.fetch(true)
 })
+
+// A submitted task id is the source of truth for progress. Polling is a no-op
+// until a task exists and stops touching the server after a terminal state.
+useVisiblePolling(() => plugins.refreshTask(), 3000)
 </script>
 
 <template>
@@ -93,6 +98,7 @@ onMounted(async () => {
       v-if="plugins.task"
       :task="plugins.task"
       @retry="plugins.retryInstall()"
+      @cancel="plugins.cancelTask()"
       @dismiss="plugins.dismissTask()"
     />
 
