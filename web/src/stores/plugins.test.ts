@@ -16,6 +16,8 @@ vi.mock('@/api', async (importOriginal) => {
       installPlugin: vi.fn(),
       togglePlugin: vi.fn(),
       uninstallPlugin: vi.fn(),
+      configurePlugin: vi.fn(),
+      restorePluginWiring: vi.fn(),
     },
   }
 })
@@ -43,6 +45,8 @@ describe('usePluginsStore', () => {
     vi.mocked(api.installPlugin).mockReset()
     vi.mocked(api.togglePlugin).mockReset()
     vi.mocked(api.uninstallPlugin).mockReset()
+    vi.mocked(api.configurePlugin).mockReset()
+    vi.mocked(api.restorePluginWiring).mockReset()
   })
 
   it('caches results until a forced refresh', async () => {
@@ -92,7 +96,7 @@ describe('usePluginsStore', () => {
     expect(nav.requiresRole).toBe('viewer')
   })
 
-  it('falls back to a stable title key when the manifest omits one', async () => {
+  it('falls back to a namespaced title key when the manifest omits one', async () => {
     vi.mocked(api.listPlugins).mockResolvedValue({
       plugins: [samplePlugin({ id: 'bare', ui: { path: '/plugins/bare' } })],
       enabled: true,
@@ -103,8 +107,8 @@ describe('usePluginsStore', () => {
 
     const nav = store.navigation[0]
     if (!nav) throw new Error('expected one navigation entry')
-    expect(nav.titleKey).toBe('plugins.bare')
-    expect(nav.fallbackTitle).toBe('VictoriaMetrics')
+    expect(nav.titleKey).toBe('plugins.text.bare.title')
+    expect(nav.title).toBe('VictoriaMetrics')
   })
 
   it('resolves a plugin by id and reports its UI URL', async () => {
@@ -190,5 +194,59 @@ describe('usePluginsStore', () => {
 
     expect(token).toBe('')
     expect(store.error).toContain('bad upstream')
+  })
+
+  it('counts one badge for plugins that need attention', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({
+      plugins: [
+        samplePlugin(),
+        samplePlugin({ id: 'bad', status: 'failed' }),
+        samplePlugin({ id: 'stale', update_available: true }),
+        samplePlugin({ id: 'off', enabled: false }),
+      ],
+      enabled: true,
+    })
+    const store = usePluginsStore()
+    await store.fetch()
+
+    expect(store.attentionCount).toBe(2)
+  })
+
+  it('tracks an install as a resumable task with per-step progress', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.installPlugin)
+      .mockRejectedValueOnce(new Error('import failed'))
+      .mockResolvedValueOnce({ plugin: samplePlugin(), token: 'token' })
+
+    const store = usePluginsStore()
+    await store.fetch()
+
+    expect(await store.startInstall({ id: 'vm' })).toBe(false)
+    expect(store.task?.state).toBe('failed')
+    expect(store.task?.steps[0]?.state).toBe('failed')
+    expect(store.task?.error).toContain('import failed')
+
+    expect(await store.retryInstall()).toBe(true)
+    expect(store.task?.state).toBe('succeeded')
+    expect(store.task?.steps.every((step) => step.state === 'done')).toBe(true)
+
+    store.dismissTask()
+    expect(store.task).toBeNull()
+    expect(await store.retryInstall()).toBe(false)
+  })
+
+  it('saves configuration and restores wiring through the store', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.configurePlugin).mockResolvedValue(samplePlugin())
+    vi.mocked(api.restorePluginWiring).mockResolvedValue(undefined)
+    const store = usePluginsStore()
+    await store.fetch()
+
+    await store.saveConfig('vm', { retention: '7d' })
+    expect(api.configurePlugin).toHaveBeenCalledWith('vm', { retention: '7d' })
+
+    await store.restoreWiring('vm', 'metrics.query_url')
+    expect(api.restorePluginWiring).toHaveBeenCalledWith('vm', 'metrics.query_url')
+    expect(store.error).toBe('')
   })
 })

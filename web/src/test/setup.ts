@@ -76,6 +76,8 @@ vi.mock('@/api', async (importOriginal) => {
       installPlugin: vi.fn(),
       togglePlugin: vi.fn(),
       uninstallPlugin: vi.fn(),
+      configurePlugin: vi.fn(),
+      restorePluginWiring: vi.fn(),
       getPlugin: vi.fn(),
       listAPITokens: vi.fn().mockResolvedValue({ tokens: [] }),
       createAPIToken: vi.fn(),

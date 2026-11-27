@@ -225,24 +225,26 @@ describe('App shell', () => {
     expect(wrapper.text()).not.toContain('Plugins')
   })
 
-  it('opens an installed plugin inside the fleet shell', async () => {
+  it('keeps one Plugins entry with an attention badge instead of per-plugin items', async () => {
     vi.mocked(api.listPlugins).mockResolvedValue({
       plugins: [{
         id: 'vm', name: 'VictoriaMetrics', version: '', enabled: true,
-        upstream: 'http://127.0.0.1:8428', role: 'viewer', kind: 'external',
+        upstream: '', role: 'viewer', kind: 'external', status: 'degraded',
         ui: { path: '/plugin/vm', title_key: 'VictoriaMetrics', requires_role: 'viewer' },
       }],
       enabled: true,
     })
 
-    const { wrapper, router } = await mountApp('/', true, 'admin')
+    const { wrapper } = await mountApp('/', true, 'admin')
     await flushPromises()
 
-    const item = wrapper.findAll('.el-menu-item').find((el) => el.text().includes('VictoriaMetrics'))
-    expect(item).toBeDefined()
-    await item!.trigger('click')
-    await flushPromises()
-    expect(router.currentRoute.value.path).toBe('/plugin/vm')
+    const pluginItems = wrapper.findAll('.el-menu-item').filter((el) =>
+      el.text().includes('VictoriaMetrics'),
+    )
+    expect(pluginItems).toHaveLength(0)
+    const entry = wrapper.findAll('.el-menu-item').find((el) => el.text().includes('Plugins'))
+    expect(entry).toBeDefined()
+    expect(entry!.find('.nav-badge').text()).toBe('1')
   })
 })
 

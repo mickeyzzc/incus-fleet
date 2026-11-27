@@ -1,265 +1,183 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
 import type { PluginEntry } from '@/api/types'
+import { useAuthStore } from '@/stores/auth'
 import { pluginStatus } from '@/stores/plugins'
 import PluginsView from './PluginsView.vue'
 
-vi.mock('@/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api')>()
-  return {
-    ...actual,
-    api: {
-      ...actual.api,
-      listClusters: vi.fn().mockResolvedValue([]),
-      listPlugins: vi.fn(),
-      listPluginCatalog: vi.fn().mockResolvedValue({ catalog: [] }),
-      installPlugin: vi.fn(),
-      togglePlugin: vi.fn(),
-      uninstallPlugin: vi.fn(),
-    },
-  }
-})
+const Blank = { template: '<div />' }
 
-function mountView() {
-  return mount(PluginsView, {
-    global: { plugins: [ElementPlus] },
-  })
-}
-
-function samplePlugin(overrides: Partial<PluginEntry> = {}): PluginEntry {
+function plugin(overrides: Partial<PluginEntry> = {}): PluginEntry {
   return {
-    id: 'victoria-metrics',
+    id: 'vm',
     name: 'VictoriaMetrics',
     version: '1.0.0',
     enabled: true,
-    upstream: 'http://127.0.0.1:8428',
+    upstream: 'http://vm.example:8428',
     role: 'viewer',
     kind: 'external',
-    ui: { path: '/plugins/victoria-metrics', title_key: 'plugins.victoriaMetrics', requires_role: 'viewer' },
+    cluster: 'c1',
+    status: 'healthy',
+    ui: { path: '/plugins/vm', title_key: 'plugins.text.vm.title' },
     ...overrides,
   }
 }
 
-describe('PluginsView', () => {
+async function mountView() {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const auth = useAuthStore()
+  auth.authenticated = true
+  auth.initialized = true
+  auth.role = 'admin'
+
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/plugins', name: 'plugins', component: PluginsView },
+      { path: '/plugins/:id', name: 'plugin-detail', component: Blank },
+    ],
+  })
+  await router.push('/plugins')
+  await router.isReady()
+
+  const wrapper = mount(PluginsView, { global: { plugins: [pinia, router, ElementPlus] } })
+  await flushPromises()
+  return { wrapper, router }
+}
+
+async function openCatalog(wrapper: ReturnType<typeof mount>) {
+  const tab = wrapper.findAll('.el-tabs__item').find((item) => item.text().includes('Catalog'))
+  await tab!.trigger('click')
+  await flushPromises()
+}
+
+describe('PluginsView information architecture', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
     vi.mocked(api.listClusters).mockResolvedValue([])
-    vi.mocked(api.listPlugins).mockReset()
-    vi.mocked(api.listPluginCatalog).mockReset()
     vi.mocked(api.listPluginCatalog).mockResolvedValue({
-      catalog: [
-        { id: 'vm', name: 'VictoriaMetrics', description: 'metrics', upstream_hint: 'http://127.0.0.1:8428', ui_path: '/plugin-ui/vm/', wiring: 'metrics.query_url' },
-        { id: 'vmlogs', name: 'VictoriaLogs', description: 'logs', upstream_hint: 'http://127.0.0.1:9428', ui_path: '/plugin-ui/vmlogs/', wiring: 'logs.query_url' },
-      ],
+      catalog: [{
+        id: 'vm', name: 'VictoriaMetrics', description: 'metrics',
+        value: 'Long-term metrics storage', publisher: 'fleet-official',
+        tier: 'official', permissions: 3, ui_path: '/plugin-ui/vm/', wiring: 'metrics.query_url',
+      }],
     })
   })
 
-  it('shows the disabled state when the plugin manager is off', async () => {
+  it('uses exactly five statuses with the shared i18n labels', () => {
+    for (const status of ['installing', 'healthy', 'degraded', 'stopped', 'failed'] as const) {
+      expect(pluginStatus(plugin({ status })).labelKey).toBe(`plugins.status.${status}`)
+    }
+  })
+
+  it('shows the disabled state when the manager is off', async () => {
     vi.mocked(api.listPlugins).mockResolvedValue({ plugins: null, enabled: false })
-
-    const wrapper = mountView()
-    await flushPromises()
-
+    const { wrapper } = await mountView()
     expect(wrapper.text()).toContain('disabled in configuration')
   })
 
   it('shows one empty state with a single next action', async () => {
     vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
-
-    const wrapper = mountView()
-    await flushPromises()
+    const { wrapper } = await mountView()
 
     expect(wrapper.text()).toContain('No plugins installed')
-    const browse = wrapper.findAll('button').filter((b) => b.text().includes('Browse catalog'))
+    const browse = wrapper.findAll('button').filter((button) => button.text().includes('Browse catalog'))
     expect(browse).toHaveLength(1)
   })
 
-  it('shows an error state with the failure message', async () => {
+  it('shows the error state with the failure message', async () => {
     vi.mocked(api.listPlugins).mockRejectedValue(new Error('network down'))
-
-    const wrapper = mountView()
-    await flushPromises()
+    const { wrapper } = await mountView()
 
     expect(wrapper.text()).toContain('Could not load the plugin list')
     expect(wrapper.text()).toContain('network down')
   })
 
-  it('lists installed plugins with the shared status vocabulary', async () => {
-    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [samplePlugin()], enabled: true })
-
-    const wrapper = mountView()
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('VictoriaMetrics')
-    expect(wrapper.text()).toContain('Healthy')
+  it('shows the loading state while data is in flight', async () => {
+    vi.mocked(api.listPlugins).mockImplementation(() => new Promise(() => {}))
+    const { wrapper } = await mountView()
+    expect(wrapper.find('[data-state="loading"]').exists()).toBe(true)
   })
 
-  it('offers exactly one primary action in the header', async () => {
-    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [samplePlugin()], enabled: true })
-
-    const wrapper = mountView()
+  it('shows the permission-denied state for viewers', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [plugin()], enabled: true })
+    const { wrapper } = await mountView()
+    const auth = useAuthStore()
+    auth.role = 'viewer'
     await flushPromises()
+    expect(wrapper.find('[data-state="forbidden"]').exists()).toBe(true)
+  })
+
+  it('lists installed plugins with status, version, cluster and health', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [plugin()], enabled: true })
+    const { wrapper } = await mountView()
+
+    const table = wrapper.find('.plugin-table')
+    expect(table.exists()).toBe(true)
+    expect(wrapper.text()).toContain('VictoriaMetrics')
+    expect(wrapper.text()).toContain('1.0.0')
+    expect(wrapper.text()).toContain('Healthy')
+    expect(wrapper.text()).toContain('c1')
+  })
+
+  it('offers exactly one primary action, in the header', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [plugin()], enabled: true })
+    const { wrapper } = await mountView()
 
     const primaries = wrapper.findAll('.el-button--primary')
-    expect(primaries.length).toBeLessThanOrEqual(1)
-  })
-})
-
-describe('pluginStatus', () => {
-  it('maps disabled plugins to stopped', () => {
-    expect(pluginStatus(samplePlugin({ enabled: false })).status).toBe('stopped')
+    expect(primaries).toHaveLength(1)
+    expect(wrapper.find('.plugins-header .el-button--primary').exists()).toBe(true)
   })
 
-  it('maps a missing upstream to unknown', () => {
-    expect(pluginStatus(samplePlugin({ upstream: undefined })).status).toBe('unknown')
-  })
-
-  it('maps a configured plugin to healthy with its target', () => {
-    const view = pluginStatus(samplePlugin())
-    expect(view.status).toBe('healthy')
-    expect(view.detail).toContain('127.0.0.1:8428')
-  })
-
-  it('switches to the catalog view and exposes detail actions', async () => {
-    vi.mocked(api.listPlugins).mockResolvedValue({
-      plugins: [samplePlugin(), samplePlugin({ id: 'logs', name: 'VictoriaLogs' })],
-      enabled: true,
-    })
-
-    const wrapper = mountView()
-    await flushPromises()
-
-    // Catalog tab renders cards rather than the installed table.
-    const tabs = wrapper.findAll('.el-tabs__item')
-    const catalog = tabs.find((tab) => tab.text().includes('Catalog'))
-    expect(catalog).toBeDefined()
-    await catalog!.trigger('click')
-    await flushPromises()
-
-    expect(wrapper.findAll('.catalog-card')).toHaveLength(2)
-  })
-
-  it('opens the detail drawer with the five fixed tabs', async () => {
-    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [samplePlugin()], enabled: true })
-
-    const wrapper = mountView()
-    await flushPromises()
-
-    const row = wrapper.find('.plugin-table tbody tr')
-    expect(row.exists()).toBe(true)
-    await row.trigger('click')
-    await flushPromises()
-
-    const labels = wrapper.findAll('.el-tabs__item').map((tab) => tab.text())
-    for (const expected of ['Overview', 'Configuration', 'Wiring', 'Events', 'Danger zone']) {
-      expect(labels.some((label) => label.includes(expected))).toBe(true)
-    }
-  })
-
-  it('shows a plugin without an upstream as unknown', async () => {
-    vi.mocked(api.listPlugins).mockResolvedValue({
-      plugins: [samplePlugin({ upstream: undefined })],
-      enabled: true,
-    })
-
-    const wrapper = mountView()
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('Unknown')
-  })
-
-  it('shows a disabled plugin as stopped', async () => {
-    vi.mocked(api.listPlugins).mockResolvedValue({
-      plugins: [samplePlugin({ enabled: false })],
-      enabled: true,
-    })
-
-    const wrapper = mountView()
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('Stopped')
-  })
-
-  it('refreshes from the header action', async () => {
-    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [samplePlugin()], enabled: true })
-
-    const wrapper = mountView()
-    await flushPromises()
-    expect(api.listPlugins).toHaveBeenCalledTimes(1)
-
-    const refresh = wrapper.findAll('button').find((b) => b.text().includes('Refresh'))
-    expect(refresh).toBeDefined()
-    await refresh!.trigger('click')
-    await flushPromises()
-
-    expect(api.listPlugins).toHaveBeenCalledTimes(2)
-  })
-
-  it('moves from the empty state into the catalog', async () => {
+  it('renders catalog cards with publisher, value, permission count and tier chip', async () => {
     vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    const { wrapper } = await mountView()
+    await openCatalog(wrapper)
 
-    const wrapper = mountView()
-    await flushPromises()
-
-    const browse = wrapper.findAll('button').find((b) => b.text().includes('Browse catalog'))
-    await browse!.trigger('click')
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('One-click install')
+    const card = wrapper.find('.catalog-card')
+    expect(card.exists()).toBe(true)
+    expect(card.text()).toContain('VictoriaMetrics')
+    expect(card.text()).toContain('Long-term metrics storage')
+    expect(card.text()).toContain('fleet-official')
+    expect(card.text()).toContain('3 permissions')
+    expect(card.text()).toContain('Official')
+    expect(card.findAll('.el-button--primary')).toHaveLength(0)
   })
 
-  it('closes the detail drawer', async () => {
-    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [samplePlugin()], enabled: true })
-
-    const wrapper = mountView()
-    await flushPromises()
+  it('opens the detail page from the installed table, never from the sidebar', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [plugin()], enabled: true })
+    const { wrapper, router } = await mountView()
 
     await wrapper.find('.plugin-table tbody tr').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.el-drawer').exists()).toBe(true)
-
-    const close = wrapper.find('.el-drawer__close-btn')
-    if (close.exists()) {
-      await close.trigger('click')
-      await flushPromises()
-    }
+    expect(router.currentRoute.value.path).toBe('/plugins/vm')
   })
 
-  it('renders the installing status for a plugin being deployed', async () => {
-    vi.mocked(api.listPlugins).mockResolvedValue({
-      plugins: [samplePlugin({ enabled: true, upstream: '' })],
-      enabled: true,
-    })
+  it('refreshes from the header action', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [plugin()], enabled: true })
+    const { wrapper } = await mountView()
+    expect(api.listPlugins).toHaveBeenCalledTimes(1)
 
-    const wrapper = mountView()
+    const refresh = wrapper.findAll('button').find((button) => button.text().includes('Refresh'))
+    await refresh!.trigger('click')
     await flushPromises()
-
-    expect(wrapper.text()).toContain('Unknown')
+    expect(api.listPlugins).toHaveBeenCalledTimes(2)
   })
 
-  it('does not offer a self-referential action in the catalog empty state', async () => {
+  it('does not offer a self-referential action in the empty catalog', async () => {
     vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
     vi.mocked(api.listPluginCatalog).mockResolvedValue({ catalog: [] })
+    const { wrapper } = await mountView()
 
-    const wrapper = mountView()
-    await flushPromises()
+    expect(wrapper.findAll('button').filter((b) => b.text().includes('Browse catalog'))).toHaveLength(1)
+    await openCatalog(wrapper)
 
-    // Installed tab: one next step, pointing at the catalog.
-    let browse = wrapper.findAll('button').filter((b) => b.text().includes('Browse catalog'))
-    expect(browse).toHaveLength(1)
-
-    const catalogTab = wrapper.findAll('.el-tabs__item').find((t) => t.text().includes('Catalog'))
-    await catalogTab!.trigger('click')
-    await flushPromises()
-
-    // Catalog tab: explaining the empty catalog must not offer "Browse catalog"
-    // again — that would be a no-op loop.
-    browse = wrapper.findAll('button').filter((b) => b.text().includes('Browse catalog'))
-    expect(browse).toHaveLength(0)
+    expect(wrapper.findAll('button').filter((b) => b.text().includes('Browse catalog'))).toHaveLength(0)
     expect(wrapper.text()).toContain('No plugins are registered on this instance')
   })
 })
