@@ -81,6 +81,7 @@ function tab(wrapper: ReturnType<typeof mount>, label: string) {
 describe('PluginDetailView', () => {
   beforeEach(() => {
     vi.mocked(api.listPluginCatalog).mockResolvedValue({ catalog: [] })
+    vi.mocked(api.getPlugin).mockResolvedValue(plugin())
     vi.mocked(api.togglePlugin).mockResolvedValue(plugin())
     vi.mocked(api.configurePlugin).mockResolvedValue(plugin())
     vi.mocked(api.restorePluginWiring).mockResolvedValue(undefined)
@@ -179,5 +180,66 @@ describe('PluginDetailView', () => {
     auth.role = 'viewer'
     await flushPromises()
     expect(wrapper.text()).toContain('do not have permission')
+  })
+
+  it('consumes wiring, events, health and config from the descriptor endpoint', async () => {
+    vi.mocked(api.getPlugin).mockResolvedValue(plugin({
+      config: { retention: '30d', listen_port: '8428' },
+      health_history: [{ at: '2026-11-27T11:00:00Z', status: 'failed', detail: 'timeout' }],
+      wiring: [{ capability: 'Metrics', target: 'http://vm.example:8428', default_target: 'ring', key: 'metrics.query_url' }],
+      events: [{ at: '2026-11-27T11:00:00Z', kind: 'error', message: 'descriptor event' }],
+    }))
+
+    const { wrapper } = await render('vm', plugin({ config: { retention: '1d' } }))
+    expect(api.getPlugin).toHaveBeenCalledWith('vm')
+    expect(wrapper.text()).toContain('timeout')
+
+    await tab(wrapper, 'Configuration').trigger('click')
+    const inputs = wrapper.findAll('.detail-config input')
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('30d')
+
+    await tab(wrapper, 'Wiring').trigger('click')
+    expect(wrapper.text()).toContain('ring')
+    await tab(wrapper, 'Events').trigger('click')
+    expect(wrapper.text()).toContain('descriptor event')
+  })
+
+  it('falls back to list values when the descriptor omits the new fields', async () => {
+    vi.mocked(api.getPlugin).mockResolvedValue(plugin({
+      config: undefined, wiring: undefined, events: undefined, health_history: undefined,
+    }))
+
+    const { wrapper } = await render()
+    expect(wrapper.text()).toContain('No health samples yet')
+    await tab(wrapper, 'Wiring').trigger('click')
+    expect(wrapper.text()).toContain('does not override fleet configuration')
+    await tab(wrapper, 'Events').trigger('click')
+    expect(wrapper.text()).toContain('No recent deliveries or errors')
+  })
+
+  it('shows an explicit error when saving configuration fails', async () => {
+    vi.mocked(api.configurePlugin).mockRejectedValue(new Error('config endpoint down'))
+    const { wrapper } = await render()
+    await tab(wrapper, 'Configuration').trigger('click')
+
+    const save = wrapper.findAll('button').find((button) => button.text().includes('Save configuration'))
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Could not save the configuration')
+    expect(wrapper.text()).toContain('config endpoint down')
+  })
+
+  it('shows an explicit error when restoring wiring fails', async () => {
+    vi.mocked(api.restorePluginWiring).mockRejectedValue(new Error('wiring endpoint down'))
+    const { wrapper } = await render()
+    await tab(wrapper, 'Wiring').trigger('click')
+
+    const restore = wrapper.findAll('button').find((button) => button.text().includes('Restore default'))
+    await restore!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Could not restore the default')
+    expect(wrapper.text()).toContain('wiring endpoint down')
   })
 })

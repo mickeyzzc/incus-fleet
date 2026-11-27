@@ -1,8 +1,8 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { api } from '@/api'
-import type { PluginEntry } from '@/api/types'
+import { api, ApiError } from '@/api'
+import type { PluginEntry, PluginInstallTaskStatus } from '@/api/types'
 import { usePluginsStore } from './plugins'
 
 vi.mock('@/api', async (importOriginal) => {
@@ -13,7 +13,13 @@ vi.mock('@/api', async (importOriginal) => {
       ...actual.api,
       listPlugins: vi.fn(),
       listPluginCatalog: vi.fn().mockResolvedValue({ catalog: [] }),
+      getPlugin: vi.fn(),
       installPlugin: vi.fn(),
+      submitPluginInstallTask: vi.fn(),
+      getPluginInstallTask: vi.fn(),
+      listPluginInstallTasks: vi.fn(),
+      cancelPluginInstallTask: vi.fn(),
+      resumePluginInstallTask: vi.fn(),
       togglePlugin: vi.fn(),
       uninstallPlugin: vi.fn(),
       configurePlugin: vi.fn(),
@@ -42,7 +48,13 @@ describe('usePluginsStore', () => {
     vi.mocked(api.listPlugins).mockReset()
     vi.mocked(api.listPluginCatalog).mockReset()
     vi.mocked(api.listPluginCatalog).mockResolvedValue({ catalog: [] })
+    vi.mocked(api.getPlugin).mockReset()
     vi.mocked(api.installPlugin).mockReset()
+    vi.mocked(api.submitPluginInstallTask).mockReset()
+    vi.mocked(api.getPluginInstallTask).mockReset()
+    vi.mocked(api.listPluginInstallTasks).mockReset()
+    vi.mocked(api.cancelPluginInstallTask).mockReset()
+    vi.mocked(api.resumePluginInstallTask).mockReset()
     vi.mocked(api.togglePlugin).mockReset()
     vi.mocked(api.uninstallPlugin).mockReset()
     vi.mocked(api.configurePlugin).mockReset()
@@ -212,27 +224,218 @@ describe('usePluginsStore', () => {
     expect(store.attentionCount).toBe(2)
   })
 
-  it('tracks an install as a resumable task with per-step progress', async () => {
+  function status(overrides: Partial<PluginInstallTaskStatus> = {}): PluginInstallTaskStatus {
+    return {
+      id: 'task-1',
+      plugin_id: 'vm',
+      state: 'running',
+      attempt: 1,
+      created_at: '2026-11-27T10:00:00Z',
+      updated_at: '2026-11-27T10:00:00Z',
+      ...overrides,
+    }
+  }
+
+  it('submits a task and drives the panel from its server status', async () => {
     vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.submitPluginInstallTask).mockResolvedValue({ task: status({ state: 'queued' }) })
+    vi.mocked(api.getPluginInstallTask).mockResolvedValue({
+      task: status({ progress: JSON.stringify({ step: 6 }) }),
+    })
+
+    const store = usePluginsStore()
+    await store.fetch()
+
+    expect(await store.startInstall({ id: 'vm', cluster: 'c1' })).toBe(true)
+    expect(api.submitPluginInstallTask).toHaveBeenCalledWith({ id: 'vm', cluster: 'c1' })
+    expect(api.installPlugin).not.toHaveBeenCalled()
+    expect(api.getPluginInstallTask).toHaveBeenCalledWith('task-1')
+    expect(store.task?.taskId).toBe('task-1')
+    expect(store.task?.progress).toBe(60)
+    expect(store.task?.currentStep).toBe(2)
+    expect(store.task?.state).toBe('running')
+  })
+
+  it('polls a running task by id and stops once it succeeds', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.submitPluginInstallTask).mockResolvedValue({ task: status() })
+    vi.mocked(api.getPluginInstallTask)
+      .mockResolvedValueOnce({ task: status({ progress: JSON.stringify({ step: 3 }) }) })
+      .mockResolvedValueOnce({ task: status({ progress: JSON.stringify({ step: 4 }) }) })
+      .mockResolvedValueOnce({ task: status({ state: 'succeeded' }) })
+
+    const store = usePluginsStore()
+    await store.startInstall({ id: 'vm' })
+    expect(store.task?.progress).toBe(30)
+    expect(store.task?.state).toBe('running')
+
+    await store.refreshTask()
+    expect(store.task?.progress).toBe(40)
+
+    await store.refreshTask()
+    expect(store.task?.state).toBe('succeeded')
+    expect(store.task?.steps.every((step) => step.state === 'done')).toBe(true)
+    const calls = vi.mocked(api.getPluginInstallTask).mock.calls.length
+    await store.refreshTask()
+    expect(vi.mocked(api.getPluginInstallTask).mock.calls.length).toBe(calls)
+  })
+
+  it('keeps a polling error as a warning instead of failing the task', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.submitPluginInstallTask).mockResolvedValue({ task: status() })
+    vi.mocked(api.getPluginInstallTask).mockRejectedValue(new Error('poll down'))
+
+    const store = usePluginsStore()
+    await store.startInstall({ id: 'vm' })
+    await store.refreshTask()
+
+    expect(store.task?.state).toBe('running')
+    expect(store.task?.pollError).toContain('poll down')
+  })
+
+  it('resumes a failed task by its id', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.submitPluginInstallTask).mockResolvedValue({ task: status() })
+    vi.mocked(api.getPluginInstallTask)
+      .mockResolvedValueOnce({ task: status() })
+      .mockResolvedValueOnce({ task: status({ state: 'failed', error: 'health failed' }) })
+      .mockResolvedValueOnce({ task: status({ state: 'running' }) })
+    vi.mocked(api.resumePluginInstallTask).mockResolvedValue({ status: 'queued' })
+
+    const store = usePluginsStore()
+    await store.startInstall({ id: 'vm' })
+    await store.refreshTask()
+    expect(store.task?.state).toBe('failed')
+    expect(store.task?.error).toBe('health failed')
+
+    expect(await store.retryInstall()).toBe(true)
+    expect(api.resumePluginInstallTask).toHaveBeenCalledWith('task-1')
+    expect(store.task?.state).toBe('running')
+    expect(store.task?.error).toBe('')
+
+    store.dismissTask()
+    expect(store.task).toBeNull()
+    expect(await store.retryInstall()).toBe(false)
+  })
+
+  it('reports a failed resume and falls back only when resume is unavailable', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.submitPluginInstallTask).mockResolvedValue({ task: status() })
+    vi.mocked(api.getPluginInstallTask)
+      .mockResolvedValueOnce({ task: status() })
+      .mockResolvedValueOnce({ task: status({ state: 'failed', error: 'broken' }) })
+    vi.mocked(api.resumePluginInstallTask)
+      .mockRejectedValueOnce(new ApiError(500, 'boom', 'resume failed'))
+      .mockRejectedValueOnce(new ApiError(404, 'not_found', 'no resume route'))
+
+    const store = usePluginsStore()
+    await store.startInstall({ id: 'vm' })
+    await store.refreshTask()
+
+    expect(await store.retryInstall()).toBe(false)
+    expect(store.task?.error).toContain('resume failed')
+
+    expect(await store.retryInstall()).toBe(true)
+    expect(api.submitPluginInstallTask).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels a running task through the task endpoint', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.submitPluginInstallTask).mockResolvedValue({ task: status() })
+    vi.mocked(api.getPluginInstallTask).mockResolvedValue({ task: status() })
+    vi.mocked(api.cancelPluginInstallTask).mockResolvedValue(undefined)
+
+    const store = usePluginsStore()
+    await store.startInstall({ id: 'vm' })
+    expect(await store.cancelTask()).toBe(true)
+    expect(api.cancelPluginInstallTask).toHaveBeenCalledWith('task-1')
+    expect(store.task?.state).toBe('canceled')
+    expect(await store.cancelTask()).toBe(false)
+  })
+
+  it('surfaces a cancellation failure and can resume a canceled task', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.submitPluginInstallTask).mockResolvedValue({ task: status() })
+    vi.mocked(api.getPluginInstallTask).mockResolvedValue({ task: status() })
+    vi.mocked(api.cancelPluginInstallTask).mockRejectedValue(new Error('cannot cancel'))
+    vi.mocked(api.resumePluginInstallTask).mockResolvedValue({ status: 'queued' })
+
+    const store = usePluginsStore()
+    await store.startInstall({ id: 'vm' })
+    expect(await store.cancelTask()).toBe(false)
+    expect(store.error).toContain('cannot cancel')
+    expect(store.task?.pollError).toContain('cannot cancel')
+
+    // A task can still be resumed from a canceled checkpoint.
+    store.task!.state = 'canceled'
+    expect(await store.retryInstall()).toBe(true)
+  })
+
+  it('falls back to the legacy install endpoint only when tasks are unavailable', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.submitPluginInstallTask).mockRejectedValue(new ApiError(404, 'not_found', 'missing route'))
+    vi.mocked(api.installPlugin).mockResolvedValue({ plugin: samplePlugin(), token: 'legacy-token' })
+
+    const store = usePluginsStore()
+    expect(await store.startInstall({ id: 'vm' })).toBe(true)
+    expect(store.task?.token).toBe('legacy-token')
+    expect(store.task?.taskId).toBe('')
+    expect(api.installPlugin).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not silently fall back for real task errors', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.submitPluginInstallTask).mockRejectedValue(new ApiError(500, 'boom', 'server exploded'))
+
+    const store = usePluginsStore()
+    expect(await store.startInstall({ id: 'vm' })).toBe(false)
+    expect(store.task?.state).toBe('failed')
+    expect(store.task?.error).toContain('server exploded')
+    expect(api.installPlugin).not.toHaveBeenCalled()
+  })
+
+  it('retries a legacy task by resubmitting when no task id exists', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.submitPluginInstallTask).mockRejectedValue(new ApiError(405, 'method_not_allowed', 'unused'))
     vi.mocked(api.installPlugin)
       .mockRejectedValueOnce(new Error('import failed'))
       .mockResolvedValueOnce({ plugin: samplePlugin(), token: 'token' })
 
     const store = usePluginsStore()
-    await store.fetch()
-
     expect(await store.startInstall({ id: 'vm' })).toBe(false)
-    expect(store.task?.state).toBe('failed')
     expect(store.task?.steps[0]?.state).toBe('failed')
-    expect(store.task?.error).toContain('import failed')
 
     expect(await store.retryInstall()).toBe(true)
     expect(store.task?.state).toBe('succeeded')
     expect(store.task?.steps.every((step) => step.state === 'done')).toBe(true)
+  })
 
-    store.dismissTask()
-    expect(store.task).toBeNull()
-    expect(await store.retryInstall()).toBe(false)
+  it('loads the rich descriptor and merges it into the cached entry', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [samplePlugin()], enabled: true })
+    vi.mocked(api.getPlugin).mockResolvedValue(samplePlugin({
+      config: { retention: '7d' },
+      wiring: [{ capability: 'Metrics', target: 'http://vm.example:8428', default_target: 'ring' }],
+    }))
+
+    const store = usePluginsStore()
+    await store.fetch()
+    const descriptor = await store.fetchDetail('vm')
+
+    expect(api.getPlugin).toHaveBeenCalledWith('vm')
+    expect(descriptor?.config).toEqual({ retention: '7d' })
+    expect(store.byId('vm')?.wiring).toHaveLength(1)
+    expect(store.byId('vm')?.upstream).toBe('http://127.0.0.1:8428')
+  })
+
+  it('falls back to the list entry when the descriptor cannot be loaded', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [samplePlugin()], enabled: true })
+    vi.mocked(api.getPlugin).mockRejectedValue(new Error('descriptor down'))
+
+    const store = usePluginsStore()
+    await store.fetch()
+    expect(await store.fetchDetail('vm')).toMatchObject({ id: 'vm' })
+    expect(store.detailError).toContain('descriptor down')
+    expect(await store.fetchDetail('missing')).toBeNull()
   })
 
   it('saves configuration and restores wiring through the store', async () => {
@@ -242,11 +445,24 @@ describe('usePluginsStore', () => {
     const store = usePluginsStore()
     await store.fetch()
 
-    await store.saveConfig('vm', { retention: '7d' })
+    expect(await store.saveConfig('vm', { retention: '7d' })).toBe(true)
     expect(api.configurePlugin).toHaveBeenCalledWith('vm', { retention: '7d' })
 
-    await store.restoreWiring('vm', 'metrics.query_url')
+    expect(await store.restoreWiring('vm', 'metrics.query_url')).toBe(true)
     expect(api.restorePluginWiring).toHaveBeenCalledWith('vm', 'metrics.query_url')
     expect(store.error).toBe('')
+  })
+
+  it('reports config and wiring failures without throwing', async () => {
+    vi.mocked(api.listPlugins).mockResolvedValue({ plugins: [], enabled: true })
+    vi.mocked(api.configurePlugin).mockRejectedValue(new Error('config endpoint down'))
+    vi.mocked(api.restorePluginWiring).mockRejectedValue(new Error('wiring endpoint down'))
+    const store = usePluginsStore()
+    await store.fetch()
+
+    expect(await store.saveConfig('vm', {})).toBe(false)
+    expect(store.error).toContain('config endpoint down')
+    expect(await store.restoreWiring('vm', 'key')).toBe(false)
+    expect(store.error).toContain('wiring endpoint down')
   })
 })

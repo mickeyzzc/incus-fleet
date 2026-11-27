@@ -6,11 +6,12 @@ import { useI18n } from 'vue-i18n'
 import type { InstallStepState, PluginInstallTask } from '@/plugins/model'
 
 const props = defineProps<{ task: PluginInstallTask }>()
-defineEmits<{ retry: []; dismiss: [] }>()
+defineEmits<{ retry: []; cancel: []; dismiss: [] }>()
 
 const { t } = useI18n()
 
-const percent = computed(() => Math.round(
+/** The server checkpoint is authoritative; older installs derive it from steps. */
+const percent = computed(() => props.task.progress ?? Math.round(
   (props.task.steps.filter((step) => step.state === 'done').length / props.task.steps.length) * 100,
 ))
 const failedStep = computed(() => props.task.steps.find((step) => step.state === 'failed'))
@@ -34,6 +35,10 @@ function dotClass(state: InstallStepState): string {
         <p class="muted">
           {{ task.state === 'running' ? t('plugins.task.running', { percent }) : t(`plugins.task.${task.state}`) }}
         </p>
+        <p v-if="task.taskId" class="muted task-meta">
+          {{ t('plugins.task.taskId', { id: task.taskId }) }}
+          <span v-if="task.attempt && task.attempt > 1"> · {{ t('plugins.task.attempt', { count: task.attempt }) }}</span>
+        </p>
       </div>
       <span v-if="task.state === 'succeeded'" class="task-success"><el-icon><CircleCheck /></el-icon></span>
       <span v-else-if="task.state === 'failed'" class="task-failed"><el-icon><WarningFilled /></el-icon></span>
@@ -54,14 +59,26 @@ function dotClass(state: InstallStepState): string {
 
     <el-progress :percentage="percent" :status="task.state === 'failed' ? 'exception' : undefined" />
 
+    <p v-if="task.pollError" class="muted task-warning" role="status">
+      {{ t('plugins.task.pollFailed', { error: task.pollError }) }}
+    </p>
+
     <div v-if="task.state === 'failed'" class="task-recovery">
       <p>{{ t('plugins.task.failedAt', { step: failedLabel }) }}</p>
       <p class="muted">{{ task.error }} · {{ t('plugins.task.failedHint') }}</p>
       <el-button type="primary" @click="$emit('retry')">{{ t('plugins.task.retry') }}</el-button>
       <el-button text :icon="Close" @click="$emit('dismiss')">{{ t('plugins.task.dismiss') }}</el-button>
     </div>
+    <div v-else-if="task.state === 'canceled'" class="task-recovery">
+      <p class="muted">{{ t('plugins.task.canceledHint') }}</p>
+      <el-button type="primary" @click="$emit('retry')">{{ t('plugins.task.retry') }}</el-button>
+      <el-button text :icon="Close" @click="$emit('dismiss')">{{ t('plugins.task.dismiss') }}</el-button>
+    </div>
     <div v-else-if="task.state === 'succeeded'" class="task-recovery">
       <el-button :icon="Close" @click="$emit('dismiss')">{{ t('plugins.task.dismiss') }}</el-button>
+    </div>
+    <div v-else class="task-recovery">
+      <el-button text @click="$emit('cancel')">{{ t('plugins.task.cancel') }}</el-button>
     </div>
   </section>
 </template>
@@ -86,4 +103,6 @@ function dotClass(state: InstallStepState): string {
 .task-running { color: var(--el-color-primary); }
 .task-recovery { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
 .task-recovery p { margin: 0; font-size: 13px; }
+.task-meta { margin: 2px 0 0; font-size: 12px; }
+.task-warning { margin: 8px 0 0; color: var(--el-color-warning); }
 </style>

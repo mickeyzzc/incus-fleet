@@ -120,6 +120,8 @@ describe('PluginInstallWizard', () => {
       memory: '4GiB',
       disk: '20GiB',
       network: 'incusbr0',
+      filesystem: 'ext4',
+      mount_point: '/data',
     }])
   })
 

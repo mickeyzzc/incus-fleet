@@ -1079,12 +1079,70 @@ export interface PluginInstallRequest {
   disk?: string
   network?: string
   upstream?: string
+  /** Advanced data-disk settings collected by the install wizard. */
+  filesystem?: string
+  mount_point?: string
+  /** Operator-supplied manifest template values and approved capabilities. */
+  values?: Record<string, string>
+  approvals?: string[]
+  defaults?: Record<string, string>
+  signature?: string
 }
 
 export interface PluginInstallResponse {
   plugin: PluginEntry
   /** Shown once at install time; fleet stores only the token id. */
   token: string
+}
+
+/** States reported by the task-based plugin install endpoints. */
+export type PluginInstallTaskState =
+  | 'queued'
+  | 'dispatched'
+  | 'accepted'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'canceled'
+
+/** One immutable checkpoint event of an install task. */
+export interface PluginTaskEvent {
+  id: string
+  task_id: string
+  at: string
+  state: string
+  message?: string
+  data?: string
+}
+
+/** Task descriptor returned by /api/v1/plugin-installs. */
+export interface PluginInstallTaskStatus {
+  id: string
+  plugin_id: string
+  state: string
+  /** JSON checkpoint: {"step": <completed backend steps>, ...}. */
+  progress?: string
+  attempt: number
+  error?: string
+  created_at: string
+  updated_at: string
+  events?: PluginTaskEvent[]
+}
+
+export interface PluginInstallTaskSubmitResponse {
+  task: PluginInstallTaskStatus
+}
+
+export interface PluginInstallTaskDetailResponse {
+  task: PluginInstallTaskStatus
+}
+
+export interface PluginInstallTaskListResponse {
+  tasks: PluginInstallTaskStatus[]
+}
+
+export interface PluginInstallTaskResumeResponse {
+  status: string
 }
 
 /** One issued API token. The secret is only present in the creation response. */

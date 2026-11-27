@@ -19,6 +19,10 @@ import type {
   PluginEntry,
   PluginInstallRequest,
   PluginInstallResponse,
+  PluginInstallTaskDetailResponse,
+  PluginInstallTaskListResponse,
+  PluginInstallTaskResumeResponse,
+  PluginInstallTaskSubmitResponse,
   PluginListResponse,
   TelemetrySeries,
   TokenScopesResponse,
@@ -1383,8 +1387,48 @@ export class ApiClient {
     return this.request<PluginCatalogResponse>('GET', '/api/v1/plugins/catalog')
   }
 
+  /**
+   * Legacy synchronous install. Kept only as a compatibility fallback for
+   * servers that do not expose /api/v1/plugin-installs.
+   */
   async installPlugin(request: PluginInstallRequest): Promise<PluginInstallResponse> {
     return this.request<PluginInstallResponse>('POST', '/api/v1/plugins/install', request)
+  }
+
+  /** Submits a resumable plugin install task. */
+  async submitPluginInstallTask(
+    request: PluginInstallRequest,
+  ): Promise<PluginInstallTaskSubmitResponse> {
+    return this.request<PluginInstallTaskSubmitResponse>('POST', '/api/v1/plugin-installs', request)
+  }
+
+  /** Lists plugin install tasks previously submitted on this server. */
+  async listPluginInstallTasks(): Promise<PluginInstallTaskListResponse> {
+    return this.request<PluginInstallTaskListResponse>('GET', '/api/v1/plugin-installs')
+  }
+
+  /** Loads one install task together with its event timeline. */
+  async getPluginInstallTask(id: string): Promise<PluginInstallTaskDetailResponse> {
+    return this.request<PluginInstallTaskDetailResponse>(
+      'GET',
+      `/api/v1/plugin-installs/${encodeURIComponent(id)}`,
+    )
+  }
+
+  /** Requests cooperative cancellation at the next install checkpoint. */
+  async cancelPluginInstallTask(id: string): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/plugin-installs/${encodeURIComponent(id)}/cancel`,
+    )
+  }
+
+  /** Re-queues a failed or canceled task from its last checkpoint. */
+  async resumePluginInstallTask(id: string): Promise<PluginInstallTaskResumeResponse> {
+    return this.request<PluginInstallTaskResumeResponse>(
+      'POST',
+      `/api/v1/plugin-installs/${encodeURIComponent(id)}/resume`,
+    )
   }
 
   async togglePlugin(id: string, enabled: boolean): Promise<PluginEntry> {

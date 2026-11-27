@@ -6,8 +6,21 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api'
+import type { PluginInstallTaskStatus } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 import PluginsView from './PluginsView.vue'
+
+function taskStatus(overrides: Partial<PluginInstallTaskStatus> = {}): PluginInstallTaskStatus {
+  return {
+    id: 'task-1',
+    plugin_id: 'vm',
+    state: 'running',
+    attempt: 1,
+    created_at: '2026-11-27T10:00:00Z',
+    updated_at: '2026-11-27T10:00:00Z',
+    ...overrides,
+  }
+}
 
 const DialogStub = defineComponent({
   name: 'ElDialog',
@@ -81,13 +94,10 @@ describe('PluginsView install flow', () => {
         ui_path: '/plugin-ui/vm/', wiring: 'metrics.query_url', image: 'vm-oci',
       }],
     })
-    vi.mocked(api.installPlugin).mockResolvedValue({
-      token: 'plugin-token',
-      plugin: {
-        id: 'vm', name: 'VictoriaMetrics', version: '1.0.0', enabled: true,
-        role: 'viewer', kind: 'external', ui: { path: '/plugins/vm' },
-      },
-    })
+    vi.mocked(api.submitPluginInstallTask).mockResolvedValue({ task: taskStatus({ state: 'queued' }) })
+    vi.mocked(api.getPluginInstallTask).mockResolvedValue({ task: taskStatus({ state: 'succeeded' }) })
+    vi.mocked(api.cancelPluginInstallTask).mockResolvedValue(undefined)
+    vi.mocked(api.resumePluginInstallTask).mockResolvedValue({ status: 'queued' })
   })
 
   it('starts from the single header action, not from a catalog card', async () => {
@@ -115,7 +125,8 @@ describe('PluginsView install flow', () => {
     await wrapper.find('.wizard-upstream input').setValue('http://vm.example:8428')
     await finishWizard(wrapper)
 
-    expect(api.installPlugin).toHaveBeenCalledWith({ id: 'vm', upstream: 'http://vm.example:8428' })
+    expect(api.submitPluginInstallTask).toHaveBeenCalledWith({ id: 'vm', upstream: 'http://vm.example:8428' })
+    expect(api.installPlugin).not.toHaveBeenCalled()
     expect(wrapper.find('.wizard').exists()).toBe(false)
     expect(wrapper.find('.plugin-task').exists()).toBe(true)
   })
@@ -125,7 +136,7 @@ describe('PluginsView install flow', () => {
     await startWizard(wrapper)
     await finishWizard(wrapper)
 
-    expect(api.installPlugin).toHaveBeenCalledWith(expect.objectContaining({
+    expect(api.submitPluginInstallTask).toHaveBeenCalledWith(expect.objectContaining({
       id: 'vm',
       cluster: 'c1',
       name: 'fleet-vm',
@@ -134,15 +145,9 @@ describe('PluginsView install flow', () => {
   })
 
   it('reports a failed install at its step and resumes on demand', async () => {
-    vi.mocked(api.installPlugin)
-      .mockRejectedValueOnce(new Error('image import failed'))
-      .mockResolvedValueOnce({
-        token: 'plugin-token',
-        plugin: {
-          id: 'vm', name: 'VictoriaMetrics', version: '1.0.0', enabled: true,
-          role: 'viewer', kind: 'external', ui: { path: '/plugins/vm' },
-        },
-      })
+    vi.mocked(api.getPluginInstallTask)
+      .mockResolvedValueOnce({ task: taskStatus({ state: 'failed', error: 'image import failed' }) })
+      .mockResolvedValueOnce({ task: taskStatus({ state: 'succeeded' }) })
 
     const wrapper = await mountView()
     await startWizard(wrapper)
@@ -153,9 +158,24 @@ describe('PluginsView install flow', () => {
 
     await button(wrapper, 'Resume install').trigger('click')
     await flushPromises()
+    await flushPromises()
 
-    expect(api.installPlugin).toHaveBeenCalledTimes(2)
+    expect(api.resumePluginInstallTask).toHaveBeenCalledWith('task-1')
     expect(wrapper.text()).toContain('Install finished')
+  })
+
+  it('cancels a running task from the panel', async () => {
+    vi.mocked(api.getPluginInstallTask).mockResolvedValue({ task: taskStatus() })
+
+    const wrapper = await mountView()
+    await startWizard(wrapper)
+    await finishWizard(wrapper)
+
+    await button(wrapper, 'Cancel install').trigger('click')
+    await flushPromises()
+
+    expect(api.cancelPluginInstallTask).toHaveBeenCalledWith('task-1')
+    expect(wrapper.text()).toContain('Install canceled')
   })
 
   it('keeps the task panel free of nested dialogs', async () => {

@@ -20,6 +20,7 @@ function task(overrides: Partial<PluginInstallTask> = {}): PluginInstallTask {
     ],
     error: '',
     token: '',
+    taskId: 'task-1',
     request: { id: 'vm' },
     ...overrides,
   }
@@ -73,5 +74,37 @@ describe('PluginTaskPanel', () => {
     const dismiss = wrapper.findAll('button').find((button) => button.text().includes('Dismiss'))
     await dismiss!.trigger('click')
     expect(wrapper.emitted('dismiss')).toHaveLength(1)
+  })
+
+  it('prefers the server checkpoint percentage and shows the task id', () => {
+    const wrapper = render(task({ progress: 60, attempt: 2, pollError: 'poll down' }))
+    expect(wrapper.text()).toContain('60%')
+    expect(wrapper.text()).toContain('task-1')
+    expect(wrapper.text()).toContain('Attempt 2')
+    expect(wrapper.text()).toContain('poll down')
+  })
+
+  it('offers a cancel action while the task is running', async () => {
+    const wrapper = render(task())
+    const cancel = wrapper.findAll('button').find((button) => button.text().includes('Cancel install'))
+    expect(cancel).toBeDefined()
+    await cancel!.trigger('click')
+    expect(wrapper.emitted('cancel')).toHaveLength(1)
+  })
+
+  it('lets an operator resume a canceled task', async () => {
+    const wrapper = render(task({ state: 'canceled' }))
+    expect(wrapper.attributes('data-state')).toBe('canceled')
+    expect(wrapper.text()).toContain('Install canceled')
+
+    const resume = wrapper.findAll('button').find((button) => button.text().includes('Resume install'))
+    expect(resume).toBeDefined()
+    await resume!.trigger('click')
+    expect(wrapper.emitted('retry')).toHaveLength(1)
+  })
+
+  it('keeps the cancel action hidden for terminal tasks', () => {
+    const wrapper = render(task({ state: 'succeeded' }))
+    expect(wrapper.findAll('button').some((button) => button.text().includes('Cancel install'))).toBe(false)
   })
 })
