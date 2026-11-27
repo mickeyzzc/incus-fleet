@@ -1399,6 +1399,23 @@ export class ApiClient {
     await this.request<void>('DELETE', `/api/v1/plugins/${encodeURIComponent(id)}`)
   }
 
+  /** Saves the operator-editable template values of an installed plugin. */
+  async configurePlugin(id: string, config: Record<string, string>): Promise<PluginEntry> {
+    return this.request<PluginEntry>(
+      'PUT',
+      `/api/v1/plugins/${encodeURIComponent(id)}/config`,
+      { config },
+    )
+  }
+
+  /** Clears an approved override and restores the static configuration default. */
+  async restorePluginWiring(id: string, key: string): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/v1/plugins/${encodeURIComponent(id)}/wiring/${encodeURIComponent(key)}`,
+    )
+  }
+
   /** Lists API tokens visible to the caller. */
   async listAPITokens(): Promise<{ tokens: APIToken[] | null }> {
     return this.request<{ tokens: APIToken[] | null }>('GET', '/api/v1/tokens')

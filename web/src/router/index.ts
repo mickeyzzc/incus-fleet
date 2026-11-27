@@ -8,7 +8,18 @@ import {
 } from 'vue-router'
 
 import i18n from '@/i18n'
+import type { PluginNavEntry } from '@/plugins/model'
 import { useAuthStore } from '@/stores/auth'
+
+/** Named so dynamic plugin routes can be inserted before it. */
+export const CATCH_ALL_NAME = 'not-found'
+const DYNAMIC_PREFIX = 'plugin-ui-'
+
+const catchAllRoute: RouteRecordRaw = {
+  path: '/:pathMatch(.*)*',
+  name: CATCH_ALL_NAME,
+  redirect: '/',
+}
 
 const routes: RouteRecordRaw[] = [
   {
@@ -72,10 +83,10 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'titles.plugins' },
   },
   {
-    // The proxied plugin UI is framed inside fleet so the sidebar stays usable.
-    path: '/plugin/:id',
-    name: 'plugin-page',
-    component: () => import('@/views/PluginPage.vue'),
+    // Plugins are reached from the installed list, never from the sidebar.
+    path: '/plugins/:id',
+    name: 'plugin-detail',
+    component: () => import('@/views/PluginDetailView.vue'),
     props: true,
     meta: { titleKey: 'titles.plugins' },
   },
@@ -89,14 +100,55 @@ const routes: RouteRecordRaw[] = [
     path: '/node',
     redirect: '/',
   },
-  {
-    path: '/:pathMatch(.*)*',
-    redirect: '/',
-  },
+  catchAllRoute,
 ]
+
+/**
+ * Registers the same-origin UI route of every installed plugin. The catch-all
+ * is removed first and re-added last so a plugin path always wins over it.
+ * Call again whenever the installed set changes; older routes are dropped.
+ */
+export function registerPluginRoutes(router: Router, entries: PluginNavEntry[]): number {
+  for (const route of router.getRoutes()) {
+    if (String(route.name ?? '').startsWith(DYNAMIC_PREFIX)) {
+      router.removeRoute(String(route.name))
+    }
+  }
+
+  const hadCatchAll = router.hasRoute(CATCH_ALL_NAME)
+  if (hadCatchAll) {
+    router.removeRoute(CATCH_ALL_NAME)
+  }
+
+  for (const entry of entries) {
+    router.addRoute({
+      path: entry.path,
+      name: `${DYNAMIC_PREFIX}${entry.id}`,
+      component: () => import('@/views/PluginPage.vue'),
+      props: { id: entry.id },
+      meta: {
+        titleKey: entry.titleKey,
+        title: entry.title,
+        pluginId: entry.id,
+      },
+    })
+  }
+
+  if (hadCatchAll) {
+    router.addRoute(catchAllRoute)
+  }
+
+  return entries.length
+}
 
 /** Resolves the translated page title for a route. */
 export function routeTitle(to: RouteLocationNormalized): string {
+  if (typeof to.meta.titleKey === 'string' && i18n.global.te(to.meta.titleKey)) {
+    return i18n.global.t(to.meta.titleKey)
+  }
+  if (typeof to.meta.title === 'string') {
+    return to.meta.title
+  }
   if (typeof to.meta.titleKey === 'string') {
     return i18n.global.t(to.meta.titleKey)
   }

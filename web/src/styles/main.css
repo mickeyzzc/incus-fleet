@@ -278,6 +278,19 @@ strong,
   text-align: center;
 }
 
+/* One badge for the whole plugin area, never one badge per plugin. */
+.nav-badge {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--el-color-warning, #e6a23c);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
 .sidebar-footer {
   display: flex;
   align-items: center;
@@ -297,6 +310,7 @@ strong,
 .sidebar-icon-only .brand-text,
 .sidebar-icon-only .nav-group-label,
 .sidebar-icon-only .nav-count,
+.sidebar-icon-only .nav-badge,
 .sidebar-icon-only .sidebar-footer > span:not(.health-dot) {
   display: none;
 }

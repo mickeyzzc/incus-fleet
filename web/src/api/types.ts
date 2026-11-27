@@ -966,6 +966,12 @@ export interface PrometheusQueryResponse {
   error?: string
 }
 
+/** Plugin-provided strings, keyed by locale with English as the fallback. */
+export interface PluginMessages {
+  en?: Record<string, string>
+  'zh-CN'?: Record<string, string>
+}
+
 /** One plugin registered with fleet. */
 export interface PluginEntry {
   id: string
@@ -977,6 +983,43 @@ export interface PluginEntry {
   kind: string
   health_path?: string
   ui: PluginUI
+  /** Server-side status; when absent the shell infers it from the descriptor. */
+  status?: 'installing' | 'healthy' | 'degraded' | 'stopped' | 'failed'
+  statusDetail?: string
+  publisher?: string
+  description?: string
+  tier?: 'official' | 'community'
+  cluster?: string
+  instance?: string
+  update_available?: boolean
+  permissions?: number
+  /** Operator-editable template values shown on the Configuration tab. */
+  config?: Record<string, string>
+  /** Fleet capability → current target pairs shown on the Wiring tab. */
+  wiring?: PluginWiringEntry[]
+  events?: PluginEventEntry[]
+  health_history?: PluginHealthPoint[]
+}
+
+export interface PluginHealthPoint {
+  at: string
+  status: 'healthy' | 'degraded' | 'failed'
+  detail?: string
+}
+
+export interface PluginWiringEntry {
+  /** Human-facing capability name, used as the primary label. */
+  capability: string
+  target: string
+  default_target: string
+  /** Raw manifest key, shown only as secondary detail. */
+  key?: string
+}
+
+export interface PluginEventEntry {
+  at: string
+  kind: 'delivery' | 'error'
+  message: string
 }
 
 export interface PluginUI {
@@ -984,6 +1027,14 @@ export interface PluginUI {
   icon?: string
   title_key?: string
   requires_role?: string
+  messages?: PluginMessages
+}
+
+/** One human sentence plus its consequence, shown before install approval. */
+export interface PluginEffect {
+  /** i18n key or plain sentence; the shell resolves keys when they exist. */
+  sentence: string
+  consequence: string
 }
 
 export interface PluginListResponse {
@@ -1006,6 +1057,12 @@ export interface PluginCatalogEntry {
   default_network?: string
   port?: number
   health_path?: string
+  publisher?: string
+  tier?: 'official' | 'community'
+  /** One-line value proposition shown on the catalog card. */
+  value?: string
+  permissions?: number
+  effects?: PluginEffect[]
 }
 
 export interface PluginCatalogResponse {

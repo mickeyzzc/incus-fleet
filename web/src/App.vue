@@ -17,6 +17,8 @@ import en from 'element-plus/es/locale/lang/en'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 
 import LocaleSwitch from '@/components/LocaleSwitch.vue'
+import { mergePluginMessages } from '@/plugins/messages'
+import { registerPluginRoutes } from '@/router'
 import { useAuthStore } from '@/stores/auth'
 import { useClustersStore } from '@/stores/clusters'
 import { usePluginsStore } from '@/stores/plugins'
@@ -140,6 +142,24 @@ watch(
     }
     if (auth.canAdmin && !plugins.loaded) {
       void plugins.fetch()
+    }
+  },
+  { immediate: true },
+)
+
+// Installed plugins contribute data, not sidebar items. Their same-origin UI
+// routes and translated titles are registered before the catch-all route.
+watch(
+  () => plugins.navigation,
+  (entries) => registerPluginRoutes(router, entries),
+  { immediate: true },
+)
+
+watch(
+  () => plugins.items,
+  (items) => {
+    for (const entry of items) {
+      mergePluginMessages(entry.id, entry.ui.messages)
     }
   },
   { immediate: true },
@@ -276,17 +296,11 @@ async function logout(): Promise<void> {
           <el-menu-item v-if="auth.canAdmin" index="/plugins" :title="t('nav.plugins')">
             <el-icon><Grid /></el-icon>
             <span>{{ t('nav.plugins') }}</span>
-            <span v-if="!isCollapsed && plugins.count > 0" class="nav-count">{{ plugins.count }}</span>
-          </el-menu-item>
-
-          <el-menu-item
-            v-for="item in plugins.navigation"
-            :key="item.id"
-            :index="item.path"
-            :title="item.fallbackTitle"
-          >
-            <el-icon><Grid /></el-icon>
-            <span>{{ item.fallbackTitle }}</span>
+            <span
+              v-if="!isCollapsed && plugins.attentionCount > 0"
+              class="nav-badge"
+              :title="t('plugins.attention', { count: plugins.attentionCount })"
+            >{{ plugins.attentionCount }}</span>
           </el-menu-item>
 
           <div v-if="!isCollapsed" class="nav-group-label">{{ t('nav.clusters') }}</div>
