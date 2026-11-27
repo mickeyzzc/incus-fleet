@@ -14,6 +14,7 @@ vi.mock('@/api', async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
+      listClusters: vi.fn().mockResolvedValue([]),
       listPlugins: vi.fn(),
       listPluginCatalog: vi.fn().mockResolvedValue({ catalog: [] }),
       installPlugin: vi.fn(),

@@ -38,7 +38,7 @@ const hasData = computed(() => series.value.some((item) => (item.points?.length 
 async function refresh(): Promise<void> {
   try {
     const selector = `{cluster="${props.cluster}",__name__=~"fleet_cluster_memory_used_bytes|fleet_cluster_memory_total_bytes|fleet_cluster_storage_used_bytes|fleet_cluster_storage_total_bytes"}`
-    series.value = await api.metricQueryRange(selector, '1h', '30s')
+    series.value = (await api.metricQueryRange(selector, '1h', '30s')) ?? []
     error.value = ''
   } catch (err) {
     error.value = errorMessage(err)

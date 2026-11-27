@@ -241,6 +241,20 @@ func TestBootConfigPathsAndDerivedName(t *testing.T) {
 
 // TestRepackInitrdRejectsNonGzip covers the validation that keeps a malformed
 // initrd from producing a silently unbootable installer.
+func TestDerivedISONameTruncatesLongNames(t *testing.T) {
+	longISO := strings.Repeat("very-long-installer-name-", 4)
+	got := derivedISOName(longISO, unattended.ProfileDebianPreseed, "vm-with-long-name")
+	if len(got) > 63 {
+		t.Fatalf("derivedISOName() length = %d, want <= 63", len(got))
+	}
+	if len(got) < 9 || strings.Trim(got[len(got)-8:], "0123456789abcdef") != "" {
+		t.Fatalf("derivedISOName() = %q, want a hash suffix", got)
+	}
+	if got == longISO {
+		t.Fatal("derivedISOName() should shorten long names")
+	}
+}
+
 func TestRepackInitrdRejectsNonGzip(t *testing.T) {
 	if _, err := repackInitrd([]byte("not gzip at all"), "preseed.cfg", []byte("x")); !errors.Is(err, ErrUnattended) {
 		t.Fatalf("repackInitrd() = %v, want ErrUnattended", err)

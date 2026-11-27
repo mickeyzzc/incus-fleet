@@ -78,6 +78,15 @@ func pluginMetricsUpstream(ctx context.Context, st *store.SQLStore) string {
 	return ""
 }
 
+// nonNegativeUint64 clamps negative counters before rendering them as unsigned
+// Prometheus values; an unguarded int-to-uint64 conversion wraps on 64-bit hosts.
+func nonNegativeUint64(value int) uint64 {
+	if value < 0 {
+		return 0
+	}
+	return uint64(value)
+}
+
 // pluginMetricsSnapshot renders the current cluster and member resources in
 // Prometheus text exposition format.
 func pluginMetricsSnapshot(summaries []clusters.Summary) string {
@@ -93,8 +102,8 @@ func pluginMetricsSnapshot(summaries []clusters.Summary) string {
 		line("fleet_cluster_memory_total_bytes", summary.Memory.Total, clusterLabel)
 		line("fleet_cluster_storage_used_bytes", summary.Storage.Used, clusterLabel)
 		line("fleet_cluster_storage_total_bytes", summary.Storage.Total, clusterLabel)
-		line("fleet_cluster_instances_total", uint64(summary.Instances.Total), clusterLabel)
-		line("fleet_cluster_instances_running", uint64(summary.Instances.Running), clusterLabel)
+		line("fleet_cluster_instances_total", nonNegativeUint64(summary.Instances.Total), clusterLabel)
+		line("fleet_cluster_instances_running", nonNegativeUint64(summary.Instances.Running), clusterLabel)
 
 		for _, member := range summary.Members {
 			memberLabel := fmt.Sprintf(`{cluster=%q,member=%q}`, summary.Name, member.Name)

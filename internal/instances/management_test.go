@@ -975,3 +975,22 @@ func TestDeleteForcesStopWithoutAgent(t *testing.T) {
 		t.Fatalf("agent-less delete must force-stop: %#v", args[0])
 	}
 }
+
+func TestTargetMemberOrUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		member string
+		detail Detail
+		want   string
+	}{
+		{name: "explicit member", member: "node-a", detail: Detail{Location: "node-b"}, want: "node-a"},
+		{name: "detail location", detail: Detail{Location: "node-b"}, want: "node-b"},
+		{name: "cluster fallback", want: "the cluster"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := targetMemberOrUnknown(tc.member, tc.detail); got != tc.want {
+				t.Fatalf("targetMemberOrUnknown() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

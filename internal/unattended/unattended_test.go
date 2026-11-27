@@ -317,3 +317,19 @@ func TestRenderSeedFilesWithOverride(t *testing.T) {
 		t.Errorf("meta-data should still use spec hostname: %q", files[1].Content)
 	}
 }
+
+func TestInitrdPathsAndSeedName(t *testing.T) {
+	paths := InitrdPaths(ProfileDebianPreseed)
+	if len(paths) != 2 || paths[0] != "/install.amd/gtk/initrd.gz" {
+		t.Fatalf("InitrdPaths() = %v", paths)
+	}
+	if got := InitrdSeedName(ProfileDebianPreseed); got != "preseed.cfg" {
+		t.Fatalf("InitrdSeedName() = %q", got)
+	}
+	if got := InitrdPaths(ProfileKickstart); got != nil {
+		t.Fatalf("InitrdPaths(kickstart) = %v", got)
+	}
+	if got := InitrdSeedName(ProfileKickstart); got != "" {
+		t.Fatalf("InitrdSeedName(kickstart) = %q", got)
+	}
+}

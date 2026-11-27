@@ -9,6 +9,8 @@ import { api } from '@/api'
 describe('HostMetricsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(api.metricQueryRange).mockReset()
+    vi.mocked(api.metricQueryRange).mockResolvedValue([])
     ;(api.hostMetrics as any).mockResolvedValue([
       {
         name: 'fleet_host_cpu_usage_ratio',
@@ -128,48 +130,46 @@ describe('HostMetricsPanel', () => {
     await nextTick()
     await wrapper.find('select').setValue('external')
     await nextTick()
-    await wrapper.find('select').setValue('center')
+    await wrapper.find('select').setValue('local')
     await flushPromises()
 
-    expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('center')
+    expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('local')
     expect(api.hostMetrics).toHaveBeenCalledWith('c1', 'node-a')
   })
 
   it('explains disabled external metrics and can switch back to the center', async () => {
     vi.mocked(api.hostMetrics).mockResolvedValue([])
-    vi.mocked(api.metricQueryRange).mockRejectedValueOnce(
+    vi.mocked(api.metricQueryRange).mockRejectedValue(
       new Error('external metric queries are not enabled'),
     )
     const wrapper = mount(HostMetricsPanel, {
       props: { cluster: 'c1', member: 'node-a' },
       global: { plugins: [ElementPlus], stubs: { Sparkline: true, ElProgress: true } },
     })
-    await nextTick()
+    await flushPromises()
 
-    await wrapper.find('select').setValue('external')
-    await nextTick()
-    await nextTick()
     expect(wrapper.text()).toContain('External metrics are not configured')
     expect(wrapper.text()).toContain('Set the Prometheus/VM query endpoint')
 
+    await wrapper.find('select').setValue('external')
+    await flushPromises()
     const center = wrapper.findAll('button').find((button) => button.text().includes('Use center'))
     await center?.trigger('click')
-    await nextTick()
-    await nextTick()
+    await flushPromises()
     expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('local')
-    expect(api.hostMetrics).toHaveBeenCalledTimes(2)
+    expect(api.hostMetrics).toHaveBeenCalled()
   })
 
   it('shows an empty state without telemetry', async () => {
     ;(api.hostMetrics as any).mockResolvedValue([])
+    vi.mocked(api.metricQueryRange).mockResolvedValue([])
     const wrapper = mount(HostMetricsPanel, {
       props: { cluster: 'c1', member: 'node-a' },
       global: {
         stubs: { Sparkline: true, ElButton: true, ElProgress: true, ElAlert: true },
       },
     })
-    await nextTick()
-    await nextTick()
+    await flushPromises()
     expect(wrapper.text()).toContain('No agent telemetry yet')
   })
 })

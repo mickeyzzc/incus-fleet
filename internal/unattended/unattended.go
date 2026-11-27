@@ -399,7 +399,7 @@ func renderPreseed(spec AnswerSpec) string {
 		"d-i grub-installer/with_other_os boolean true",
 		// "default" is not a device name and makes grub-installer ask which
 		// disk to use, blocking an unattended run.
-		"d-i grub-installer/bootdev string " + grubDev,
+		"d-i grub-installer/bootdev string "+grubDev,
 		"### Finishing up",
 		"d-i finish-install/keep-consoles boolean false",
 		"d-i finish-install/reboot_in_progress note",
