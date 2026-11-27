@@ -95,7 +95,7 @@ async function refresh(): Promise<void> {
   loading.value = true
   try {
     if (source.value === 'external') {
-      series.value = await externalSeries()
+      series.value = (await externalSeries()) ?? []
     } else {
       try {
         const local = (await api.hostMetrics(props.cluster, props.member)) ?? []
@@ -104,7 +104,7 @@ async function refresh(): Promise<void> {
         } else {
           // The center may be enabled yet empty (no agent reporting). Use the
           // connected VictoriaMetrics automatically when it has samples.
-          const external = await externalSeries()
+          const external = (await externalSeries()) ?? []
           if (external.length > 0) {
             series.value = external
             source.value = 'external'
@@ -119,7 +119,7 @@ async function refresh(): Promise<void> {
         if (!/telemetry is not enabled/i.test(message)) {
           throw err
         }
-        series.value = await externalSeries()
+        series.value = (await externalSeries()) ?? []
         source.value = 'external'
       }
     }
