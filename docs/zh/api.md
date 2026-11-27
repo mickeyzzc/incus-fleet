@@ -181,8 +181,25 @@ POST /api/v1/auth/logout
 | POST | `/batch/keys` | 是 | 把已存储的密钥注入多个实例 |
 | POST | `/batch/scripts` | 是 | 在多个实例上运行同一个已存储脚本 |
 | POST | `/batch/power` | 是 | 启动、停止或重启多个实例 |
+| GET | `/plugins` | `read:plugins` | 插件列表与管理器是否启用 |
+| GET | `/plugins/catalog` | `read:plugins` | 内置与社区目录项 |
+| GET | `/plugins/{id}` | `read:plugins` | 单个插件描述符 |
+| POST | `/plugins/install` | `manage:plugins` | 旧版同步安装；`201` 返回一次性 token |
+| POST | `/plugins/{id}/toggle` | `manage:plugins` | 启用或停用已安装插件 |
+| GET | `/plugins/{id}/wiring` | `read:plugins` | 已批准接线及默认值与效果 |
+| PUT | `/plugins/{id}/wiring` | `manage:plugins` | 设置接线值或恢复默认值 |
+| POST | `/plugin-installs` | `manage:plugins` | 入队任务安装；`202` 返回任务 |
+| GET | `/plugin-installs` | `read:plugins` | 列出插件安装任务 |
+| GET | `/plugin-installs/{id}` | `read:plugins` | 单个安装任务及其事件 |
+| POST | `/plugin-installs/{id}/cancel` | `manage:plugins` | 请求协作取消；返回 `204` |
+| POST | `/plugin-installs/{id}/resume` | `manage:plugins` | 重新入队失败/已取消任务 |
+| DELETE | `/plugins/{id}` | `manage:plugins` | 卸载并恢复接线默认值 |
+| POST | `/plugins/events` | HMAC/bearer | 入站插件事件；仅在启用事件时挂载 |
+| GET | `/logs/query` | 是 | 通过已接线后端检索日志 |
+| GET | `/plugin-ui/{id}/…` | `read:plugins` | 插件 UI 的同源代理 |
 
-`type` 可取 `any`（默认）、`container` 或 `virtual-machine`。
+`type` 可取 `any`（默认）、`container` 或 `virtual-machine`。插件路由仅在
+`plugins.enabled` 为 true 时挂载；请求体、接线键与限制见[插件系统](plugins.md)。
 
 ## 健康检查与版本
 
@@ -838,6 +855,26 @@ desktop 端点，不涉及任何额外 TCP 监听。
 `{"cluster", "instance", "ok", "exit_code", "stdout", "stderr", "error"}`。各实例
 独立执行：一个失败不会影响其余实例。所有 item 都成功时响应为 `200 OK`，只要有
 item 报告错误则为 `207 Multi-Status`。
+
+## 插件安装任务与接线
+
+`POST /api/v1/plugin-installs` 接受 JSON 请求体，必填目录 `id`，可选 `name`、
+`cluster`、`member`、`instance`、`upstream`、`cpu`、`memory`、`disk`、`network`、
+`values`、`data_disk_gb`、`filesystem`、`mount_point`、`storage_pool`、`approvals`、
+`defaults`、`health_delay_ms`、`health_interval_ms`、`health_failure_threshold`、
+`signature`。响应为 `202` 与 `task` 对象（`id`、`plugin_id`、`state`、`progress`、
+`attempt`、`error`、`created_at`、`updated_at`），详情接口另含 `events`。状态取值为
+`queued`、`dispatched`、`running`、`succeeded`、`failed`、`canceled`。同一插件 id
+同时只能有一个排队/运行任务；取消在下一个检查点生效，续装只接受失败或已取消任务。
+
+`PUT /api/v1/plugins/{id}/wiring` 接受
+`{"values":[{"key":"metrics.query_url","value":"http://192.0.2.10:8428","enabled":true}]}`。
+键必须被 manifest 声明且安装时批准，值必须是绝对 http(s) URL；`enabled: false`
+恢复捕获的默认值。入站事件 `POST /api/v1/plugins/events` 限制 1 MiB，必须带
+`X-Fleet-Signature` HMAC 头（配置 `plugins.events.bearer_token_file` 时还需
+`Authorization: Bearer …`）；可选的 `X-Fleet-Plugin-ID` 头必须是已注册插件。日志查询
+接受 `query`、RFC3339 格式的 `from`/`to` 与 `limit`（1–1000，默认 100）。
+完整行为见[插件系统](plugins.md)。
 
 ## 错误
 

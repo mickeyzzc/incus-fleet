@@ -6,6 +6,46 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Plugin install orchestrator: checkpointed `plugin.install` host tasks with
+  progress events, cooperative cancel, resume, reverse rollback, manifest
+  templates, data-disk preparation, config injection and health-gated wiring
+  activation. Approved overrides are durable in the new `plugin_wiring` table
+  (migration 15), and `GET`/`PUT /api/v1/plugins/{id}/wiring` manages them.
+- Event plumbing: signed outbound webhooks for agent, host-task, migration and
+  instance-state events, the opt-in inbound `POST /api/v1/plugins/events`
+  endpoint, and `GET /api/v1/logs/query` for log search through a wired backend.
+- Community packages can be signed: `scripts/pack-plugin.sh` writes a
+  `manifest.yaml.sig` sidecar verified with `plugins.signing_key_file` (or
+  `INCUS_FLEET_PLUGINS_SIGNING_KEY`); a MiBeeNVR example package is included.
+- Data-driven plugin UI: `router.addRoute` pages, a generic plugin page, icon
+  and i18n mappings, one sidebar entry with a badge, Catalog/Installed views,
+  a three-step install wizard, a task panel, a five-tab detail page, and one
+  status vocabulary.
+- Documentation now describes plugin phases P0–P5, the task API, wiring keys,
+  event endpoints and the remaining limitations in English and Chinese.
+
+### Changed
+
+- Installed plugins activate wiring only after the health check passes;
+  uninstall restores the captured static defaults and revokes the plugin token.
+- `manifest.yaml` is the preferred plugin format; legacy `plugin.json` catalog
+  entries are still accepted. The older synchronous
+  `POST /api/v1/plugins/install` endpoint is retained alongside the task API.
+- Plugin UIs and descriptors use the `/plugin-ui/<id>/…` namespace; the plugin
+  manager itself stays at `/plugins`.
+- Agent telemetry and log shipping stay off by default. Installing `vmlogs`
+  enables log search, while remote write still requires static configuration.
+
+### Fixed
+
+- Documentation corrections only: the plugin docs no longer label P2–P5 as
+  "specified", and the user guides no longer describe one-click install as
+  connecting an existing upstream only.
+
 ## 0.2.0 - 2026-11-24
 
 ### Added

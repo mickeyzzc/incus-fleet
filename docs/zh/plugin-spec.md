@@ -12,6 +12,11 @@
    `/plugin/<id>`；
 6. 任何一步失败都会删除刚创建的实例，避免留下半成品。
 
+> `manifest.yaml`（`schema: fleet-plugin/v1`）现为规范格式；下述 `plugin.json`
+> 格式对仅接入的目录项仍然有效。配置签名密钥后，`scripts/pack-plugin.sh` 会生成
+> `manifest.yaml.sig` HMAC 旁车文件。完整 schema、任务接口与当前限制见
+> [插件系统](plugins.md)。
+
 ## 目录结构
 
 ```text

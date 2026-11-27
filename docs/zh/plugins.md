@@ -1,14 +1,16 @@
-# 插件系统规范（设计草案）
+# 插件系统
 
 [English](../en/plugins.md) | **简体中文**
 
-> 状态：**设计草案，尚未实现**。本文档规定 incus-fleet 的插件系统。
+> 状态：**P0–P5 已实现**。manifest 解析与注册表、带作用域的 API token、同源代理、
+> 基于任务的安装编排器、持久化接线注册表、事件 webhook、数据驱动 UI、内置目录与
+> 签名社区包均已上线。各阶段状态见 §10，当前限制见 §11。
 > 文档已脱敏：所有地址与主机名使用 RFC 5737 文档段和 `example.com`；
 > 不含凭据、内部拓扑或部署专有值。
 
 ## 1. 插件系统是什么 —— 不是什么
 
-incus-fleet 将获得三项内置能力：
+incus-fleet 提供三项内置能力：
 
 1. **插件规范** —— 任何外部服务都能实现的 manifest 格式。
 2. **Web 插件管理页** —— 浏览目录、查看权限、安装、配置、启停/卸载、查看接线与健康状态。
@@ -38,7 +40,7 @@ fleet 核心只包含：规范解析器、管理 UI、编排器、同源代理�
 
 ## 3. Manifest 格式
 
-插件包是签名归档（`.fleetplugin`），内容：
+插件包是 `.fleetplugin` 归档，内容：
 
 ```
 manifest.yaml       # 必需，见下方 schema
@@ -96,7 +98,7 @@ install:
 capabilities:                         # 原样展示在安装页
   deploy_instance: true
   proxy_ui:
-    path_prefix: /plugins/victoria-metrics/
+    path_prefix: /plugin-ui/victoria-metrics/
     upstream_port: 8428
   proxy_api:
     path_prefix: /api/v1/plugins/victoria-metrics/
@@ -122,25 +124,80 @@ permissions:
   fleet: [read:clusters, read:instances, read:agents]
 ```
 
-社区插件的 manifest 中出现任何 `wiring` 声明，校验时直接拒绝。
+`internal/plugin.ParseManifest` 强制校验：
+
+- `schema` 必须是 `fleet-plugin/v1`，`id` 必须是小写 DNS 标签，`tier` 为
+  `official` 或 `community`。
+- `install.defaults.network` 为 `managed` 或 `overlay`；`data_disk.filesystem`
+  为 `ext4` 或 `xfs`；挂载点必须是绝对路径，必需数据盘容量必须为正。模板类型
+  支持 `text`、`choice`、`port`、`bool`。
+- 代理前缀必须以 `/` 开头和结尾且两者不同；webhook 路径必须是绝对路径并至少
+  列出一个事件。
+- 社区插件不得声明 `wiring`；每条接线都必须有键与人类可读的效果说明。
+
+`manifest.yaml` 是规范格式，旧版 `plugin.json` 目录项（仅接入或带安装脚本）
+仍受支持。`scripts/pack-plugin.sh` 会校验两种格式，并在有签名密钥时写入
+`manifest.yaml.sig` 旁车文件：对 manifest 原始字节做 base64 HMAC-SHA256，
+可带 `sha256:` 前缀。密钥来自 `plugins.signing_key_file` 或
+`INCUS_FLEET_PLUGINS_SIGNING_KEY`。配置密钥后，未签名的社区包会被目录跳过、
+被任务安装接口拒绝；未配置密钥时没有信任锚，本地开发包仍可使用。内置 manifest
+不签名。
 
 ## 4. 一键安装：编排步骤
 
-安装插件是一个长任务（复用现有 host task / lease 机制），带进度、取消与回滚：
+安装器（`internal/plugininstall`）把每次安装保存为类型为 `plugin.install` 的持久化
+host task。十个步骤顺序执行；每步成功后把检查点写入 `HostTask.Progress`，
+并追加一条 `HostTaskEvent`：
 
-1. **校验** —— 解析并验证签名；检查架构、fleet 版本兼容性、申请的权限。
-2. **选位** —— 操作员选定目标集群、存储池、网络，填写模板值（CPU/内存/磁盘/格式/挂载/数据位置）；UI 展示权限与接线摘要供确认。
-3. **导入镜像** —— `POST /clusters/{cluster}/images/...`（或把打包的 tarball 载入目标集群存储）。
-4. **分配数据盘** —— `POST .../storage-pools/{pool}/volumes`；大小与文件系统取自 manifest 默认值或操作员覆盖。
-5. **格式化挂载** —— `POST .../instances/{instance}/ops` 的 `run-script`：建文件系统、建挂载点、写 fstab、挂载。
-6. **创建实例** —— `POST /clusters/{cluster}/instances`：CPU/内存、根盘、挂数据卷、网络（overlay 或受管网络）、需要时静态地址。
-7. **注入配置** —— keys/scripts/`ops` 下发渲染后的配置、端点 URL、插件专用凭据（见 §7）。
-8. **启动与健康检查** —— 启动实例；轮询健康端点直至 healthy；插件内部服务完成注册。
-9. **激活接线** —— 仅在健康检查通过后，把已批准的接线值写入接线注册表（§5）；fleet 子系统重载并开始使用插件。
-10. **发布 UI 与导航** —— 注册代理路由与导航描述符；插件出现在 fleet Web UI。
+1. **validate** —— 重新校验 manifest；若配置签名密钥则验证签名；社区插件不得
+   带 `approvals`。
+2. **placement** —— 使用请求的 `cluster`/`member`，否则选第一个在线集群与成员。
+3. **image** —— 把 `artifact.image.reference` 解析为目标集群上已有镜像的指纹；
+   任务本身不导入镜像。
+4. **data_disk** —— 当 `data_disk_gb`（或 manifest 中必需数据盘的默认值）大于 0 时，
+   在 `storage_pool`（默认 `default`）上创建自定义卷 `plugin-<id>-data`，创建实例时
+   挂到 `mount_point`。
+5. **format_mount** —— 通过 `instances/{i}/ops` 的 `run-script` 对请求中的
+   `instance` 名称执行 `plugin.DataDiskScript`：按需建文件系统、挂载卷并写入 fstab。
+6. **create_instance** —— 创建名为 `instance`（默认 `fleet-<id>`）的容器，
+   CPU、内存、根盘与网络取自请求或 manifest。
+7. **inject_config** —— 渲染 manifest `templates`（未知键报错），用临时脚本写入
+   `/etc/fleet-plugin/config.env` 并通过 `ops` 执行。
+8. **health** —— 延迟 `initial_delay_seconds` 后探测
+   `<upstream><health.endpoint>`，按 `interval_seconds` 重试最多
+   `failure_threshold` 次；2xx 后才激活接线。
+9. **activate_wiring** —— 为已安装插件注册描述符，随后持久化并激活每个已批准键，
+   同时记录静态默认值。
+10. **publish** —— 写入 `installed_plugins` 记录，签发绑定 `(插件 id, 实例 id)`、
+    仅有 `read:plugins` 作用域的插件 token，并为声明的事件注册出站 webhook 订阅者。
 
-失败时按 9→3 回滚：撤销接线、移除代理路由、停/删实例、按需删卷/镜像。
-每一步都是检查点；修复底层问题后可续装。
+失败或取消时按已完成步骤逆序回滚：删除已安装记录、撤销接线、删除实例与数据卷，
+并把检查点倒回数据盘步骤，使续装重放这些步骤。`Resume` 只接受失败或已取消的任务；
+同一插件 id 同时只能有一个排队/运行中的任务。未启用 HA 时任务在服务端进程内执行；
+启用 HA 时由常规 host task 调度器领取。
+
+### 任务接口
+
+| 方法 | 路径 | 作用域 | 用途 |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/plugin-installs` | `manage:plugins` | 入队安装；返回 `202` 与 `{"task": ...}` |
+| `GET` | `/api/v1/plugin-installs` | `read:plugins` | 列出安装任务 |
+| `GET` | `/api/v1/plugin-installs/{id}` | `read:plugins` | 单个任务（含事件） |
+| `POST` | `/api/v1/plugin-installs/{id}/cancel` | `manage:plugins` | 在下一个检查点协作取消；`204` |
+| `POST` | `/api/v1/plugin-installs/{id}/resume` | `manage:plugins` | 重新入队失败/已取消任务 |
+
+POST 请求体可带 `id`（必填，目录插件 id）、`name`、`cluster`、`member`、
+`instance`、`upstream`、`cpu`、`memory`、`disk`、`network`、`values`（模板覆盖）、
+`data_disk_gb`、`filesystem`、`mount_point`、`storage_pool`、`approvals`（接线键）、
+`defaults`（要恢复的静态值）、`health_delay_ms`、`health_interval_ms`、
+`health_failure_threshold`、`signature`（manifest 字节的 base64 HMAC）。任务状态字段
+有 `id`、`plugin_id`、`state`、`progress`、`attempt`、`error`、`created_at`、
+`updated_at`，详情接口还含 `events`。状态取值为 `queued`、`dispatched`、`running`、
+`succeeded`、`failed`、`canceled`。常见错误：`400 unknown_plugin`、
+`403 invalid_signature`、`409 install_in_progress`、`409 invalid_state`。
+
+旧接口 `POST /api/v1/plugins/install` 保留：它同步部署并返回 `201` 与一次性 token，
+目前仍是 Web 向导使用的路径；它没有检查点，也不支持取消/续装。
 
 ### 安装表单（由 manifest 生成）
 
@@ -150,86 +207,120 @@ permissions:
 | 根盘 | manifest 默认 | 20 GiB |
 | 数据盘大小与文件系统 | manifest + 操作员 | 200 GiB、ext4、挂 `/data` |
 | 存储池 | fleet 已知存储池下拉 | `ssd-pool` / `hdd-pool` |
-| 网络 / 地址 | fleet overlay 或受管网络 + 静态 IP | overlay + 静态地址 |
+| 网络 | manifest 默认值或请求 `network` | `managed` 或 `overlay` |
 | 插件参数 | manifest `templates` | 保留期、端口、监听地址、凭据 |
 
 ## 5. 接线注册表
 
 fleet 核心子系统对若干配置项动态读取：静态配置给默认值，接线注册表给生效覆盖值。
+已批准的覆盖保存在 `plugin_wiring` 表（迁移 15），启动时加载；内存注册表只保存
+当前生效值。
 
 ```
-GET/PUT /api/v1/plugins/{id}/wiring      # admin；查看/修改已批准接线
+GET /api/v1/plugins/{id}/wiring          # read:plugins；查看已批准接线
+PUT /api/v1/plugins/{id}/wiring          # manage:plugins；修改已批准接线
 ```
 
-初始接线键（随插件增加）：
+`GET` 返回 `key`、`value`、`default_value`、`effect`、`enabled`、`approved`。
+`PUT` 接受 `{"values":[{"key","value","enabled"}]}`：键必须被 manifest 声明且安装时
+批准，值必须是绝对 http(s) URL（末尾 `/` 会被去掉）。传 `"enabled": false`
+即恢复捕获的默认值并通知消费者。变更会作为 `plugin.wiring.update` 记入审计，
+并发布 `plugin.wiring_changed` 事件。
 
-| 键 | 效果 |
-|---|---|
-| `metrics.remote_write_url` | 遥测 remote-write 目标（VictoriaMetrics 插件） |
-| `metrics.query_url` + `metrics.query_type` | PromQL 查询代理后端 |
-| `logs.query_url` | 日志检索代理后端（VictoriaLogs 插件） |
-| `notifications.sink_url` | 事件 webhook 目标（bell 插件） |
+当前被消费的键，以及内置 manifest 声明的键：
 
-> 注：接线注册表当前实现为 `internal/plugin.Registry` 的内存契约（`SetWiring` /
-> `WiringValue` / `ClearWiring`），尚未持久化到数据库。进程重启后清空，静态配置回到权威。
-> 持久化与「卸载后恢复默认」的落库安排在 P2。
+| 键 | 效果 | 消费方 |
+|---|---|---|
+| `metrics.remote_write_url` | 遥测 remote-write 目标 | fleet 启动/remote writer |
+| `metrics.query_url` + `metrics.query_type` | PromQL 查询代理后端 | 指标代理 |
+| `logs.query_url` | 日志检索代理后端 | 日志查询代理 |
+| `bootstrap.answer_file_url` | 无人值守安装的应答文件来源 | `hive` 声明，尚无消费方 |
+| `notifications.sink_url` | 事件 webhook 目标 | `bell` 声明，尚无消费方 |
 
 设计规则：
 
 - 只能设置 manifest 声明且安装时批准的键。
+- 同一键由第一个声明它的插件生效；值会规范化为 http(s) URL。
 - 接线变更后 fleet 重载相应子系统，无需重启进程。
-- 卸载插件时恢复静态配置的默认值。
+- 卸载与「恢复默认」都会把捕获的默认值写回并禁用该行；批准记录保留，
+  重新安装无需二次批准。
 - 接线变更与其他特权操作一样进审计。
 
-## 6. 首批插件（规划中）
+## 6. 首批插件
 
-| 插件 | 一键安装后的效果 |
-|---|---|
-| **VictoriaMetrics** | 部署 VM；fleet 遥测 remote-write 与 PromQL 代理指向它；出现「指标」导航；fleet 内存 1h 指标环退场（不再是显示源）。 |
-| **VictoriaLogs** | 部署 VictoriaLogs；**仅在插件安装接线时**启用 agent 日志上报链路（默认关闭，当前 Rust agent 只报指标）；出现「日志检索」导航。 |
-| **MiBeeHive** | 部署 hive；注入 fleet 端点与限定凭据；hive 注册 IT/运维页面（PXE 应答、DNS 管理、内部 apt/yum 源与缓存、kite-agent 自动化）；hive 取得集群/节点清单，开始 PXE 应答分发。 |
-| **MiBeeBell** | 后续阶段：部署 bell；fleet/hive/VM 事件投递到 bell webhook；出现「通知中心」导航。 |
+内置 manifest 只有描述符——fleet 从不运行插件代码。目录暴露以下 id，每个声明
+一条接线并带一个安装端口；镜像引用使用 `example.com` 占位符，任务安装前需先在
+集群上导入镜像（见[一键安装插件](plugins-one-click.md)）：
+
+| 插件 | 目录 id | 端口 | 声明的接线 |
+|---|---|---|---|
+| **VictoriaMetrics** | `vm` | 8428 | `metrics.query_url` |
+| **VictoriaLogs** | `vmlogs` | 9428 | `logs.query_url` |
+| **MiBeeHive** | `hive` | 8080 | `bootstrap.answer_file_url` |
+| **MiBeeBell** | `bell` | 9090 | `notifications.sink_url` |
+
+安装 `vm` 会把 PromQL 代理切到 VictoriaMetrics；安装 `vmlogs` 会启用日志检索代理。
+这两个 manifest 都不会打开 remote-write 或 Rust agent 日志上报（见 §11）。另外两个键
+只是声明，便于安装页展示将接管的能力，fleet 尚未消费。
 
 能力互补：fleet 继续管实例/ISO/无人值守安装；hive 补网络启动（DHCP/TFTP）与应答文件分发。
 hive 可经 fleet 的 batch scripts/ops 原语可选地向选定节点分发 kite-agent，但绝不自行开 SSH 通道。
 
 ## 7. 身份、凭据与权限
 
-fleet 现状（见 `docs/en/architecture.md`）：bearer token 是引导凭据，首个本地账号创建后退役；
-session 只带单一角色（`admin`/`operator`/`viewer`）；没有 per-user API token 与 scope。
+带 scope 的 per-user API token 已在 P0/P1 实现，是插件系统的前置条件（见
+`docs/en/architecture.md`）：引导 bearer token 在首个本地账号创建后退役，session 只带
+单一角色（`admin`/`operator`/`viewer`）并隐含对应 scope。不存在临时的本地账号凭据。
 
-**决定：直接实现带 scope 与有效期的 per-user API token，作为插件系统的前置条件。**
-不设「专用本地账号」过渡方案——临时弱凭据会留下迁移债务和审计盲区。该能力安排在 P0/P1，
-先于编排器允许安装任何插件。
+已实现的 token 设计：
 
-Token 设计：
-
-- per-user API token：哈希存储、显式 scope 列表、有效期、轮换、撤销、最近使用时间；从现有用户/管理界面签发。
-- 插件专用 token 基于它：每次安装签发绑定 `(插件 id, 实例 id)` 的 token，只携带 manifest 声明且安装时批准的 scope；卸载立即撤销。
-- `requireScope` 中间件与现有 `requireAuth`/`requireWriter`/`requireAdmin` 并列；session 在单一角色之外增加 scope。
-- 插件→fleet 调用走同源代理、用 scoped token；fleet→插件调用用每次安装生成的共享密钥（webhook 用 HMAC，代理 API 用 bearer）。
-- 每次插件 API 调用都带插件 id 与 scope 进审计，特权动作可追溯到具体安装，而非共享账号。
+- per-user API token 哈希存储，带显式 scope 列表、有效期、轮换、撤销与最近使用时间。
+- 插件专用 token 绑定 `(插件 id, 实例 id)`，只带 `read:plugins` 作用域；卸载立即撤销。
+  任务安装器与旧安装接口都会签发该 token。
+- `requireScope` 与 `requireAuth`/`requireWriter`/`requireAdmin` 并列；插件读取用
+  `read:plugins`，变更用 `manage:plugins`。
+- 插件→fleet 调用使用 scoped token；fleet→插件 webhook 带由签名密钥派生的 HMAC
+  签名。同源代理在转发前剥离 Fleet 会话 Cookie。
+- 特权接线变更以操作者用户名记入审计。
 
 ## 8. Web UI 与前端改造点
 
-已实现端点（P1）：
+管理端点都从 `httpapi.Deps` 挂载，并由 `requireScope` 保护：接受带 scope 的
+API token，或角色隐含该 scope 的浏览器会话；入站事件端点改用 HMAC 与可选 bearer
+token 鉴权。令牌管理由 `read:own-tokens` 保护，
+所有角色都隐含该 scope——任何账号都能管理自己的凭据；只有管理员才能操作他人
+令牌或申请超出自身的 scope。
 
-| 方法 | 路径 | 用途 |
-|---|---|---|
-| `GET` | `/api/v1/plugins` | 已注册插件列表及管理器是否启用 |
-| `GET` | `/api/v1/plugins/{id}` | 单个插件描述 |
-| `GET` | `/plugin-ui/{id}/…` | 插件 UI 的同源代理（唯一的代理命名空间） |
-| `GET` | `/api/v1/tokens` | 列出令牌（管理员看全部，其他账号只看自己的） |
-| `POST` | `/api/v1/tokens` | 签发令牌，响应中一次性返回密钥 |
-| `DELETE` | `/api/v1/tokens/{id}` | 撤销令牌 |
-| `GET` | `/api/v1/tokens/scopes` | scope 词表 |
+| 方法 | 路径 | 作用域 | 用途 |
+|---|---|---|---|
+| `GET` | `/api/v1/plugins` | `read:plugins` | 插件列表及管理器是否启用 |
+| `GET` | `/api/v1/plugins/catalog` | `read:plugins` | 目录项（内置 + `plugins.dir` 下的包） |
+| `GET` | `/api/v1/plugins/{id}` | `read:plugins` | 单个插件描述 |
+| `POST` | `/api/v1/plugins/install` | `manage:plugins` | 旧版同步安装；`201` 返回一次性 token |
+| `POST` | `/api/v1/plugins/{id}/toggle` | `manage:plugins` | 启用/停用已安装插件 |
+| `GET`、`PUT` | `/api/v1/plugins/{id}/wiring` | `read:plugins`、`manage:plugins` | 查看/修改已批准接线 |
+| `POST` | `/api/v1/plugin-installs` | `manage:plugins` | 入队任务安装 |
+| `GET` | `/api/v1/plugin-installs`、`/api/v1/plugin-installs/{id}` | `read:plugins` | 列出/查看安装任务 |
+| `POST` | `/api/v1/plugin-installs/{id}/cancel`、`.../resume` | `manage:plugins` | 取消/续装任务 |
+| `DELETE` | `/api/v1/plugins/{id}` | `manage:plugins` | 卸载；恢复接线默认值并撤销 token |
+| `POST` | `/api/v1/plugins/events` | HMAC + 可选 bearer | 入站插件事件（仅在启用时挂载路由） |
+| `GET` | `/api/v1/logs/query` | `requireAuth` | 日志检索代理；未配置后端时 `503 unavailable` |
+| `GET` | `/plugin-ui/{id}/…` | `read:plugins` | 插件 UI 的同源代理（唯一的代理命名空间） |
+| `GET`、`POST`、`DELETE` | `/api/v1/tokens`、`/api/v1/tokens/{id}` | `read:own-tokens` | 令牌管理；scope 词表在 `/api/v1/tokens/scopes` |
 
-所有插件端点由 `requireScope` 保护：接受带 scope 的 API 令牌，或角色隐含该 scope 的
-浏览器会话。令牌管理本身由 `read:own-tokens` 保护，所有角色都隐含该 scope——任何账号
-都能管理自己的凭据；只有管理员才能操作他人令牌或申请超出自身的 scope。P2 规划：`GET /api/v1/plugins/catalog`（商店列表）与安装端点。
-- 前端增加插件 store（持久导航 + 数据驱动路由）：`router.addRoute` 为每个已安装插件的 UI 路径注册路由，放在 catch-all 之前；通用 `PluginPage.vue` 渲染代理目标；图标组件映射与 `i18n.mergeLocaleMessage` 处理插件图标与标题。
+配置键（均在 `plugins:` 下）：`enabled`（默认 false）、`dir`（默认 `data/plugins`）、
+`health_interval`（默认 `15s`）、`signing_key_file`（或环境变量
+`INCUS_FLEET_PLUGINS_SIGNING_KEY`），以及 `events.enabled`（默认 false）、
+`events.path`（默认 `/api/v1/plugins/events`）、`events.secret_file`（启用事件时必填）、
+`events.bearer_token_file`（可选）。`plugins.entries` 可声明 `id`、`enabled`、
+`upstream` 和/或 `upstream_port`、`bearer_token_file`、`role`、`ui`（`path` 必须位于
+`/plugin-ui/` 下）。
+
+- 前端用 `router.addRoute` 为每个已安装插件注册数据驱动路由，放在 catch-all 之前；
+  `PluginPage.vue` 渲染代理目标；图标组件映射与 `i18n.mergeLocaleMessage` 处理图标与标题。
 - 硬编码核心导航保留作兜底，保证既有行为与测试稳定。
-- 同源插件 UI 的 CSP 调整：`frame-ancestors 'self'`；`default-src` 与 `connect-src` 保持 `'self'`。外部源必须代理，禁止直接加载。
+- 同源插件 UI 的 CSP 调整：`frame-ancestors 'self'`；`default-src` 与 `connect-src`
+  保持 `'self'`。外部源必须代理，禁止直接加载。
 
 ### 8.1 交互设计与信息架构
 
@@ -283,25 +374,53 @@ Token 设计：
 新增用户可见能力的 PR 必须附一份信息架构说明：入口、页面结构、加载 / 空 / 错误 / 无权限
 四种状态，以及它替换或合并了哪个既有控件。只加一个按钮或一张表的 PR，评审直接打回。
 
+**状态（P3）：**侧栏单入口与徽标、商店/已安装双视图、三步安装向导、任务面板、固定
+五标签详情页，以及统一状态词（`installing`、`healthy`、`degraded`、`stopped`、
+`failed`）均已实现。尚未由服务端支撑的界面部分见 §11。
+
 ## 9. 商店（社区插件）
 
-商店是社区插件包的签名列表：
+目录把内置描述符与解压到 `plugins.dir/<id>/` 下的社区包合并：
 
-- 作者按 §3 打包 `.fleetplugin` 归档，提交到商店仓库（PR + 签名验证）。
+- 作者用 `scripts/pack-plugin.sh` 按 §3 打包 `.fleetplugin` 归档，提交到商店仓库
+  （PR + 签名验证）。
 - 安装页展示发布者、版本、来源、权限与接线声明，再请用户确认。
 - 社区插件不能声明 `wiring`；只获得通用能力（实例/卷/网络/配置/代理/事件）。
-- 例子：MiBeeNVR 可打包成商店插件，在 fleet 上一键安装，无需修改 fleet 核心。
+  配置签名密钥后，社区 `manifest.yaml` 必须带有效的 `manifest.yaml.sig`。
+- 例子：MiBeeNVR 的示例包位于 `plugins/examples/mibee-nvr/`，无需修改 fleet 核心
+  即可安装。
 
-## 10. 分阶段实施计划
+## 10. 实现状态
 
 - **P0 —— 契约与凭据。** ✅ **已完成。** `internal/plugin`（manifest 解析/校验、注册表、生命周期、事件分发、接线注册表）；`plugins:` 配置段；带 scope 与有效期的 per-user API token（迁移 10、`auth.TokenStore`、`requireScope`），含绑定 `(插件 id, 实例 id)` 的插件专用 token。
-- **P1 —— 服务端接入点。** ✅ **已完成。** 插件路由与同源代理经 `httpapi.Deps` 挂载；`GET /api/v1/plugins`、`/api/v1/plugins/{id}`、`/plugins/…`、`/plugin-ui/…` 与 `/api/v1/tokens` 系列已上线。CSP 放宽为 `frame-ancestors 'self'`、`X-Frame-Options: SAMEORIGIN` 以允许渲染代理页面。P1 未完成部分：实例创建、健康轮询、安装后激活接线（依赖 P2 编排器）。
-- **P2 —— 编排器。** 带检查点的安装任务、manifest 驱动模板、卷/实例/配置工作流、回滚；用现有 fleet API 完成选址。
-- **P3 —— 数据驱动 UI。** 插件 store、`router.addRoute`、`PluginPage.vue`、图标映射、i18n 合并、CSP 调整。**交互按 §8.1 设计**：商店与已安装分成两个视图、三步安装向导、固定五标签详情页、全局唯一状态词，以及每页的四种状态（加载/空/错误/无权限）都要设计——不是在既有界面上叠加。
-- **P4 —— 事件与按需遥测。** agent/集群/任务事件分发。**agent 日志/遥测上报默认关闭，仅由插件安装接线启用**——安装 VictoriaMetrics 才开指标 remote-write，安装 VictoriaLogs 才开 Rust agent 日志上报链路；没有安装插件时 agent 不上报任何额外数据，fleet 保持基线行为。
-- **P5 —— 首批插件与商店。** VictoriaMetrics、VictoriaLogs、MiBeeHive，后续 MiBeeBell；社区商店与签名强制校验。
+- **P1 —— 服务端接入点。** ✅ **已完成。** 插件路由与同源代理经 `httpapi.Deps` 挂载；`GET /api/v1/plugins`、`GET /api/v1/plugins/{id}`、`/plugin-ui/…` 与 `/api/v1/tokens` 系列已上线。CSP 放宽为 `frame-ancestors 'self'`、`X-Frame-Options: SAMEORIGIN` 以允许渲染代理页面。
+- **P2 —— 编排器。** ✅ **已完成。** `internal/plugininstall` 以带进度事件的 `plugin.install` host task 执行带检查点的安装，支持协作取消、续装、逆序回滚、manifest 模板、数据盘格式化与配置注入、健康检查通过后才激活接线；迁移 15 持久化接线；`manifest.yaml` 优先并兼容 `plugin.json`；社区包支持 HMAC 签名校验。
+- **P3 —— 数据驱动 UI。** ✅ **已完成。** 插件 store + `router.addRoute`、`PluginPage.vue`、图标映射、i18n 合并；侧栏单入口与徽标；商店/已安装双视图；三步安装向导、任务面板、固定五标签详情页、统一状态词；按 §8.1 提供加载/空/错误/无权限状态。
+- **P4 —— 事件与按需遥测。** ✅ **已完成。** agent、host task、迁移与实例状态事件会分发给已注册订阅者；出站签名 webhook、按需启用的入站 `POST /api/v1/plugins/events` 与 `GET /api/v1/logs/query` 代理已上线。日志上报与日志检索默认关闭，只有已安装插件的 `logs.query_url` 接线启用检索代理。Rust agent 的遥测 envelope 未改动。
+- **P5 —— 首批插件与商店。** ✅ **已完成。** `vm`、`vmlogs`、`hive`、`bell` 的内置描述符；MiBeeNVR 社区示例；`scripts/pack-plugin.sh` 生成目录签名旁车文件。
 
-## 11. 不在范围内
+## 11. 已知限制
+
+- Web 向导仍调用旧版同步接口 `POST /api/v1/plugins/install`。§4 的任务接口已提供，
+  但浏览器端尚未接入；任务面板目前展示向导的本地进度，而非轮询任务 id。
+- 详情页的「配置保存」（`PUT /api/v1/plugins/{id}/config`）与「按 key 恢复默认」
+  （`DELETE /api/v1/plugins/{id}/wiring/{key}`）调用的服务端路由并不存在。当前请用
+  `PUT /api/v1/plugins/{id}/wiring` 并传 `"enabled": false` 恢复默认值。
+  `GET /api/v1/plugins/{id}` 返回的描述符也没有接线、事件、健康历史与 config 字段，
+  因此这三个标签只显示空状态。
+- 接线行与批准记录会持久化，但重启时只重新注册内置描述符。已安装的社区插件需要
+  重新注册描述符，其接线才会加载、接线接口才会响应；动态注册的事件订阅者也只在
+  内存中存在。
+- `hive` 与 `bell` 的接线键仅是声明：fleet 尚无子系统消费
+  `bootstrap.answer_file_url` 或 `notifications.sink_url`。内置 manifest 均未声明
+  `metrics.remote_write_url`，remote-write 仍需静态配置。
+- 需要数据盘的插件应在请求中给出明确的 `instance` 名称：格式化/挂载步骤在创建实例
+  之前对该名称执行。任务会解析镜像别名，但不导入镜像。
+- agent 日志上报尚未实现：Rust agent 仍只上报指标，没有日志 envelope 或发送端可供修改。
+- 只有在未配置签名密钥时社区目录包才允许无签名；在生产环境接收第三方包前，请先配置
+  `plugins.signing_key_file`（或环境变量覆盖）。
+
+## 12. 不在范围内
 
 - 编译进 fleet 二进制或与 fleet 共享进程的插件。
 - 不经同源代理的跨域 UI 嵌入。

@@ -12,6 +12,12 @@ A plugin is a service instance Fleet creates and manages. One-click install:
    mounts the UI at `/plugin/<id>`;
 6. deletes the instance if any step fails.
 
+> `manifest.yaml` (`schema: fleet-plugin/v1`) is now the canonical format; the
+> `plugin.json` format below remains supported for connect-only entries.
+> `scripts/pack-plugin.sh` writes a `manifest.yaml.sig` HMAC sidecar when a
+> signing key is configured. See [the plugin system](plugins.md) for the full
+> schema, task API and current limits.
+
 ## Layout
 
 ```text
