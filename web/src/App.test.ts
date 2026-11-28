@@ -246,6 +246,29 @@ describe('App shell', () => {
     expect(entry).toBeDefined()
     expect(entry!.find('.nav-badge').text()).toBe('1')
   })
+
+  it('keeps a cold cluster deep link free of menu errors', async () => {
+    // A deep link renders while the cluster list is still in flight. When the
+    // list arrives, Element Plus may not have registered the sub-menu yet.
+    let resolveClusters: (value: Awaited<ReturnType<typeof api.listClusters>>) => void = () => {}
+    vi.mocked(api.listClusters).mockReturnValue(
+      new Promise((resolve) => { resolveClusters = resolve }),
+    )
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { wrapper } = await mountApp('/clusters/c1')
+      resolveClusters([clusterSummary()])
+      await flushPromises()
+      await flushPromises()
+      const unhandled = errorSpy.mock.calls.some((args) =>
+        args.some((arg) => String(arg).includes('Cannot destructure property')),
+      )
+      expect(unhandled).toBe(false)
+      expect(wrapper.text()).toContain('Cluster 62')
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
 })
 
   it('keeps the active menu highlight for a trailing-slash deep link', async () => {

@@ -47,6 +47,21 @@ incus image copy quay:victoriametrics/victoria-logs:latest local: --alias vmlogs
 > CPU 使用率与负载仍依赖 `incus-fleet-agent` 的实际采样；当前内置推送只包含 Fleet 能
 > 直接读取的容量与用量汇总。
 
+## 多副本部署注意
+
+安装器默认把上游写成实例的 `incusbr0` 地址（`http://<vm-bridge-ip>:8428`），该地址
+只有托管该实例的成员可达。如果多个 Fleet 副本共享同一数据库，其他副本的图表查询和
+指标推送都会超时。请在托管成员上把服务映射到所有副本都能访问的地址，并把已安装插件
+的上游改为该地址：
+
+```bash
+incus config device add fleet-vm fleet-http proxy \
+  listen=tcp:<fleet-reachable-ip>:8428 connect=tcp:<vm-bridge-ip>:8428
+```
+
+上游保存在 `installed_plugins.upstream`（也可通过插件 wiring 的 `metrics.query_url`
+覆盖）；修改后无需重启，下一轮推送与查询立即生效。
+
 ## 操作步骤
 
 1. 打开「插件 → 商店」，选择 `VictoriaMetrics` 或 `VictoriaLogs`。

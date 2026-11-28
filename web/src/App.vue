@@ -48,18 +48,33 @@ interface MenuHandle {
 }
 const menuRef = ref<MenuHandle | null>(null)
 
+/**
+ * Expand one sidebar branch. Element Plus registers sub-menus during render,
+ * so on a cold deep link the index can be missing for a moment; its own
+ * defaultActive handling opens the branch in that case.
+ */
+function openMenuBranch(index: string): void {
+  try {
+    menuRef.value?.open(index)
+  } catch {
+    // Branch not mounted yet - defaultActive will reveal it once it is.
+  }
+}
+
 // Element Plus only applies default-active on mount; open the cluster/node
 // branch explicitly so the current node stays visible after navigation.
 watch(
-  () => route.fullPath,
+  [() => route.fullPath, () => clusters.items],
   () => {
     const cluster = String(route.params.cluster ?? '')
-    if (!cluster) {
+    // A deep link can render before the cluster list arrives. Element Plus
+    // throws when asked to open a sub-menu whose index is not registered yet.
+    if (!cluster || !clusters.items.some((item) => item.name === cluster)) {
       return
     }
-    menuRef.value?.open(`/clusters/${cluster}/group`)
+    openMenuBranch(`/clusters/${cluster}/group`)
     if (route.name === 'node-detail') {
-      menuRef.value?.open(`/clusters/${cluster}/members`)
+      openMenuBranch(`/clusters/${cluster}/members`)
     }
   },
   { immediate: true, flush: 'post' },

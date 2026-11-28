@@ -52,6 +52,23 @@ Once `vm` is installed:
 CPU usage and load still require the actual `incus-fleet-agent`; the built-in push
 only carries capacity and usage totals Fleet can read directly.
 
+## Multi-replica deployments
+
+The installer stores the instance's `incusbr0` address
+(`http://<vm-bridge-ip>:8428`) as the upstream. Only the member hosting that
+instance can reach it. When several Fleet replicas share one database, the other
+replicas will time out on chart queries and metric pushes. Expose the service on
+an address every replica can reach, then update the installed plugin's upstream:
+
+```bash
+incus config device add fleet-vm fleet-http proxy \
+  listen=tcp:<fleet-reachable-ip>:8428 connect=tcp:<vm-bridge-ip>:8428
+```
+
+The upstream lives in `installed_plugins.upstream` (a plugin wiring
+`metrics.query_url` overrides it). No restart is needed; the next push and query
+pick up the new address.
+
 ## Steps
 
 1. Open **Plugins → Catalog** and pick VictoriaMetrics or VictoriaLogs.
